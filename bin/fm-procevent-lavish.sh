@@ -31,6 +31,12 @@
 #            Captain-supplied body lines are visibly prefixed so they cannot
 #            forge structural labels. Empty message and annotation sections
 #            are reported explicitly.
+#            Both table-form and list-form captures are supported; nested
+#            targets and attachments are skipped while the item's own scalar
+#            fields are retained. The shared parser below owns the wire format.
+#            Malformed content or a declared/presented count mismatch yields
+#            complete: no; inspect that verdict, not just the command's exit
+#            status. A declared nonempty block parsed as empty is incomplete.
 # poll       The registered listener command `arm` publishes, not a command to
 #            run in a conversational turn. It runs the published blocking poll
 #            and prints its response verbatim, absorbing only the one exact
@@ -96,6 +102,10 @@
 #
 # Only rows tagged `choice` are read. A freeform captain message is prose that may
 # contain anything, and must never be able to forge a decision key.
+# `answers` and `reconciles` use the same parser as `read` for either emission
+# form. Malformed content or a declared/parsed count mismatch prints a diagnostic
+# to stderr and exits 3, even if valid choices were already printed to stdout;
+# callers must not treat that output as a complete extraction.
 #
 # `read` is the presentation command summarized above; keyed intake remains
 # the separate `answers` contract described here.
@@ -701,9 +711,8 @@ cmd_silent() {
 # card's declared close mode (`done` or `release`) to the keyed-answer intake.
 # Items come from the shared result parser above, in either emission form, and
 # only items whose `tag` field is `choice` are read.
-# Choices from well-formed items are still printed when the result also holds
-# something the parser cannot account for, but the command then exits 3 so that
-# no caller can mistake a partial or unrecognized result for a complete one. A freeform `message` row is captain prose and is deliberately never a
+# The header owns the partial-output and failure contract.
+# A freeform `message` row is captain prose and is deliberately never a
 # source of decision keys. A row that does not carry both a slug-shaped `question`
 # and the versioned `selection` and `note` fields inside its `Context data:` block
 # is skipped. A time-limited rollout branch accepts the old question/answer
