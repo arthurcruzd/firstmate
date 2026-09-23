@@ -771,10 +771,7 @@ fm_remote_job_stage_owner_alive() { # <stage-dir>
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$stage/.owner-start" 256 2>/dev/null) || return 1
-  actual_start=$(fm_remote_job_process_start "$pid" "$recorded_start" 2>/dev/null) || {
-    [ "$?" -eq 2 ] && return 0
-    return 1
-  }
+  actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || return 1
   [ "$recorded_start" = "$actual_start" ]
 }
 
@@ -910,7 +907,7 @@ fm_remote_job_worker_identity_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worke
 fm_remote_job_worker_lock_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.lock"; }
 
 fm_remote_job_process_start() {
-  local pid=$1 recorded_start=${2:-} proc_root stat_line starttime ps_bin value
+  local pid=$1 proc_root stat_line starttime ps_bin value
   local -a stat_fields
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
@@ -921,8 +918,7 @@ fm_remote_job_process_start() {
   # matching fm_pid_identity. Parse after the last ")" so comm with spaces or
   # parentheses cannot shift the field. Tests may point FM_PROC_ROOT_OVERRIDE at a
   # fake /proc.
-  case "$recorded_start" in *[!0-9]*) proc_root= ;; esac
-  if [ -n "$proc_root" ] && [ -r "$proc_root/$pid/stat" ]; then
+  if [ -r "$proc_root/$pid/stat" ]; then
     stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
     read -r -a stat_fields <<< "${stat_line##*)}"
     [ "${#stat_fields[@]}" -ge 20 ] || return 1
@@ -935,9 +931,6 @@ fm_remote_job_process_start() {
   value=$("$ps_bin" -p "$pid" -o lstart= 2>/dev/null) || return 1
   [ -n "$value" ] || return 1
   case "$value" in *$'\n'*|*$'\r'*) return 1 ;; esac
-  if [ -n "$recorded_start" ] && [ "$recorded_start" != "$value" ]; then
-    case "$recorded_start" in *[!0-9]*) kill -0 "$pid" 2>/dev/null && return 2 ;; esac
-  fi
   printf '%s\n' "$value"
 }
 
@@ -1041,7 +1034,7 @@ fm_remote_job_lock_owner_matches_process() {
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$lock/start" 256) || return 1
-  actual_start=$(fm_remote_job_process_start "$pid" "$recorded_start") || return "$?"
+  actual_start=$(fm_remote_job_process_start "$pid") || return 1
   [ "$recorded_start" = "$actual_start" ] || return 1
   recorded_command=$(fm_remote_job_read_single_line "$lock/command" 8192) || return 1
   actual_command=$(fm_remote_job_process_command "$pid") || return 1
@@ -1177,7 +1170,7 @@ fm_remote_job_reload_launchagent() { # <account-home> <uid>
 }
 
 fm_remote_job_start_linux_worker() { # <remote-root> <account-home>
-  local root=$1 account_home=$2 worker pid status
+  local root=$1 account_home=$2 worker pid= lock start command
   worker="$root/bin/fm-remote-job-worker.sh"
   [ -f "$worker" ] && [ ! -L "$worker" ] && [ -x "$worker" ] || {
     FM_REMOTE_JOB_ERROR="remote job worker is not a genuine executable in the configured code root"
@@ -1190,19 +1183,30 @@ fm_remote_job_start_linux_worker() { # <remote-root> <account-home>
     # and would immediately replace a lone process kill, so stop the whole
     # worker tree through its isolated group.
     pid=$FM_REMOTE_JOB_OWNER_PID
+  elif [ "$(fm_remote_job_platform)" = linux ]; then
+    lock=$(fm_remote_job_worker_lock_path)
+    start=$(fm_remote_job_read_single_line "$lock/start" 256 2>/dev/null || true)
+    if [ -d "$lock" ] && [ ! -L "$lock" ] && [[ "$start" =~ ^[A-Za-z]{3}[[:space:]][A-Za-z]{3}[[:space:]][[:space:]0-9][0-9][[:space:]][0-9]{2}:[0-9]{2}:[0-9]{2}[[:space:]][0-9]{4}$ ]]; then
+      pid=$(fm_remote_job_read_single_line "$lock/pid" 64 2>/dev/null || true)
+      case "$pid" in ''|*[!0-9]*) pid= ;; esac
+      if [ -n "$pid" ] && [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null; then
+        command=$(fm_remote_job_process_command "$pid" 2>/dev/null || true)
+        case "$command" in
+          "/bin/bash $worker"|"/bin/bash $worker --serve") ;;
+          *) pid= ;;
+        esac
+      else
+        pid=
+      fi
+    fi
+  fi
+  if [ -n "$pid" ]; then
     fm_remote_job_stop_worker_tree "$pid" || {
       FM_REMOTE_JOB_ERROR="stale remote job worker did not stop safely"
       return 1
     }
     wait "$pid" 2>/dev/null || true
     FM_REMOTE_JOB_REPAIRED=1
-  else
-    status=0
-    fm_remote_job_lock_owner_matches_process "$account_home" || status=$?
-    if [ "$status" -eq 2 ] || fm_remote_job_probe "$account_home"; then
-      FM_REMOTE_JOB_ERROR="remote job worker ownership is unverified; stop the legacy worker before retrying"
-      return 1
-    fi
   fi
   # Job control puts the worker tree in its own process group, so a later stop
   # can signal every descendant at once without ever reaching the caller's own
