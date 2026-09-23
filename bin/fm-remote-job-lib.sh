@@ -13,10 +13,7 @@
 # optional caller-cancellation marker, and .claim may hold owner, owner_start,
 # supervisor, supervisor_start, group, group_start, and armed records while
 # work executes.
-# fm_remote_job_process_start owns those start identities: on a Linux-compatible
-# /proc it records the starttime tick from /proc/<pid>/stat (parsed after the
-# last ")" so comm may contain spaces or parentheses), which is immune to
-# wall-clock and btime drift; otherwise it keeps ps -o lstart=.
+# fm_remote_job_process_start below owns the platform-specific start identities.
 # Stage writes state=queued last. seq is a queue-wide monotonic staging
 # sequence reserved atomically by its persistent .seq-claims directory; the
 # counter is only a forward-moving allocation hint. If the bounded hint walk
@@ -1184,6 +1181,10 @@ fm_remote_job_start_linux_worker() { # <remote-root> <account-home>
     # worker tree through its isolated group.
     pid=$FM_REMOTE_JOB_OWNER_PID
   elif [ "$(fm_remote_job_platform)" = linux ]; then
+    # Legacy lstart cannot prove identity after btime drift. At this Linux-only
+    # upgrade boundary, require the live command to name this root's worker
+    # before stopping its tree; ordinary identity comparisons remain exact.
+    # tests/fm-remote-job-process-start.test.sh covers the upgrade handoff.
     lock=$(fm_remote_job_worker_lock_path)
     start=$(fm_remote_job_read_single_line "$lock/start" 256 2>/dev/null || true)
     if [ -d "$lock" ] && [ ! -L "$lock" ] && [[ "$start" =~ ^[A-Za-z]{3}[[:space:]][A-Za-z]{3}[[:space:]][[:space:]0-9][0-9][[:space:]][0-9]{2}:[0-9]{2}:[0-9]{2}[[:space:]][0-9]{4}$ ]]; then
