@@ -137,6 +137,7 @@ fm_remote_job_process_start() {
 LEGACY
   export FM_REMOTE_JOB_STATE_ROOT="$fixture/state"
   export FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux
+  # shellcheck disable=SC2329 # trap EXIT invokes this cleanup indirectly.
   upgrade_cleanup() {
     local child
     for child in $(jobs -pr); do
