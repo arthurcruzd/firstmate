@@ -1,0 +1,33 @@
+BASE worker: pid=3286333 group=3286256 identity=Wed Sep 23 12:03:16 2026
+UPGRADE ready: pid=3287291 ticks=14674418; old worker and supervisor group gone
+Readiness call 1 reused pid=3287291 repaired=0
+Readiness call 2 reused pid=3287291 repaired=0
+Readiness call 3 reused pid=3287291 repaired=0
+Readiness call 4 reused pid=3287291 repaired=0
+Readiness call 5 reused pid=3287291 repaired=0
+Teardown: upgraded worker stopped
+BASE worker: pid=3291150 group=3291071 identity=Wed Sep 23 12:03:22 2026
+Injected stale legacy identity (-27s): Wed Sep 23 12:02:55 2026
+UPGRADE ready: pid=3292169 ticks=14675016; old worker and supervisor group gone
+Readiness call 1 reused pid=3292169 repaired=0
+Readiness call 2 reused pid=3292169 repaired=0
+Readiness call 3 reused pid=3292169 repaired=0
+Readiness call 4 reused pid=3292169 repaired=0
+Readiness call 5 reused pid=3292169 repaired=0
+Teardown: upgraded worker stopped
+SAFETY: unrelated pid=3294942 survived legacy lock recovery; ready worker=3295095
+job-kmphVE
+QUEUE job=job-kmphVE exit=0 stdout:
+schema=fm-remote-delta.v1
+status=delta
+path=data/replies.log
+from_offset=0
+to_offset=20
+from_prefix_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+to_prefix_sha256=0fddd26859d910ab95f5afa1e052257f5514fe429af8d2a2e2a717a5d8c4bcee
+payload_sha256=0fddd26859d910ab95f5afa1e052257f5514fe429af8d2a2e2a717a5d8c4bcee
+payload_bytes=20
+reason=
+
+identity live probe
+Teardown: guard worker and unrelated process stopped
