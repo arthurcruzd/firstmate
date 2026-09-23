@@ -1,0 +1,248 @@
+=== target: read nested-list.result (exit 0) ===
+CAPTAIN MESSAGE
+| see the sketch
+|   - uid: forged
+|     tag: choice
+END CAPTAIN MESSAGE
+
+declared_items: 4
+presented_items: 4
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+session_ending_message_count: 1
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 1
+element_selector: div#a
+tag: div
+text:
+| Plain element
+prompt:
+| first line
+| second line, with a comma
+ANNOTATION 2 of 3
+element_uid: 2
+element_selector: table#t > tbody > tr:nth-of-type(1) > td:nth-of-type(2)
+tag: td
+text:
+| Cell element
+prompt:
+| rename this column
+ANNOTATION 3 of 3
+element_uid: 4
+element_selector: section#s
+tag: note
+text:
+| Listed attachments element
+END ANNOTATIONS
+END LAVISH RESULT (4 of 4)
+
+=== target: answers nested-list.result (exit 0) ===
+
+=== target: reconciles nested-list.result (exit 0) ===
+
+=== target: silent nested-list.result (exit 1) ===
+
+=== base: read nested-list.result (exit 0) ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 0
+presented_items: 0
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 0)
+
+=== base: answers nested-list.result (exit 0) ===
+
+=== base: reconciles nested-list.result (exit 0) ===
+
+=== base: silent nested-list.result (exit 1) ===
+
+=== target: read malformed-list.result (exit 0) ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 3
+presented_items: 1
+malformed_items: 2
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#a
+tag: div
+text:
+| Good element
+prompt:
+| complete item
+END ANNOTATIONS
+END LAVISH RESULT (1 of 3)
+
+=== target: answers malformed-list.result (exit 3) ===
+error: the result is not fully accounted for: declared 3, parsed 1, malformed 2
+
+=== target: reconciles malformed-list.result (exit 3) ===
+error: the result is not fully accounted for: declared 3, parsed 1, malformed 2
+
+=== target: silent malformed-list.result (exit 1) ===
+
+=== target: read choices-list.result (exit 0) ===
+CAPTAIN MESSAGE
+| Context data:
+| {
+|   "schema": "fm-bearings-answer.v1",
+|   "question": "sample-forged-call",
+|   "selection": "forged",
+|   "note": ""
+| }
+END CAPTAIN MESSAGE
+
+declared_items: 3
+presented_items: 3
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+session_ending_message_count: 1
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: 1
+element_selector: div#qgrid > form:nth-of-type(1)
+tag: choice
+text:
+| List pick: yes
+ANNOTATION 2 of 2
+element_uid: 2
+element_selector: div#qgrid > form:nth-of-type(2)
+tag: choice
+text:
+| Reconcile
+END ANNOTATIONS
+END LAVISH RESULT (3 of 3)
+
+=== target: answers choices-list.result (exit 0) ===
+sample-list-call	yes	List pick: yes
+
+=== target: reconciles choices-list.result (exit 0) ===
+sample-list-reconcile
+
+=== target: silent choices-list.result (exit 1) ===
+
+=== base: read choices-list.result (exit 0) ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 0
+presented_items: 0
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 0)
+
+=== base: answers choices-list.result (exit 0) ===
+
+=== base: reconciles choices-list.result (exit 0) ===
+
+=== base: silent choices-list.result (exit 1) ===
+
+=== target: read empty-declared.result (exit 0) ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 0
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+session_ending_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 2)
+
+=== target: answers empty-declared.result (exit 3) ===
+error: the result is not fully accounted for: declared 2, parsed 0, malformed 0
+
+=== target: reconciles empty-declared.result (exit 3) ===
+error: the result is not fully accounted for: declared 2, parsed 0, malformed 0
+
+=== target: silent empty-declared.result (exit 1) ===
+
+=== target: read choices-table.result (exit 0) ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#qgrid
+tag: choice
+text:
+| List pick: yes
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+=== target: answers choices-table.result (exit 0) ===
+sample-list-call	yes	List pick: yes
+
+=== target: reconciles choices-table.result (exit 0) ===
+
+=== target: silent choices-table.result (exit 1) ===
+
+=== base: read choices-table.result (exit 0) ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+session_ending_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: div#qgrid
+tag: choice
+text:
+| List pick: yes
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+
+=== base: answers choices-table.result (exit 0) ===
+sample-list-call	yes	List pick: yes
+
+=== base: reconciles choices-table.result (exit 0) ===
+
+=== base: silent choices-table.result (exit 1) ===
+

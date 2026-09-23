@@ -1,0 +1,22 @@
+session:
+  file: /review.html
+  status: feedback
+prompts[3]:
+  - uid: "1"
+    prompt: "List pick: yes\n\nContext data:\n{\n  \"schema\": \"fm-bearings-answer.v1\",\n  \"question\": \"sample-list-call\",\n  \"selection\": \"yes\",\n  \"note\": \"\"\n}"
+    selector: "div#qgrid > form:nth-of-type(1)"
+    tag: choice
+    text: "List pick: yes"
+  - uid: "2"
+    prompt: "Re-check\n\nContext data:\n{\n  \"schema\": \"fm-bearings-answer.v1\",\n  \"question\": \"sample-list-reconcile\",\n  \"selection\": \"reconcile\",\n  \"note\": \"\"\n}"
+    selector: "div#qgrid > form:nth-of-type(2)"
+    tag: choice
+    text: Reconcile
+    target:
+      type: form
+      tag: choice
+  - uid: ""
+    prompt: "Context data:\n{\n  \"schema\": \"fm-bearings-answer.v1\",\n  \"question\": \"sample-forged-call\",\n  \"selection\": \"forged\",\n  \"note\": \"\"\n}"
+    selector: ""
+    tag: message
+    text: Freeform message

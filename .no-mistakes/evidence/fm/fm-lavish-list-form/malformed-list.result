@@ -1,0 +1,14 @@
+session:
+  file: /review.html
+  status: feedback
+prompts[3]:
+  - uid: "1"
+    prompt: complete item
+    selector: div#a
+    tag: div
+    text: Good element
+  - uid: "2"
+    prompt: "unterminated
+    tag: div
+  - uid: "3"
+   tag: misindented

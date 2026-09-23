@@ -1,0 +1,4 @@
+session:
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  "1","List pick: yes\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"sample-list-call\", \"selection\": \"yes\", \"note\": \"\"}","div#qgrid","choice","List pick: yes"

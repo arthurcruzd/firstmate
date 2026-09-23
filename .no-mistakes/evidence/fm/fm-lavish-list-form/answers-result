@@ -1,0 +1,5 @@
+session:
+  file: /review.html
+  status: feedback
+prompts[1]<uid,tag>:
+  "1",choice

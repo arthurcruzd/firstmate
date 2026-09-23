@@ -1,0 +1,14 @@
+PASS: read distinguishes a live captain message from a session-ending message
+PASS: read presents every annotation and a distinct session-ending message
+PASS: read never certifies rows missing declared fields as complete
+PASS: read keeps every annotation when the session-ending message is absent
+PASS: read surfaces a typed comment on an annotated element
+PASS: read still surfaces a typed comment that matches the element text
+PASS: read still presents a pure annotation with no comment
+PASS: read does not present choice context as a comment
+PASS: read still presents a pure message with no selector
+PASS: read distinguishes a feedback capture from an ended-with-nothing close
+PASS: read presents list-form items with nested targets, attachments, and multi-line prompts
+PASS: read never certifies malformed list-form items as complete
+PASS: read never reports a declared-but-unparsed block as complete
+PASS: answers reads list-form choices and refuses a block it cannot account for
