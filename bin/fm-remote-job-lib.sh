@@ -1167,7 +1167,7 @@ fm_remote_job_reload_launchagent() { # <account-home> <uid>
 }
 
 fm_remote_job_start_linux_worker() { # <remote-root> <account-home>
-  local root=$1 account_home=$2 worker pid= lock start command
+  local root=$1 account_home=$2 worker pid='' lock start command
   worker="$root/bin/fm-remote-job-worker.sh"
   [ -f "$worker" ] && [ ! -L "$worker" ] && [ -x "$worker" ] || {
     FM_REMOTE_JOB_ERROR="remote job worker is not a genuine executable in the configured code root"
