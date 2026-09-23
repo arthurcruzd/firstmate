@@ -2,8 +2,7 @@
 # Process-start identity for the remote job runner.
 # On a Linux-compatible /proc, fm_remote_job_process_start uses starttime ticks
 # so a changing ps lstart for the same live pid cannot break the owner match.
-# Elsewhere it keeps ps -o lstart=. An older lstart recording mismatches the
-# tick identity and is treated as any other non-matching owner.
+# Elsewhere it keeps ps -o lstart=.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -91,16 +90,70 @@ test_linux_live_pid_owner_match_survives_changed_ps_lstart() {
   fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME" \
     || { kill "$live" 2>/dev/null || true; fail "owner match failed for a live pid whose ps lstart differs from starttime"; }
   write_lock_owner "$live" "$lstart" "$command"
+  fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME" \
+    || { kill "$live" 2>/dev/null || true; fail "legacy lstart owner did not match"; }
+  write_lock_owner "$live" "invalid identity" "$command"
   if fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME"; then
     kill "$live" 2>/dev/null || true
-    fail "an older lstart recording still matched the live pid instead of recovering as a non-matching owner"
+    fail "a mismatching legacy identity was accepted"
+  fi
+  write_lock_owner "$live" "$((first + 1))" "$command"
+  if fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME"; then
+    kill "$live" 2>/dev/null || true
+    fail "a mismatching tick identity was accepted"
   fi
   kill "$live" 2>/dev/null || true
   wait "$live" 2>/dev/null || true
   pass "changed ps lstart for the same live pid no longer breaks the Linux owner match"
 }
 
+test_legacy_worker_upgrade() (
+  local fixture="$TMP_ROOT/upgrade" old_pid new_pid lock stage start
+  [ "$(uname -s)" = Linux ] || return 0
+  mkdir -p "$fixture/bin" "$fixture/account"
+  cp "$ROOT/bin/fm-remote-job-lib.sh" "$ROOT/bin/fm-remote-job-worker.sh" "$fixture/bin/"
+  printf 'fixture\n' > "$fixture/AGENTS.md"
+  cat >> "$fixture/bin/fm-remote-job-lib.sh" <<'LEGACY'
+fm_remote_job_process_start() {
+  local ps_bin
+  if [ -x /bin/ps ]; then ps_bin=/bin/ps; else ps_bin=/usr/bin/ps; fi
+  "$ps_bin" -p "$1" -o lstart=
+}
+LEGACY
+  export FM_REMOTE_JOB_STATE_ROOT="$fixture/state"
+  export FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux
+  upgrade_cleanup() {
+    local child
+    for child in $(jobs -pr); do
+      kill -TERM -- "-$child" 2>/dev/null || true
+      wait "$child" 2>/dev/null || true
+    done
+  }
+  trap upgrade_cleanup EXIT
+  fm_remote_job_ensure_worker "$fixture" "$fixture/account" || fail "legacy worker did not become ready"
+  lock=$(fm_remote_job_worker_lock_path)
+  old_pid=$(cat "$lock/pid")
+  start=$(cat "$lock/start")
+  case "$start" in *[!0-9]*) ;; *) fail "fixture did not record legacy lstart" ;; esac
+  stage="$fixture/stage"
+  mkdir "$stage"
+  printf '%s\n' "$old_pid" > "$stage/.owner-pid"
+  printf '%s\n' "$start" > "$stage/.owner-start"
+  fm_remote_job_stage_owner_alive "$stage" || fail "legacy staging owner was considered dead"
+  cp "$ROOT/bin/fm-remote-job-lib.sh" "$fixture/bin/fm-remote-job-lib.sh"
+  fm_remote_job_ensure_worker "$fixture" "$fixture/account" || fail "upgraded worker did not become ready"
+  new_pid=$(cat "$lock/pid")
+  [ "$new_pid" != "$old_pid" ] || fail "legacy worker was not replaced"
+  ! kill -0 "$old_pid" 2>/dev/null || fail "legacy worker survived replacement"
+  start=$(cat "$lock/start")
+  case "$start" in ''|*[!0-9]*) fail "replacement did not record ticks" ;; esac
+  fm_remote_job_ensure_worker "$fixture" "$fixture/account" || fail "repeated ensure failed"
+  [ "$(cat "$lock/pid")" = "$new_pid" ] || fail "repeated ensure replaced the current worker"
+  pass "live legacy worker upgrades to a single reusable tick-identity worker"
+)
+
 test_fake_proc_starttime_ignores_ps_lstart_and_parses_comm_safely
+test_legacy_worker_upgrade
 test_linux_live_pid_owner_match_survives_changed_ps_lstart
 
 echo "ALL TESTS PASSED"

@@ -16,10 +16,7 @@
 # fm_remote_job_process_start owns those start identities: on a Linux-compatible
 # /proc it records the starttime tick from /proc/<pid>/stat (parsed after the
 # last ")" so comm may contain spaces or parentheses), which is immune to
-# wall-clock and btime drift; otherwise it keeps ps -o lstart=. A value written
-# by an older build that recorded lstart on Linux mismatches the tick identity
-# and is treated as any other non-matching owner, so the existing replacement
-# path recovers it rather than wedging on a dual-format compare.
+# wall-clock and btime drift; otherwise it keeps ps -o lstart=.
 # Stage writes state=queued last. seq is a queue-wide monotonic staging
 # sequence reserved atomically by its persistent .seq-claims directory; the
 # counter is only a forward-moving allocation hint. If the bounded hint walk
@@ -774,7 +771,7 @@ fm_remote_job_stage_owner_alive() { # <stage-dir>
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$stage/.owner-start" 256 2>/dev/null) || return 1
-  actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || return 1
+  actual_start=$(fm_remote_job_process_start "$pid" "$recorded_start" 2>/dev/null) || return 1
   [ "$recorded_start" = "$actual_start" ]
 }
 
@@ -910,7 +907,7 @@ fm_remote_job_worker_identity_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worke
 fm_remote_job_worker_lock_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.lock"; }
 
 fm_remote_job_process_start() {
-  local pid=$1 proc_root stat_line starttime ps_bin value
+  local pid=$1 recorded_start=${2:-} proc_root stat_line starttime ps_bin value
   local -a stat_fields
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
@@ -920,8 +917,9 @@ fm_remote_job_process_start() {
   # systemd-timesyncd). Capability-detect the files rather than keying on uname,
   # matching fm_pid_identity. Parse after the last ")" so comm with spaces or
   # parentheses cannot shift the field. Tests may point FM_PROC_ROOT_OVERRIDE at a
-  # fake /proc. An older lstart recording mismatches this tick value on purpose.
-  if [ -r "$proc_root/$pid/stat" ]; then
+  # fake /proc.
+  case "$recorded_start" in *[!0-9]*) proc_root= ;; esac
+  if [ -n "$proc_root" ] && [ -r "$proc_root/$pid/stat" ]; then
     stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
     read -r -a stat_fields <<< "${stat_line##*)}"
     [ "${#stat_fields[@]}" -ge 20 ] || return 1
@@ -1037,7 +1035,7 @@ fm_remote_job_lock_owner_matches_process() {
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$lock/start" 256) || return 1
-  actual_start=$(fm_remote_job_process_start "$pid") || return 1
+  actual_start=$(fm_remote_job_process_start "$pid" "$recorded_start") || return 1
   [ "$recorded_start" = "$actual_start" ] || return 1
   recorded_command=$(fm_remote_job_read_single_line "$lock/command" 8192) || return 1
   actual_command=$(fm_remote_job_process_command "$pid") || return 1
