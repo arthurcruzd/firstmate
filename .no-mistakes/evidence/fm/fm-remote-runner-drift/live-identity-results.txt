@@ -1,0 +1,8 @@
+pass=7 fail=0
+PASS	linux-ticks-not-lstart	pid 1836683 identity=13811472 field22=13811472 lstart='Wed Sep 23 09:39:28 2026'
+PASS	owner-match-ticks-reject-mismatch	match=1 lstart_reject=1 tick_reject=1
+PASS	paren-comm-ticks	comm='watch(er) x' identity=13814705
+PASS	lstart-fallback-mismatch	ident='Wed Sep 23 09:39:29 2026' match=1 mismatch=1
+PASS	repeated-ensure-no-pileup	pid=1837104 start=13811567 workers=2
+PASS	legacy-upgrade-with-drift	old=1839708 new=1840310 ticks=13812033 workers=2
+PASS	unrelated-legacy-pid-not-killed	sleep=1842167 survived; worker=1842343

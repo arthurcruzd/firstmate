@@ -1,0 +1,89 @@
+
+===== host =====
+uname=Linux 7.0.0-31-generic x86_64
+live_root=/tmp/fm-remote-job-live.5PEHIN
+btime=1790018254
+date=Wed Sep 23 09:39:29 UTC 2026
+
+===== S1 Linux start identity is /proc starttime ticks, not ps lstart =====
+pid=1836683 comm=sleep
+identity1=13811472
+identity2=13811472
+proc_field22=13811472
+ps_lstart=Wed Sep 23 09:39:28 2026
+PASS: linux-ticks-not-lstart — pid 1836683 identity=13811472 field22=13811472 lstart='Wed Sep 23 09:39:28 2026'
+
+===== S2 owner match uses ticks; mismatched ticks and legacy lstart are rejected =====
+ticks=13811481 cmd=sleep 60 lstart='Wed Sep 23 09:39:28 2026'
+match_ticks=1 reject_lstart=1 reject_wrong_tick=1
+PASS: owner-match-ticks-reject-mismatch — match=1 lstart_reject=1 tick_reject=1
+
+===== S3 live process with parentheses in comm still yields field-22 ticks =====
+coreutils: unknown program ''sleep(x)y''
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: '/proc/1836845/stat'
+cat: /proc/1836845/stat: No such file or directory
+/root/.no-mistakes/evidence/01M36SBMJKSME9J5T7VM2GGSM3/live-identity-driver.sh: line 150: /proc/1836845/comm: No such file or directory
+pid=1836845 comm=''
+stat=
+identity=ERROR field22=ERROR
+FAIL: paren-comm-ticks — comm='' ident=ERROR field22=ERROR
+
+===== S4 lstart fallback when /proc is unavailable =====
+fallback_ident='Wed Sep 23 09:39:29 2026'
+ps_lstart='Wed Sep 23 09:39:29 2026'
+match=1 mismatch_status=1
+PASS: lstart-fallback-mismatch — ident='Wed Sep 23 09:39:29 2026' match=1 mismatch=1
+
+===== S5 live Linux worker records tick identity; repeated ensure does not pile up =====
+first pid=1837104 start=13811567 cmd=/bin/bash /tmp/fm-remote-job-live.5PEHIN/s5-checkout/bin/fm-remote-job-worker.sh --serve count=2
+ps:
+1837047 Wed Sep 23 09:39:29 2026 /bin/bash /tmp/fm-remote-job-live.5PEHIN/s5-checkout/bin/fm-remote-job-worker.sh
+1837104 Wed Sep 23 09:39:29 2026 /bin/bash /tmp/fm-remote-job-live.5PEHIN/s5-checkout/bin/fm-remote-job-worker.sh --serve
+ensure #1 pid=1837104 count=2 repaired=0
+ensure #2 pid=1837104 count=2 repaired=0
+ensure #3 pid=1837104 count=2 repaired=0
+ensure #4 pid=1837104 count=2 repaired=0
+ensure #5 pid=1837104 count=2 repaired=0
+PASS: repeated-ensure-no-pileup — pid=1837104 start=13811567 workers=2
+
+===== S6 Linux upgrade handoff of a live legacy-lstart worker, including 27s drift =====
+legacy pid=1839708 start='Wed Sep 23 09:39:33 2026' cmd='/bin/bash /tmp/fm-remote-job-live.5PEHIN/s6-checkout/bin/fm-remote-job-worker.sh --serve' count=2
+legacy ps:
+1839651 Wed Sep 23 09:39:33 2026 /bin/bash /tmp/fm-remote-job-live.5PEHIN/s6-checkout/bin/fm-remote-job-worker.sh
+1839708 Wed Sep 23 09:39:33 2026 /bin/bash /tmp/fm-remote-job-live.5PEHIN/s6-checkout/bin/fm-remote-job-worker.sh --serve
+drifted_start='Wed Sep 23 09:39:06 2026'
+replacement pid=1840310 start=13812033 cmd='/bin/bash /tmp/fm-remote-job-live.5PEHIN/s6-checkout/bin/fm-remote-job-worker.sh --serve' old_alive=0 count=2
+replacement ps:
+1840253 Wed Sep 23 09:39:34 2026 /bin/bash /tmp/fm-remote-job-live.5PEHIN/s6-checkout/bin/fm-remote-job-worker.sh
+1840310 Wed Sep 23 09:39:34 2026 /bin/bash /tmp/fm-remote-job-live.5PEHIN/s6-checkout/bin/fm-remote-job-worker.sh --serve
+post-upgrade ensure #1 pid=1840310 count=2
+post-upgrade ensure #2 pid=1840310 count=2
+post-upgrade ensure #3 pid=1840310 count=2
+PASS: legacy-upgrade-with-drift — old=1839708 new=1840310 ticks=13812033 workers=2
+
+===== S7 adversarial: unrelated live pid with legacy lstart is not stopped =====
+planted unrelated pid=1842167 start='Wed Sep 23 09:39:36 2026' cmd='sleep 60'
+sleep_alive=1 new_pid=1842343 new_start=13812325 workers=2
+1842286 Wed Sep 23 09:39:37 2026 /bin/bash /tmp/fm-remote-job-live.5PEHIN/s7-checkout/bin/fm-remote-job-worker.sh
+1842343 Wed Sep 23 09:39:37 2026 /bin/bash /tmp/fm-remote-job-live.5PEHIN/s7-checkout/bin/fm-remote-job-worker.sh --serve
+PASS: unrelated-legacy-pid-not-killed — sleep=1842167 survived; worker=1842343
+
+===== summary =====
+pass=6 fail=1
+PASS	linux-ticks-not-lstart	pid 1836683 identity=13811472 field22=13811472 lstart='Wed Sep 23 09:39:28 2026'
+PASS	owner-match-ticks-reject-mismatch	match=1 lstart_reject=1 tick_reject=1
+FAIL	paren-comm-ticks	comm='' ident=ERROR field22=ERROR
+PASS	lstart-fallback-mismatch	ident='Wed Sep 23 09:39:29 2026' match=1 mismatch=1
+PASS	repeated-ensure-no-pileup	pid=1837104 start=13811567 workers=2
+PASS	legacy-upgrade-with-drift	old=1839708 new=1840310 ticks=13812033 workers=2
+PASS	unrelated-legacy-pid-not-killed	sleep=1842167 survived; worker=1842343
+===== S3 retry: live process with parentheses in comm =====
+pid=1844764
+comm='watch(er) x'
+stat=1844764 (watch(er) x) S 1844756 1844756 1844756 0 -1 4194304 131 0 0 0 0 0 0 0 20 0 1 0 13814705 2699264 363 18446744073709551615 96549854367744 96549854368101 140733231522496 0 0 0 0 6 0 1 0 0 17 1 0 0 0 0 0 96549854379448 96549854380048 96550414946304 140733231530862 140733231530906 140733231530906 140733231534028 0
+identity=13814705
+field22=13814705
+lstart='Wed Sep 23 09:40:01 2026'
+PASS: paren-comm-ticks — comm='watch(er) x' identity=13814705
