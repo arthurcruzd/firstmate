@@ -137,7 +137,6 @@ worker_quarantined_execution_stopped() { # <account-home>
   local account_home=$1 job state kind file pid
   fm_remote_job_regular_bounded "$WORKER_LOCK/quarantine" 256 || return 1
   fm_remote_job_lock_owner_matches_process "$account_home" && return 1
-  [ "$?" -ne 2 ] || return 1
   for job in "$FM_REMOTE_JOB_JOBS"/job-*; do
     [ -d "$job" ] && [ ! -L "$job" ] || continue
     state=$(fm_remote_job_read_state "$job" 2>/dev/null || true)
@@ -171,9 +170,7 @@ worker_acquire_lock() {
       worker_recover_quarantine "$account_home" || return 3
       continue
     fi
-    if fm_remote_job_lock_owner_matches_process "$account_home"; then return 2; else
-      [ "$?" -ne 2 ] || return 2
-    fi
+    if fm_remote_job_lock_owner_matches_process "$account_home"; then return 2; fi
     if fm_remote_job_probe "$account_home" || worker_lock_recent; then
       attempt=$((attempt + 1))
       sleep 0.1
@@ -265,7 +262,7 @@ worker_signal_process_or_group() { # process|group <signal> <pid>
 worker_supervisor_identity_status() { # <job-dir> <pid>
   local job=$1 pid=$2 recorded_start actual_start
   recorded_start=$(fm_remote_job_read_single_line "$job/.claim/supervisor_start" 256 2>/dev/null) || return 2
-  actual_start=$(fm_remote_job_process_start "$pid" "$recorded_start" 2>/dev/null) || {
+  actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || {
     worker_process_or_group_alive process "$pid" && return 2
     return 1
   }
@@ -282,7 +279,7 @@ worker_group_identity_status() { # <job-dir> <pid>
   local job=$1 pid=$2 recorded_start actual_start file="$1/.claim/group_start"
   [ -e "$file" ] || [ -L "$file" ] || return 3
   recorded_start=$(fm_remote_job_read_single_line "$file" 256 2>/dev/null) || return 2
-  actual_start=$(fm_remote_job_process_start "$pid" "$recorded_start" 2>/dev/null) || {
+  actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || {
     kill -0 "$pid" 2>/dev/null && return 2
     worker_process_or_group_alive group "$pid" && return 0
     return 1
@@ -366,7 +363,7 @@ worker_stop_recorded_execution() { # <job-dir>
 worker_lane_identity_matches() { # <pid> <start>
   local pid=$1 start=$2 actual_start
   [ -n "$start" ] || return 1
-  actual_start=$(fm_remote_job_process_start "$pid" "$start" 2>/dev/null) || return "$?"
+  actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || return 1
   [ "$actual_start" = "$start" ]
 }
 
@@ -376,12 +373,8 @@ worker_stop_active_execution() {
     pid=${WORKER_LANE_PIDS[$i]}
     start=${WORKER_LANE_STARTS[$i]}
     job=${WORKER_LANE_JOBS[$i]}
-    if worker_lane_identity_matches "$pid" "$start"; then kill -TERM "$pid" 2>/dev/null || true; else
-      [ "$?" -ne 2 ] || return 1
-    fi
-    if worker_lane_identity_matches "$pid" "$start"; then kill -KILL "$pid" 2>/dev/null || true; else
-      [ "$?" -ne 2 ] || return 1
-    fi
+    if worker_lane_identity_matches "$pid" "$start"; then kill -TERM "$pid" 2>/dev/null || true; fi
+    if worker_lane_identity_matches "$pid" "$start"; then kill -KILL "$pid" 2>/dev/null || true; fi
     wait "$pid" 2>/dev/null || true
     if [ -d "$job" ] && [ ! -L "$job" ]; then
       worker_stop_recorded_execution "$job" || failed=1
@@ -464,10 +457,7 @@ worker_claim_owner_alive() { # <job-dir>
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   if [ -e "$claim/owner_start" ] || [ -L "$claim/owner_start" ]; then
     recorded_start=$(fm_remote_job_read_single_line "$claim/owner_start" 256 2>/dev/null) || return 1
-    actual_start=$(fm_remote_job_process_start "$pid" "$recorded_start" 2>/dev/null) || {
-      [ "$?" -eq 2 ] && return 0
-      return 1
-    }
+    actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || return 1
     [ "$recorded_start" = "$actual_start" ]
     return
   fi
@@ -816,14 +806,12 @@ worker_lane_owns_job() { # <job-dir>
 }
 
 worker_reap_finished_lanes() {
-  local i=0 count=${#WORKER_LANE_PIDS[@]} pid start status
+  local i=0 count=${#WORKER_LANE_PIDS[@]} pid start
   local live_homes=() live_pids=() live_starts=() live_jobs=()
   while [ "$i" -lt "$count" ]; do
     pid=${WORKER_LANE_PIDS[$i]}
     start=${WORKER_LANE_STARTS[$i]}
-    status=0
-    worker_lane_identity_matches "$pid" "$start" || status=$?
-    if [ "$status" -eq 0 ] || [ "$status" -eq 2 ]; then
+    if worker_lane_identity_matches "$pid" "$start"; then
       live_homes+=("${WORKER_LANE_HOMES[$i]}")
       live_pids+=("$pid")
       live_starts+=("$start")

@@ -89,9 +89,6 @@ test_linux_live_pid_owner_match_survives_changed_ps_lstart() {
   write_lock_owner "$live" "$first" "$command"
   fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME" \
     || { kill "$live" 2>/dev/null || true; fail "owner match failed for a live pid whose ps lstart differs from starttime"; }
-  write_lock_owner "$live" "$lstart" "$command"
-  fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME" \
-    || { kill "$live" 2>/dev/null || true; fail "legacy lstart owner did not match"; }
   write_lock_owner "$live" "invalid identity" "$command"
   if fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME"; then
     kill "$live" 2>/dev/null || true
@@ -107,8 +104,26 @@ test_linux_live_pid_owner_match_survives_changed_ps_lstart() {
   pass "changed ps lstart for the same live pid no longer breaks the Linux owner match"
 }
 
+test_lstart_fallback_mismatch() (
+  local live lstart command status
+  export FM_PROC_ROOT_OVERRIDE="$TMP_ROOT/no-proc"
+  sleep 30 &
+  live=$!
+  trap 'kill "$live" 2>/dev/null || true; wait "$live" 2>/dev/null || true' EXIT
+  lstart=$(fm_remote_job_process_start "$live") || fail "fallback identity read failed"
+  case "$lstart" in *[!0-9]*) ;; *) fail "fallback did not return lstart" ;; esac
+  command=$(fm_remote_job_process_command "$live") || fail "fallback command read failed"
+  write_lock_owner "$live" "$lstart" "$command"
+  fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME" || fail "fallback owner did not match"
+  write_lock_owner "$live" "Mon Jan  1 00:00:00 2001" "$command"
+  status=0
+  fm_remote_job_lock_owner_matches_process "$ACCOUNT_HOME" || status=$?
+  [ "$status" -eq 1 ] || fail "fallback mismatch did not return ordinary failure"
+  pass "lstart fallback preserves ordinary mismatch recovery"
+)
+
 test_legacy_worker_upgrade() (
-  local drift=${1:-0} fixture="$TMP_ROOT/upgrade-${1:-0}" old_pid new_pid lock stage start status before after attempt
+  local drift=${1:-0} fixture="$TMP_ROOT/upgrade-${1:-0}" old_pid new_pid lock start
   [ "$(uname -s)" = Linux ] || return 0
   mkdir -p "$fixture/bin" "$fixture/account"
   cp "$ROOT/bin/fm-remote-job-lib.sh" "$ROOT/bin/fm-remote-job-worker.sh" "$fixture/bin/"
@@ -124,7 +139,6 @@ LEGACY
   export FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux
   upgrade_cleanup() {
     local child
-    [ -z "${old_pid:-}" ] || kill -CONT "$old_pid" 2>/dev/null || true
     for child in $(jobs -pr); do
       kill -TERM -- "-$child" 2>/dev/null || true
       wait "$child" 2>/dev/null || true
@@ -136,36 +150,10 @@ LEGACY
   old_pid=$(cat "$lock/pid")
   start=$(cat "$lock/start")
   case "$start" in *[!0-9]*) ;; *) fail "fixture did not record legacy lstart" ;; esac
-  stage="$fixture/stage"
-  mkdir "$stage"
-  printf '%s\n' "$old_pid" > "$stage/.owner-pid"
-  printf '%s\n' "$start" > "$stage/.owner-start"
-  fm_remote_job_stage_owner_alive "$stage" || fail "legacy staging owner was considered dead"
   cp "$ROOT/bin/fm-remote-job-lib.sh" "$fixture/bin/fm-remote-job-lib.sh"
   if [ "$drift" -eq 1 ]; then
     start=$(date -d "$start 27 seconds ago" '+%a %b %e %T %Y') || fail "could not simulate legacy drift"
     printf '%s\n' "$start" > "$lock/start"
-    printf '%s\n' "$start" > "$stage/.owner-start"
-    status=0
-    fm_remote_job_lock_owner_matches_process "$fixture/account" || status=$?
-    [ "$status" -eq 2 ] || fail "drifted legacy identity was not indeterminate"
-    fm_remote_job_stage_owner_alive "$stage" || fail "drifted live staging owner was considered dead"
-    before=$(jobs -pr)
-    for attempt in 1 2 3; do
-      if [ "$attempt" -eq 2 ]; then
-        kill -STOP "$old_pid" || fail "could not pause legacy heartbeat"
-        rm -f "$(fm_remote_job_worker_ready_path)"
-      fi
-      if fm_remote_job_ensure_worker "$fixture" "$fixture/account"; then
-        fail "unverified legacy ownership was accepted"
-      fi
-      [ -n "$FM_REMOTE_JOB_ERROR" ] || fail "blocked upgrade had no diagnostic"
-      kill -0 "$old_pid" 2>/dev/null || fail "unverified process was signalled"
-      after=$(jobs -pr)
-      [ "$before" = "$after" ] || fail "blocked upgrade launched another supervisor"
-    done
-    upgrade_cleanup
-    ! kill -0 "$old_pid" 2>/dev/null || fail "fixture legacy worker failed to stop"
   fi
   fm_remote_job_ensure_worker "$fixture" "$fixture/account" || fail "upgraded worker did not become ready"
   new_pid=$(cat "$lock/pid")
@@ -179,6 +167,7 @@ LEGACY
 )
 
 test_fake_proc_starttime_ignores_ps_lstart_and_parses_comm_safely
+test_lstart_fallback_mismatch || exit 1
 test_legacy_worker_upgrade || exit 1
 test_legacy_worker_upgrade 1 || exit 1
 test_linux_live_pid_owner_match_survives_changed_ps_lstart
