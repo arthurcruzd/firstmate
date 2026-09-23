@@ -13,6 +13,13 @@
 # optional caller-cancellation marker, and .claim may hold owner, owner_start,
 # supervisor, supervisor_start, group, group_start, and armed records while
 # work executes.
+# fm_remote_job_process_start owns those start identities: on a Linux-compatible
+# /proc it records the starttime tick from /proc/<pid>/stat (parsed after the
+# last ")" so comm may contain spaces or parentheses), which is immune to
+# wall-clock and btime drift; otherwise it keeps ps -o lstart=. A value written
+# by an older build that recorded lstart on Linux mismatches the tick identity
+# and is treated as any other non-matching owner, so the existing replacement
+# path recovers it rather than wedging on a dual-format compare.
 # Stage writes state=queued last. seq is a queue-wide monotonic staging
 # sequence reserved atomically by its persistent .seq-claims directory; the
 # counter is only a forward-moving allocation hint. If the bounded hint walk
@@ -903,7 +910,26 @@ fm_remote_job_worker_identity_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worke
 fm_remote_job_worker_lock_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.lock"; }
 
 fm_remote_job_process_start() {
-  local pid=$1 ps_bin value
+  local pid=$1 proc_root stat_line starttime ps_bin value
+  local -a stat_fields
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
+  # Prefer a Linux-compatible /proc when present: stat field 22 (starttime,
+  # clock ticks since boot) is immune to the wall-clock and btime drift that
+  # re-renders ps lstart (observed on WSL2 when the Windows host clock fights
+  # systemd-timesyncd). Capability-detect the files rather than keying on uname,
+  # matching fm_pid_identity. Parse after the last ")" so comm with spaces or
+  # parentheses cannot shift the field. Tests may point FM_PROC_ROOT_OVERRIDE at a
+  # fake /proc. An older lstart recording mismatches this tick value on purpose.
+  if [ -r "$proc_root/$pid/stat" ]; then
+    stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
+    read -r -a stat_fields <<< "${stat_line##*)}"
+    [ "${#stat_fields[@]}" -ge 20 ] || return 1
+    starttime=${stat_fields[19]}
+    case "$starttime" in ''|*[!0-9]*) return 1 ;; esac
+    printf '%s\n' "$starttime"
+    return 0
+  fi
   if [ -x /bin/ps ]; then ps_bin=/bin/ps; elif [ -x /usr/bin/ps ]; then ps_bin=/usr/bin/ps; else return 1; fi
   value=$("$ps_bin" -p "$pid" -o lstart= 2>/dev/null) || return 1
   [ -n "$value" ] || return 1
