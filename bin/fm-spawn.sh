@@ -1339,11 +1339,18 @@ spawn_abort_cleanup() {
   fi
   # Nothing has run in a leased slot before the launch turn, so an abort
   # archives the thread (it must never re-create its worktree at a returned
-  # slot) and hands the lease back; after publication the record's own
-  # teardown owns both.
+  # slot) and hands the lease back only once that succeeded; after publication
+  # the record's own teardown owns both.
   if [ "$T3CODE_ABORT_CLEANUP" = 1 ]; then
     T3CODE_ABORT_CLEANUP=0
-    fm_backend_kill t3code "$T" 2>/dev/null || true
+    if ! fm_backend_kill t3code "$T" 2>/dev/null; then
+      if [ "$T3CODE_LEASED" = 1 ]; then
+        T3CODE_LEASED=0
+        echo "warning: could not stop and archive T3 thread $T for $ID, so the leased worktree $WT stays leased; archive the thread in T3 Code, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
+      else
+        echo "warning: could not stop and archive T3 thread $T for $ID; archive it in T3 Code" >&2
+      fi
+    fi
   fi
   if [ "$T3CODE_LEASED" = 1 ] && [ -n "${WT:-}" ]; then
     T3CODE_LEASED=0
@@ -1739,8 +1746,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
   # A relaunch must PROVE the previous agent is gone before it launches another
-  # one into the same endpoint, and only tmux and herdr have a recovery-grade
-  # classifier that can (bin/fm-control-lib.sh owns that capability table).
+  # one into the same endpoint, and only a backend with a recovery-grade
+  # classifier can (bin/fm-control-lib.sh owns that capability table).
   fm_control_backend_state_verified "$BACKEND" || {
     echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint" >&2
     exit 1
@@ -2448,6 +2455,23 @@ WORKER_ACCOUNT_DECLARED=${WORKER_ACCOUNT%%$'\t'*}
 WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT#*$'\t'}
 WORKER_ACCOUNT_PROVIDER=${WORKER_ACCOUNT_ROOT#*$'\t'}
 WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT_ROOT%%$'\t'*}
+# T3 starts the agent itself, at full access, with its provider instance's own
+# account and environment, so a launch setting only a Firstmate-built command
+# line can apply refuses here instead of being silently widened or dropped.
+if [ "$BACKEND" = t3code ]; then
+  if [ "$HARNESS" = claude ] && [ "$CLAUDE_PERMISSION_MODE" != bypass ]; then
+    echo "error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=$CLAUDE_PERMISSION_MODE; remove that file or choose another backend" >&2
+    exit 1
+  fi
+  if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
+    echo "error: backend=t3code cannot apply config/launch-env-allowlist because T3 starts the agent with its provider instance's environment; remove that file or choose another backend" >&2
+    exit 1
+  fi
+  if [ -n "$WORKER_ACCOUNT" ]; then
+    echo "error: backend=t3code cannot apply the $HARNESS worker account pin because T3's provider instance owns the account; select that instance in config/t3code-instances instead" >&2
+    exit 1
+  fi
+fi
 if [ -n "$WORKER_ACCOUNT" ] && [ "$HARNESS" = claude ]; then
   if [ -n "$WORKER_ACCOUNT_ROOT" ]; then
     export CLAUDE_CONFIG_DIR=$WORKER_ACCOUNT_ROOT
@@ -3892,6 +3916,13 @@ EOF
     T3CODE_PROJECT_ID=$(fm_backend_t3code_project_ensure "$PROJ_ABS") || exit 1
     T3CODE_MODEL_SELECTION=$(fm_backend_t3code_model_selection "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$T3CODE_PROJECT_ID") || exit 1
     if [ "$KIND" = secondmate ]; then
+      # The home's own daemon and crew call the same server, so they read the
+      # primary's bearer through a link rather than a copy of the secret.
+      if ! { mkdir -p "$PROJ_ABS/config" &&
+        ln -sfn "$(cd "$CONFIG" && pwd -P)/t3code-token" "$PROJ_ABS/config/t3code-token"; }; then
+        echo "error: could not link the T3 bearer into $PROJ_ABS/config for $ID" >&2
+        exit 1
+      fi
       # No worktree of its own: worktreePath null runs the thread in the
       # project's workspaceRoot, the home, on whatever branch it is on.
       T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
@@ -5409,7 +5440,10 @@ if [ "$BACKEND" = t3code ]; then
   # (spawn_t3code_env_install). TRACEPARENT is delivered only once its meta
   # record exists, the same delivered-implies-recorded invariant the pane path
   # keeps by unsetting it when the record fails.
-  T3CODE_ENV=("GOTMPDIR=$TASK_TMP/gotmp")
+  T3CODE_ENV=("GOTMPDIR=$TASK_TMP/gotmp" COMPACT_ADVISER_DISABLE=1)
+  if [ "$LAVISH_AXI_HOST_CONFIG_PRESENT" = 1 ]; then
+    T3CODE_ENV+=("LAVISH_AXI_HOST=$LAVISH_AXI_HOST")
+  fi
   if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
     T3CODE_ENV+=("FM_TASK_ID=$ID")
   fi
