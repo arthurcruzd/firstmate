@@ -366,7 +366,7 @@ family_for_basename() {
     fm-harness-liveness-drift-live-e2e.test.sh|\
     fm-kimi-trust-prompt-live-e2e.test.sh|\
     fm-devin-signals-live-e2e.test.sh|fm-commandcode-signals-live-e2e.test.sh|fm-muse-signals-live-e2e.test.sh|fm-rovo-signals-live-e2e.test.sh|fm-agy-signals-live-e2e.test.sh|fm-polytoken-signals-live-e2e.test.sh|\
-    fm-launch-prompt-signals-live-e2e.test.sh|\
+    fm-launch-prompt-signals-live-e2e.test.sh|fm-backend-t3code-live-e2e.test.sh|\
     fm-pi-seeded-home-trust-live-e2e.test.sh|\
     fm-herdr-version-floor-live-e2e.test.sh|\
     fm-herdr-pi-stale-registration-live-e2e.test.sh|\
@@ -389,7 +389,7 @@ family_for_basename() {
       printf '%s\n' live-harness-optin
       ;;
     fm-backend-herdr.test.sh|fm-backend-tmux-smoke.test.sh|fm-backend.test.sh|\
-    fm-tmux-agent-liveness.test.sh|\
+    fm-backend-t3code.test.sh|fm-backend-t3code-events.test.sh|fm-tmux-agent-liveness.test.sh|\
     fm-control.test.sh|fm-control-relaunch.test.sh|\
     fm-herdr-session-cleanup.test.sh|fm-send-resolve-key.test.sh|fm-send-strict.test.sh|\
     fm-send-inbox.test.sh|fm-spawn-batch.test.sh|\
@@ -1495,6 +1495,9 @@ families_for_changed_path() {
     bin/backends/orca*|bin/backends/tmux.sh)
       printf '%s\n' backend-dispatch
       printf '%s\n' orca
+      ;;
+    bin/backends/t3code*)
+      printf '%s\n' backend-dispatch
       ;;
     bin/fm-backend.sh|bin/fm-backend-hometag-lib.sh)
       printf '%s\n' backend-dispatch
