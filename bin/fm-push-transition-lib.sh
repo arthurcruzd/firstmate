@@ -149,7 +149,7 @@ handle_push_transition() {  # <backend> <session> <record>
   to=$(fm_transition_to_status "$record")
   detail=$(fm_transition_detail "$record")
   [ -n "$pane_id" ] || { sleep 1; return; }
-  window="$session:$pane_id"
+  window=$(fm_backend_transition_target "$backend" "$session" "$pane_id")
   task=$(window_to_task "$window" "$STATE")
   # A declared wait already names the human this transition would report: an
   # external dependency, or the captain a verified hold transferred the work to.

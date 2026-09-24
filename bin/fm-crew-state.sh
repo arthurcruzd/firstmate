@@ -348,6 +348,9 @@ pane_readable() {  # <target>
 # recognized interactive prompt would report `working` here while the
 # watcher's own poll (which always captures a tail) already classifies it
 # unknown - the exact split issue #1792 describes for a different cause.
+# A t3code crew's native busy AND idle are both accepted: the T3 server
+# reports its own session status and there is no shell in front of the agent
+# to misread.
 crew_busy_verdict() {  # <target>
   local tail40
   tail40=$(fm_backend_capture "$TASK_BACKEND" "$1" 40 "$EXPECTED_LABEL" 2>/dev/null) || tail40=''
@@ -1334,22 +1337,23 @@ if ! pane_readable "$BACKEND_TARGET"; then
   #             normal flow below instead of being discarded.
   #   anything else - the cheap probes themselves failed to answer or
   #             contradicted themselves, which is unknown, never death.
-  # Backends with no classifier (orca, zellij, cmux, and paseo all report unverified)
-  # keep their historical capture-failure-means-gone reading.
+  # t3code answers from the server's own session status through the same
+  # contract. Backends with no classifier (orca, zellij, cmux, and paseo all
+  # report unverified) keep their historical capture-failure-means-gone reading.
   case "$TASK_BACKEND" in
-    tmux|herdr|rex) AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET") ;;
+    tmux|herdr|rex|t3code) AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET") ;;
     *) AGENT_STATE=none ;;
   esac
   case "$TASK_BACKEND:$AGENT_STATE" in
-    tmux:alive|herdr:alive|rex:alive)
+    tmux:alive|herdr:alive|rex:alive|t3code:alive)
       ;;
-    tmux:missing|herdr:missing|rex:missing)
+    tmux:missing|herdr:missing|rex:missing|t3code:missing)
       emit unknown none "backend target gone: $BACKEND_TARGET"
       ;;
-    tmux:dead|herdr:dead|rex:dead)
+    tmux:dead|herdr:dead|rex:dead|t3code:dead)
       emit unknown none "backend target gone: $BACKEND_TARGET (agent gone, pane shell remains)"
       ;;
-    tmux:*|herdr:*|rex:*)
+    tmux:*|herdr:*|rex:*|t3code:*)
       emit unknown none "backend unreachable ($TASK_BACKEND endpoint state: $AGENT_STATE)"
       ;;
     *)

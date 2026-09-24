@@ -107,6 +107,9 @@
 #                          agent, for human inspection only - never an automatic
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
+#                          At escalation time a T3 Code session the server still
+#                          reports running resets the timer instead
+#                          (wedge_defer_t3code_running).
 #   stale: <window> (unread firstmate instruction: ...)
 #   stale: <window> (steering-inbox ladder bookkeeping unwritable: ...)
 #   stale: <window> (steering-inbox busy bookkeeping unwritable: ...)
@@ -418,7 +421,7 @@ PAUSE_RESURFACE_SECS=${FM_PAUSE_RESURFACE_SECS:-$FM_PAUSE_RESURFACE_SECS_DEFAULT
 # connect/subscribe failure) before the push fast-path is disabled for the rest
 # of this watcher process and the loop reverts to pure polling (report section
 # 5c trigger 3: proven-unreliable-at-runtime). A watcher restart re-probes
-# capability, so a transient herdr hiccup self-heals on the next cycle chain.
+# capability, so a transient backend hiccup self-heals on the next cycle chain.
 EVENT_CAP_FAIL_MAX=${FM_EVENT_CAP_FAIL_MAX:-3}
 # Per-process memo for the push-capability probe (fm_backend_events_capable runs
 # a ~220KB `herdr api schema` read, too heavy to repeat every poll). Keyed by
@@ -1967,9 +1970,13 @@ wedge_defer_guard() {  # <window> <since-file> <triage-label> <idle-age> <guard-
 # The opt-in validating-run consult (wedge_defer_validating) runs after those three,
 # so an endpoint with no agent left in it is still reported once even while its
 # run executes; its crew-state read keeps the same one-per-threshold bound
-# because its deferral restarts the idle timer. The opt-in operator guard
-# consult (wedge_guard_evidence) runs after that, so a dead or missing endpoint is never deferred by a guard, and a home
-# without config/wedge-evidence-guards never reaches it.
+# because its deferral restarts the idle timer. A T3 Code window gets one more
+# consult after that (wedge_defer_t3code_running): its transcript can stay
+# byte-identical through a long tool call, so the server's own session status
+# is read before a still-running turn is reported as a wedge. The opt-in
+# operator guard consult (wedge_guard_evidence) runs after all of these, so a
+# dead or missing endpoint is never deferred by a guard, and a home without
+# config/wedge-evidence-guards never reaches it.
 wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-file> <task> <pane-hash> [dialog-name]
   local win=$1 since_file=$2 label=$3 escalation_file=$4 task=$5 hash=$6 dialog=${7-} since age n prev reason evidence guard guard_note
   local _wkey _wrollback_sentinel _wrb_ts _wrb_cap_reason _wrb_cap_status _wrb_rm_status
@@ -2079,6 +2086,9 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
           return 0
         fi
         if wedge_defer_validating "$win" "$since_file" "$label" "$age" "$task"; then
+          return 0
+        fi
+        if wedge_defer_t3code_running "$win" "$since_file" "$label" "$age"; then
           return 0
         fi
         guard_note=''
@@ -2203,6 +2213,25 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
       fi
       ;;
   esac
+}
+
+# wedge_defer_t3code_running: the T3 Code consult of the wedge ladder. A T3
+# window's capture is the thread's messages plus a session line, so it stays
+# byte-identical through a long tool call where a pane would keep repainting;
+# a still-running session is therefore read from the server itself before the
+# quiet transcript is reported. Only `running` defers: `starting`, a settled
+# session, a stopped or failed one, and an unreadable server all keep the
+# unchanged escalation, so a leftover status can never excuse a dead thread.
+# Returns 0 when it has handled the window, 1 to escalate on the unchanged path.
+wedge_defer_t3code_running() {  # <window> <since-file> <triage-label> <idle-age>
+  local win=$1 since_file=$2 label=$3 age=$4
+  [ "$(window_backend "$win")" = t3code ] || return 1
+  fm_backend_source t3code || return 1
+  [ "$(fm_backend_t3code_probe "$win")" = running ] || return 1
+  clear_write_tracking "$(window_key "$win")"
+  date +%s > "$since_file"
+  triage_log "absorbed $label (T3 session still running, idle ${age}s), timer reset: $win"
+  return 0
 }
 
 # busy_turn_over_age: 0 iff the last completed turn or explicit native-harness
@@ -3065,7 +3094,7 @@ heartbeat_scan_finds_actionable() {
 }
 
 # event_wait_or_sleep: the terminal wait of each supervision cycle. For a home
-# with push-capable windows (herdr, rex), it replaces the blind `sleep POLL` with a
+# with push-capable windows (herdr, rex, t3code), it replaces the blind `sleep POLL` with a
 # bounded wait on the backend's native transition stream, so a crew going
 # `blocked` wakes the supervisor sub-second instead of after the stale-pane
 # wedge timer. For every other home - no push-capable window, backend not
@@ -3086,7 +3115,7 @@ event_wait_or_sleep() {
     # they are excluded from the fast escalation exactly as the stale loop skips
     # them.
     [ "$(window_kind "$w")" = secondmate ] && continue
-    session=${w%%:*}
+    session=$(fm_backend_event_session "$b" "$w")
     if [ -z "$first_backend" ]; then first_backend=$b; first_session=$session; fi
     # One socket connection covers one backend+session; a home normally has a
     # single herdr or rex session. A window in a different backend/session stays on the
@@ -4108,7 +4137,7 @@ EOF
     fi
   fi
 
-  # Terminal wait: a bounded native-event wait for push-capable homes (herdr, rex),
+  # Terminal wait: a bounded native-event wait for push-capable homes (herdr, rex, t3code),
   # else the blind poll sleep. See event_wait_or_sleep.
   event_wait_or_sleep
 done
