@@ -98,7 +98,10 @@
 #                              only on a home that runs the host; exit 2 with one
 #                              line naming a live away record on that home.
 #
-# Supported backends: herdr, tmux. Others (zellij, orca, cmux) have no verified
+# Supported backends: herdr and tmux for `start`; t3code only through
+# `start-native` (T3 hosts no terminal to create, so the daemon runs as the
+# captain's own tracked background job, which means a Codex captain on t3code
+# has no away mode). Others (zellij, orca, cmux) have no verified
 # non-visible-launch primitive here yet and refuse loudly.
 #
 # Test seam: FM_AFK_LAUNCH_ENTRY overrides the command run in the created
@@ -712,6 +715,10 @@ fm_afk_launch_start() {
   captain_backend=$(discover_supervisor_backend) || {
     fm_afk_launch_log "could not resolve the captain supervisor backend (set FM_SUPERVISOR_BACKEND)"
     return 1; }
+  if [ "$captain_backend" = t3code ]; then
+    fm_afk_launch_log "backend t3code hosts no terminal to launch the daemon in; use 'fm-afk-launch.sh start-native' and run bin/fm-afk-start.sh through the harness's tracked background tool"
+    return 1
+  fi
 
   mkdir -p "$FM_AFK_LAUNCH_STATE"
 

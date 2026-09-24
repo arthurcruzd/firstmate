@@ -209,8 +209,9 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # docs/herdr-backend.md and AGENTS.md section 4's
 # harness-verification discipline. Selecting one refuses loudly at startup
 # instead of silently running tmux primitives against a pane that is not a tmux
-# pane.
-FM_SUPERVISOR_SUPPORTED_BACKENDS="tmux herdr"
+# pane. t3code injects through the adapter's thread.turn.start, with the
+# server's own session status as the busy verdict.
+FM_SUPERVISOR_SUPPORTED_BACKENDS="tmux herdr t3code"
 INJECT_SKIP_DEFAULT="heartbeat"
 STALE_ESCALATE_SECS_DEFAULT=240
 ESCALATE_BATCH_SECS_DEFAULT=90
@@ -700,6 +701,10 @@ pane_is_busy() {  # <target> [backend]
   case "$native" in
     busy) return 0 ;;
   esac
+  # t3code's verdict is the T3 server's own session status, trusted for idle
+  # as well as busy (bin/fm-busy-lib.sh), and its capture is a synthetic
+  # transcript rather than a terminal, so the rendered-tail reader never applies.
+  [ "$backend" != t3code ] || return 1
   tail40=$(fm_backend_capture "$backend" "$target" 40 2>/dev/null) || return 1
   printf '%s' "$tail40" | grep -v '^[[:space:]]*$' | tail -12 \
     | fm_busy_lines_match "$harness"
@@ -1786,26 +1791,28 @@ fm_super_main() {
     log "warn: could not record this daemon's process identity; the turn-end guard cannot recognize away-mode supervision"
   fi
 
-  # --- auto-discover the supervisor BACKEND (tmux vs herdr) first -----------
+  # --- auto-discover the supervisor BACKEND (tmux, herdr, or t3code) first --
   # Priority: FM_SUPERVISOR_BACKEND override > $TMUX_PANE (tmux) > $HERDR_ENV=1
-  # (herdr) > tmux fallback. Resolved before the target below, since target
-  # discovery composes a herdr "<session>:<pane-id>" string using the same
-  # $HERDR_PANE_ID/$HERDR_SESSION markers this checks. Exporting the result
-  # into FM_SUPERVISOR_BACKEND makes inject_msg/pane_is_busy/pane_input_pending
-  # (which read that env var) dispatch through the right backend without an
-  # extra global thread-through.
+  # (herdr) > a live T3 thread in this home (t3code) > tmux fallback. Resolved
+  # before the target below, since target discovery composes a herdr
+  # "<session>:<pane-id>" string using the same $HERDR_PANE_ID/$HERDR_SESSION
+  # markers this checks. Exporting the result into FM_SUPERVISOR_BACKEND makes
+  # inject_msg/pane_is_busy/pane_input_pending (which read that env var)
+  # dispatch through the right backend without an extra global thread-through.
   local discovered_backend backend_source
+  discovered_backend=$(discover_supervisor_backend) || true
   backend_source="FM_SUPERVISOR_BACKEND"
   if [ -z "${FM_SUPERVISOR_BACKEND:-}" ]; then
     if [ -n "${TMUX_PANE:-}" ]; then
       backend_source="TMUX_PANE"
     elif [ "${HERDR_ENV:-}" = "1" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
       backend_source="HERDR_ENV"
+    elif [ "$discovered_backend" = t3code ]; then
+      backend_source="T3_THREAD"
     else
       backend_source="FALLBACK($FM_SUPERVISOR_BACKEND_DEFAULT)"
     fi
   fi
-  discovered_backend=$(discover_supervisor_backend) || true
   FM_SUPERVISOR_BACKEND="$discovered_backend"
   local BACKEND="$FM_SUPERVISOR_BACKEND"
 
@@ -1815,7 +1822,7 @@ fm_super_main() {
   # harness-verification discipline). This is the clear refusal the task calls
   # for, instead of a confusing "does not resolve to a tmux pane" error.
   if ! fm_backend_list_contains "$FM_SUPERVISOR_SUPPORTED_BACKENDS" "$BACKEND"; then
-    echo "error: away-mode daemon does not support supervisor backend '$BACKEND' yet (supported: $FM_SUPERVISOR_SUPPORTED_BACKENDS); set FM_SUPERVISOR_BACKEND=tmux|herdr and FM_SUPERVISOR_TARGET to run firstmate's own pane under a supported backend" >&2
+    echo "error: away-mode daemon does not support supervisor backend '$BACKEND' yet (supported: $FM_SUPERVISOR_SUPPORTED_BACKENDS); set FM_SUPERVISOR_BACKEND=tmux|herdr|t3code and FM_SUPERVISOR_TARGET to run firstmate's own pane under a supported backend" >&2
     log "startup failed: unsupported supervisor backend '$BACKEND' (source=$backend_source)"
     fm_lock_release "$LOCK" 2>/dev/null || true
     rm -f "$PIDFILE" 2>/dev/null || true
@@ -1825,24 +1832,26 @@ fm_super_main() {
   # --- auto-discover the supervisor target (the pane running firstmate) -----
   # Priority: FM_SUPERVISOR_TARGET override > $TMUX_PANE (tmux; inherited from
   # the pane that launched the daemon, normally firstmate's own) >
-  # $HERDR_PANE_ID (herdr, composed into "<session>:<pane-id>") > firstmate:0
-  # fallback. Exporting the result into FM_SUPERVISOR_TARGET makes inject_msg
-  # (which reads that env var) use the discovered pane without an extra global.
-  local discovered target_source
+  # $HERDR_PANE_ID (herdr, composed into "<session>:<pane-id>") > the live T3
+  # thread in this home (t3code) > firstmate:0 fallback. Exporting the result
+  # into FM_SUPERVISOR_TARGET makes inject_msg (which reads that env var) use
+  # the discovered pane without an extra global.
+  local discovered target_source resolved=1
+  discovered=$(discover_supervisor_target) || resolved=0
   target_source="FM_SUPERVISOR_TARGET"
   if [ -z "${FM_SUPERVISOR_TARGET:-}" ]; then
     if [ -n "${TMUX_PANE:-}" ]; then
       target_source="TMUX_PANE"
     elif [ "${HERDR_ENV:-}" = "1" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
       target_source="HERDR_ENV(HERDR_PANE_ID)"
+    elif [ "$resolved" = 1 ]; then
+      target_source="T3_THREAD"
     else
       target_source="FALLBACK(firstmate:0)"
     fi
   fi
-  if discovered=$(discover_supervisor_target); then
-    : # resolved cleanly
-  else
-    echo "warn: could not auto-discover supervisor pane (no FM_SUPERVISOR_TARGET, TMUX_PANE, or HERDR_ENV/HERDR_PANE_ID); falling back to '$discovered' — verify this is firstmate's pane" >&2
+  if [ "$resolved" != 1 ]; then
+    echo "warn: could not auto-discover supervisor pane (no FM_SUPERVISOR_TARGET, TMUX_PANE, HERDR_ENV/HERDR_PANE_ID, or single live T3 thread in this home); falling back to '$discovered' - verify this is firstmate's pane" >&2
   fi
   FM_SUPERVISOR_TARGET="$discovered"
   local TARGET="$FM_SUPERVISOR_TARGET"

@@ -51,6 +51,9 @@
 #              endpoint, so this verb cannot tell a destroyed window from one on
 #              a tmux server it cannot address, and it will not claim a stop it
 #              cannot see.
+#              On T3 Code the exit command is the server's own session stop,
+#              since a thread has no composer (bin/fm-control-lib.sh
+#              fm_control_backend_native_exit); the postcondition is unchanged.
 #   relaunch   Transactionally replace the running agent with a new one, in the
 #              SAME worktree - and the same endpoint whenever that endpoint
 #              still exists - on the same or a newly chosen
@@ -76,6 +79,9 @@
 #              worker account pin (bin/fm-worker-account-lib.sh) here, so a pin
 #              that no longer resolves or is signed out refuses before the old
 #              agent stops.
+#              Refused on t3code before anything is stopped: a T3 thread is
+#              bound to its driver and a turn on a stopped thread continues
+#              the same agent (fm_control_backend_relaunch_supported).
 #              --note is required for a ship or scout, whose replacement
 #              inherits the local copy but none of the conversation; a
 #              secondmate reconciles its own home's records at startup, so its
@@ -619,32 +625,39 @@ do_exit() {
       esac
       ;;
   esac
-  cmd=$(fm_control_exit_command "$HARNESS")
-  hazard=$(fm_control_interrupt_hazard_signal "$HARNESS")
-  if [ -n "$hazard" ] && rendered_matches "$hazard"; then
-    die "task $ID shows the $HARNESS revert picker, where typed text becomes a search and Enter reverts file changes; refusing to type the $cmd exit command. Close it with $(fm_control_interrupt_key "$HARNESS"), never Enter, then retry '$VERB'"
+  if fm_control_backend_native_exit "$BACKEND"; then
+    # No composer to type into: the backend's own session stop is the exit
+    # command, and the agent-state wait below stays the only proof of it.
+    fm_backend_agent_stop "$BACKEND" "$T" \
+      || die "the $BACKEND session stop could not be sent for task $ID"
+  else
+    cmd=$(fm_control_exit_command "$HARNESS")
+    hazard=$(fm_control_interrupt_hazard_signal "$HARNESS")
+    if [ -n "$hazard" ] && rendered_matches "$hazard"; then
+      die "task $ID shows the $HARNESS revert picker, where typed text becomes a search and Enter reverts file changes; refusing to type the $cmd exit command. Close it with $(fm_control_interrupt_key "$HARNESS"), never Enter, then retry '$VERB'"
+    fi
+    composer_state=$(fm_backend_composer_state "$BACKEND" "$T" "$LABEL" 2>/dev/null) \
+      || composer_state=unknown
+    case "$composer_state" in
+      empty) ;;
+      pending)
+        die "task $ID's composer visibly holds pending text; refusing to type the $cmd exit command because it would concatenate onto that text. Clear or submit the pending text, then retry '$VERB'"
+        ;;
+      *)
+        die "task $ID's composer state is '$composer_state', not proven empty; refusing to type the $cmd exit command because it could concatenate onto existing text. Clear the composer, then retry '$VERB'"
+        ;;
+    esac
+    # The submit verdict is NOT the postcondition here: a successful exit command
+    # destroys the composer the verdict is read from, so a post-exit read can
+    # legitimately report anything. Only a hard transport failure aborts; the
+    # authoritative proof is the agent-state wait below. The retried Enter still
+    # matters, because a slash command opens a completion popup on some TUIs that
+    # swallows the first Enter.
+    verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
+      || die "the exit command could not be sent to task $ID on $BACKEND"
+    [ "$verdict" != send-failed ] \
+      || die "the exit command could not be sent to task $ID on $BACKEND"
   fi
-  composer_state=$(fm_backend_composer_state "$BACKEND" "$T" "$LABEL" 2>/dev/null) \
-    || composer_state=unknown
-  case "$composer_state" in
-    empty) ;;
-    pending)
-      die "task $ID's composer visibly holds pending text; refusing to type the $cmd exit command because it would concatenate onto that text. Clear or submit the pending text, then retry '$VERB'"
-      ;;
-    *)
-      die "task $ID's composer state is '$composer_state', not proven empty; refusing to type the $cmd exit command because it could concatenate onto existing text. Clear the composer, then retry '$VERB'"
-      ;;
-  esac
-  # The submit verdict is NOT the postcondition here: a successful exit command
-  # destroys the composer the verdict is read from, so a post-exit read can
-  # legitimately report anything. Only a hard transport failure aborts; the
-  # authoritative proof is the agent-state wait below. The retried Enter still
-  # matters, because a slash command opens a completion popup on some TUIs that
-  # swallows the first Enter.
-  verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
-    || die "the exit command could not be sent to task $ID on $BACKEND"
-  [ "$verdict" != send-failed ] \
-    || die "the exit command could not be sent to task $ID on $BACKEND"
   state=$(wait_agent_state "$EXIT_WAIT" dead) || {
     die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
   }
@@ -964,6 +977,8 @@ do_relaunch() {
   local -a spawn_args
 
   require_state_verified_backend relaunch
+  fm_control_backend_relaunch_supported "$BACKEND" \
+    || die "task $ID runs on the $BACKEND backend, where a thread is bound to its driver and a new turn continues the same agent, so no replacement can be launched into its endpoint; 'exit' stops it, and a fresh task needs a teardown and a new dispatch"
   resolve_relaunch_profile
 
   case "$KIND" in
