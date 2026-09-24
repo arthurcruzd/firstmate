@@ -42,6 +42,7 @@ Hold-for-return is the default and the only reach profile this release records: 
      Do not wrap it in `nohup ... &` (Codex/herdr can reap fire-and-forget shell children after a tool call returns).
    - **Every other harness** (codex, opencode, omp, and cursor on a home that does not run the supervision host, and kimi): run `bin/fm-afk-launch.sh start`.
      It is the single owner of the daemon terminal: it creates a NON-VISIBLE tracked terminal for the current backend and passes the captain pane in as `FM_SUPERVISOR_TARGET` so the daemon injects into the captain, not its own new pane (docs/herdr-backend.md "Away-mode supervisor support").
+     On the t3code backend there is no terminal to create, so `start` refuses and only the native path above works; a Codex captain hosted by T3 Code has no away daemon (docs/t3code-backend.md "Active limits").
    Both daemon paths require the record `enter` wrote and share `bin/fm-afk-start.sh` as the daemon entry.
    The daemon is **presence-gated**: it injects escalations only while `state/.afk` exists, and stays quiet otherwise.
 3. **Announce, then read back after entry.**
@@ -232,20 +233,12 @@ The single-line format makes submission unambiguous across harnesses; the carrie
   (`fm-wake-lib.sh`) instead of `flock`, which is absent on macOS.
 - **Dedupe across signal/stale/scan** - all three paths use the shared status presentation markers defined by `bin/fm-classify-lib.sh`, so a successfully classified span is not re-escalated by another path in the same digest.
   Never treat a reported unreadable state as classified; the shared library header owns that marker contract, and the marker does not clear or suppress possible-wedge aging for a nonterminal progress line.
-- **Auto-discovered supervisor pane** - the daemon resolves its own BACKEND
-  (tmux vs herdr) and TARGET independently, mirroring
-  `bin/fm-backend.sh`'s own runtime auto-detection. Backend: `FM_SUPERVISOR_BACKEND`
-  override, then `$TMUX_PANE` set (tmux), then `$HERDR_ENV=1` with
-  `$HERDR_PANE_ID` present (herdr), then a tmux fallback. Target:
-  `FM_SUPERVISOR_TARGET` override (a tmux target or a herdr
-  `"<session>:<pane-id>"` target), then `$TMUX_PANE`, then
-  `"${HERDR_SESSION:-default}:${HERDR_PANE_ID}"` under herdr, then a
-  `firstmate:0` fallback with a warning. Both resolution sources are logged at
-  startup so a wrong-but-resolving fallback is detectable. Other runtime
-  backends, including zellij, orca, and cmux, are not yet supported as
-  supervisor backends; the daemon refuses loudly at startup instead of
-  misapplying tmux primitives to a pane that isn't one
-  (docs/herdr-backend.md "Away-mode supervisor support").
+- **Auto-discovered supervisor pane** - the daemon resolves its own BACKEND (tmux, herdr, or t3code) and TARGET independently, mirroring `bin/fm-backend.sh`'s own runtime auto-detection.
+  Backend: `FM_SUPERVISOR_BACKEND` override, then `$TMUX_PANE` set (tmux), then `$HERDR_ENV=1` with `$HERDR_PANE_ID` present (herdr), then exactly one live T3 thread running in this home (t3code), then a tmux fallback.
+  Target: `FM_SUPERVISOR_TARGET` override (a tmux target, a herdr `"<session>:<pane-id>"` target, or a T3 thread id), then `$TMUX_PANE`, then `"${HERDR_SESSION:-default}:${HERDR_PANE_ID}"` under herdr, then that T3 thread id, then a `firstmate:0` fallback with a warning.
+  T3 puts nothing into the agent's environment, so the t3code rule is a cwd match over the T3 shell snapshot (`bin/backends/t3code.sh` `fm_backend_t3code_thread_for_home`), consulted only when a T3 origin and bearer are configured; two live threads in one home is an error that names both ids and asks for `FM_SUPERVISOR_TARGET`.
+  Both resolution sources are logged at startup so a wrong-but-resolving fallback is detectable.
+  Other runtime backends, including zellij, orca, and cmux, are not yet supported as supervisor backends; the daemon refuses loudly at startup instead of misapplying tmux primitives to a pane that isn't one (docs/herdr-backend.md "Away-mode supervisor support").
 
 ### Stale-artifact lifecycle
 
