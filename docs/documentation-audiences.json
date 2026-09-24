@@ -33,6 +33,7 @@
     "docs/cmux-backend.md",
     "docs/paseo-backend.md",
     "docs/rex-backend.md",
+    "docs/t3code-backend.md",
     "docs/remote-secondmates.md"
   ],
   "requiredOwnerPointers": [
@@ -98,6 +99,10 @@
     },
     {
       "source": "docs/cmux-backend.md",
+      "target": "docs/verification/runtime-backends.md"
+    },
+    {
+      "source": "docs/t3code-backend.md",
       "target": "docs/verification/runtime-backends.md"
     },
     {
@@ -485,6 +490,10 @@
     {
       "path": "docs/supervision-host.md",
       "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/t3code-backend.md",
+      "audience": "operator-current"
     },
     {
       "path": "docs/tmux-backend.md",

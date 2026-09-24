@@ -174,8 +174,12 @@ The worktree and the task's records are unaffected either way.
   Muse is a crewmate and scout adapter only, so relaunching a secondmate onto it refuses while its agent is still up rather than leaving that secondmate with no agent when the launch owner refuses.
 - A backend that cannot deliver the harness's interrupt key, or the composer clear that key needs, is refused rather than sent a different key.
   Orca's terminal API exposes only an interrupt and an Enter, so it can deliver neither Escape nor Ctrl+U.
-- `exit` and `relaunch` require a backend with a recovery-grade agent-state classifier - tmux, herdr, and rex - because without one the "the agent stopped" postcondition cannot be proven.
+  T3 Code has no composer, so Escape and Ctrl+C are both a turn interrupt and Ctrl+U is refused.
+- `exit` and `relaunch` require a backend with a recovery-grade agent-state classifier - tmux, herdr, rex, and t3code - because without one the "the agent stopped" postcondition cannot be proven.
   zellij, orca, cmux, and paseo are refused rather than reported as successful blind.
+- On t3code, `exit` is the server's own session stop rather than a typed command, because a T3 thread has no composer; the agent-state wait is still the proof.
+- `relaunch` additionally requires a backend that can host a replacement agent - tmux and herdr.
+  t3code is refused before anything is stopped: a T3 thread is bound to the driver that first ran it, and a turn on a stopped thread continues the same agent rather than launching a new one.
 - An ambiguous or unreadable endpoint state refuses.
   Only a positively classified state acts; a Rex `unreadable` acts only once the absence proof above settles it.
 - `exit`'s composer-empty check, above, is itself a fail-closed boundary that `relaunch` inherits by stopping the old agent through `exit`.
@@ -187,15 +191,16 @@ The worktree and the task's records are unaffected either way.
 
 Backend capability comes from each adapter's real surface, not from a policy choice.
 
-| Backend | Escape | Enter | Ctrl+C | Ctrl+U | Recovery-grade agent state |
-| --- | --- | --- | --- | --- | --- |
-| tmux | yes | yes | yes | yes | yes |
-| herdr | yes | yes | yes | yes | yes |
-| zellij | yes | yes | yes | yes | no |
-| cmux | yes | yes | yes | yes | no |
-| orca | no | yes | yes | no | no |
-| paseo | yes | yes | yes | yes | no |
-| rex | yes | yes | yes | yes | yes |
+| Backend | Escape | Enter | Ctrl+C | Ctrl+U | Recovery-grade agent state | Replacement agent |
+| --- | --- | --- | --- | --- | --- | --- |
+| tmux | yes | yes | yes | yes | yes | yes |
+| herdr | yes | yes | yes | yes | yes | yes |
+| zellij | yes | yes | yes | yes | no | no |
+| cmux | yes | yes | yes | yes | no | no |
+| orca | no | yes | yes | no | no | no |
+| paseo | yes | yes | yes | yes | no | no |
+| rex | yes | yes | yes | yes | yes | yes |
+| t3code | yes | yes | yes | no | yes | no |
 
 Per-harness interrupt keys, repeat counts, composer clears, exit commands, and supported task kinds live in `bin/fm-control-lib.sh` and are exercised for every verified harness by `tests/fm-control.test.sh`, with adapters outside its lane pinning their control mechanics in their own harness suites.
 The empirical basis for each adapter's value is the `harness-adapters` skill's verification record for that adapter.
@@ -206,3 +211,4 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 - `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, checkpoint refusals, rollback after a failed launch, and the endpoint-absence proof both verbs share - the Herdr reclaim of a destroyed endpoint, and tmux refusing one it cannot prove absent.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
 - `tests/fm-backend-rex.test.sh` and `tests/fm-backend-rex-smoke.test.sh` - the Rex classifier and absence proof against a stateful fake CLI and a private test server; [`docs/verification/runtime-backends.md`](verification/runtime-backends.md#rex) records the live `interrupt`, `exit`, endpoint-gone, and reclaim runs.
+- `tests/fm-backend-t3code.test.sh` - the t3code native exit and the relaunch refusal against a fake T3 server.
