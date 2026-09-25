@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm-supervisor-target-lib.sh - the single owner of supervisor-pane discovery.
+# fm-supervisor-target-lib.sh - the single owner of supervisor-endpoint discovery.
 #
 # The away-mode daemon (bin/fm-supervise-daemon.sh) must know which pane (or,
 # on t3code, which T3 thread) runs firstmate itself, both to inject escalations
@@ -14,17 +14,17 @@
 # in bin/fm-supervise-daemon.sh, so its unit tests (tests/fm-daemon.test.sh)
 # keep exercising the same names after the daemon sources this file.
 
-# Default supervisor pane target/backend when nothing is configured or detected.
+# Default supervisor endpoint target/backend when nothing is configured or detected.
 # "firstmate:0" is a tmux session:window name, so the bare fallback (nothing
 # configured, nothing detected) assumes tmux - matching the daemon's pre-herdr
 # behavior byte-for-byte when run outside both tmux and herdr.
 FM_SUPERVISOR_TARGET_DEFAULT="firstmate:0"
 FM_SUPERVISOR_BACKEND_DEFAULT="tmux"
 
-# discover_supervisor_target: resolve the pane running firstmate. Priority:
-#   1. FM_SUPERVISOR_TARGET env (explicit override) - may be a tmux target or a
-#      herdr "<session>:<pane-id>" target (paired with discover_supervisor_backend
-#      to know which).
+# discover_supervisor_target: resolve the endpoint running firstmate. Priority:
+#   1. FM_SUPERVISOR_TARGET env (explicit override) - may be a tmux target, a
+#      herdr "<session>:<pane-id>" target, or a T3 thread id (paired with
+#      discover_supervisor_backend to know which).
 #   2. $TMUX_PANE - tmux sets this in every pane's environment; inherited by a
 #      process launched from firstmate's own pane.
 #   3. $HERDR_ENV=1 + $HERDR_PANE_ID - herdr injects both into every process it
@@ -76,9 +76,9 @@ discover_supervisor_t3code_thread() {
   fm_backend_t3code_thread_for_home "${FM_HOME:-.}"
 }
 
-# discover_supervisor_backend: resolve the supervisor pane's BACKEND, independent
+# discover_supervisor_backend: resolve the supervisor endpoint's BACKEND, independent
 # of the target string so an explicit FM_SUPERVISOR_TARGET override still knows
-# which primitives (tmux vs herdr) to dispatch through. Priority mirrors
+# which primitives (tmux, herdr, or t3code) to dispatch through. Priority mirrors
 # discover_supervisor_target and bin/fm-backend.sh's fm_backend_detect:
 #   1. FM_SUPERVISOR_BACKEND env (explicit override).
 #   2. $TMUX_PANE set - tmux.

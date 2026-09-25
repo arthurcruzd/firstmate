@@ -23,6 +23,8 @@
 # Primary config/claude-permission-mode is a captain-wide safety preference
 # (bypass or auto for every claude launch), so it flows down too and a
 # secondmate's own claude crewmates launch on the same permission posture.
+# T3 Code always runs full-access and refuses `auto` instead of silently
+# widening it (docs/t3code-backend.md "Active limits").
 # Primary config/keep-ai-trailers is a home-wide commit-attribution choice, so
 # a secondmate's own crewmates keep AI co-author trailers too.
 # Primary config/supervision-host-off is the fleet's supervision-host opt-out,

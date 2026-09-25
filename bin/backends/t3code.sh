@@ -11,7 +11,8 @@
 #
 # T3 sets environment variables per provider instance, never per thread, so
 # every fact firstmate would type into a pane before launch (GOTMPDIR,
-# FM_TASK_ID, TRACEPARENT, and a secondmate's FM_* launch prefix) travels
+# COMPACT_ADVISER_DISABLE, optional LAVISH_AXI_HOST, FM_TASK_ID, TRACEPARENT,
+# and a secondmate's FM_* launch prefix) travels
 # instead as per-directory harness config that bin/fm-spawn.sh writes into the
 # launch directory before the first turn: `.claude/settings.local.json` `env`
 # for Claude, `.codex/config.toml` `[shell_environment_policy] set` for Codex.

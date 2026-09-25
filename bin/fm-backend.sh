@@ -27,6 +27,9 @@
 # marker) with no explicit backend setting - unlike Orca, which stays
 # never-auto-detected because it also owns the task worktree; see
 # docs/cmux-backend.md for its empirical basis.
+# The experimental T3 Code adapter owns agent sessions over HTTP while
+# Treehouse owns task worktrees. It can be selected explicitly or detected
+# from a configured T3 shell snapshot with one live thread in this home.
 # Codex App is intentionally not in the known set yet.
 # docs/codex-app-backend.md owns that blocked backend contract.
 #
@@ -34,7 +37,7 @@
 # treats that as `tmux` (fm_backend_of_meta), and fm-spawn.sh does not write
 # `backend=tmux` for a default-backend task, so existing and newly spawned
 # default-path metas stay byte-identical. Only a task spawned on a non-tmux
-# spawn-capable backend, currently herdr, zellij, orca, or cmux, carries an
+# spawn-capable backend, currently herdr, zellij, orca, cmux, or t3code, carries an
 # explicit `backend=` line.
 #
 # Event-source framing (herdr-addendum "Events as the core abstraction"): a
@@ -250,10 +253,10 @@ fm_backend_detect_cmux_app_is_ancestor() {
 # per-task `--backend` flag is parsed by the caller (fm-spawn.sh) and takes
 # precedence over this resolution entirely; it is not read here. Auto-detect
 # fires only when nothing was explicitly configured, so an explicit setting
-# always wins. Auto-detected herdr stays silent like tmux. Selecting cmux via
-# auto-detect prints one loud stderr notice because cmux remains experimental;
-# the notice names the winning signal, so a fallback-detected cmux (bundle id or
-# ancestry, after the claude wrapper stripped CMUX_WORKSPACE_ID) is visibly
+# always wins. Auto-detected herdr stays silent like tmux. Auto-detected cmux
+# and t3code print a loud stderr notice because both remain experimental. The
+# cmux notice names the winning signal, so a fallback-detected cmux (bundle id
+# or ancestry, after the claude wrapper stripped CMUX_WORKSPACE_ID) is visibly
 # distinct from the primary-marker case.
 fm_backend_name() {
   local line v detected marker

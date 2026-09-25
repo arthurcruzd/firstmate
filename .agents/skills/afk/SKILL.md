@@ -41,7 +41,7 @@ Hold-for-return is the default and the only reach profile this release records: 
      If the native launch fails, run `bin/fm-afk-launch.sh stop` to roll back the prepared lifecycle.
      Do not wrap it in `nohup ... &` (Codex/herdr can reap fire-and-forget shell children after a tool call returns).
    - **Every other harness** (codex, opencode, omp, and cursor on a home that does not run the supervision host, and kimi): run `bin/fm-afk-launch.sh start`.
-     It is the single owner of the daemon terminal: it creates a NON-VISIBLE tracked terminal for the current backend and passes the captain pane in as `FM_SUPERVISOR_TARGET` so the daemon injects into the captain, not its own new pane (docs/herdr-backend.md "Away-mode supervisor support").
+     It is the single owner of the daemon terminal: it creates a NON-VISIBLE tracked terminal on pane backends and passes the captain endpoint in as `FM_SUPERVISOR_TARGET` so the daemon injects into the captain, not its own new pane (docs/herdr-backend.md "Away-mode supervisor support").
      On the t3code backend there is no terminal to create, so `start` refuses and only the native path above works; a Codex captain hosted by T3 Code has no away daemon (docs/t3code-backend.md "Active limits").
    Both daemon paths require the record `enter` wrote and share `bin/fm-afk-start.sh` as the daemon entry.
    The daemon is **presence-gated**: it injects escalations only while `state/.afk` exists, and stays quiet otherwise.
@@ -104,7 +104,7 @@ Destructive, irreversible, and security-sensitive actions are never pre-authoriz
 
 ## The daemon, where it still runs
 
-On the harnesses that still launch the daemon (every verified harness except Pi and pi-signed, and except away mode on a home that runs the supervision host), the mechanics below are unchanged.
+On the harnesses that still launch the daemon (every verified harness except Pi and pi-signed, and except away mode on a home that runs the supervision host), the mechanics below are unchanged, subject to the T3 Code limits above.
 
 ### Operational prefix contract
 
@@ -118,9 +118,8 @@ For other harnesses, the operational prefix travels with the message text; neith
 
 ### Busy-guard and composer guard
 
-The daemon never injects into an in-use pane. Two checks run before every
-injection, dispatched through `bin/fm-backend.sh` for the supervisor's own
-backend (tmux or herdr; see "Auto-discovered supervisor pane" below):
+For tmux and Herdr, the daemon never injects into an in-use pane.
+Two checks run before every pane injection through `bin/fm-backend.sh`; T3 Code has no composer and uses the native status and turn transport owned by [`docs/t3code-backend.md`](../../../docs/t3code-backend.md#away-mode).
 
 - **Primary-pane busy guard** - `pane_is_busy` trusts Herdr native `busy` when available, otherwise matches rendered output against only the detected primary harness's signature.
   This narrow delivery guard never classifies a recorded worker task and never uses a global union of vendor patterns.
@@ -201,9 +200,10 @@ The single-line format makes submission unambiguous across harnesses; the carrie
 - **Single-line digest** - embedded newlines are collapsed to a literal
   separator before injection, so submission is unambiguous regardless of
   harness.
-- **Busy and composer guards on the supervisor pane** - before injecting, the daemon runs the detected-primary-harness rendered busy guard and reads `fm_backend_composer_state` directly.
-  Only `empty` permits injection; `pending` protects half-typed or swallowed input, and `unknown` protects unreadable panes and bare dead-shell prompts.
-  Every other result preserves the buffer for retry, so the daemon never merges its digest into the captain's half-typed line or types it into a shell.
+- **Busy and composer guards on the supervisor endpoint** - before injecting, the daemon runs the backend's busy guard and reads `fm_backend_composer_state` directly.
+  On pane backends, only `empty` permits injection; `pending` protects half-typed or swallowed input, and `unknown` protects unreadable panes and bare dead-shell prompts.
+  T3 Code has no composer, so its adapter supplies the native busy verdict, reports the composer guard empty, and starts one turn as described in [`docs/t3code-backend.md`](../../../docs/t3code-backend.md#away-mode).
+  Every other pane verdict preserves the buffer for retry, so the daemon never merges its digest into the captain's half-typed line or types it into a shell.
 - The active backend passes its capture plus declarative styled, cursor, identity, and row capabilities to the shared screen classifier; all structural recognition and verdict logic remains in `bin/fm-composer-lib.sh`.
   Styled captures let that owner remove dim/faint and dark-TRUECOLOR ghost or placeholder text while shape detection uses the ANSI-stripped screen, so a dark border is not lost with ghost content.
   A ghost-only or idle bordered composer such as claude's `│ > ... │` therefore reads empty without allowing an unbordered shell prompt to do the same.
@@ -233,11 +233,7 @@ The single-line format makes submission unambiguous across harnesses; the carrie
   (`fm-wake-lib.sh`) instead of `flock`, which is absent on macOS.
 - **Dedupe across signal/stale/scan** - all three paths use the shared status presentation markers defined by `bin/fm-classify-lib.sh`, so a successfully classified span is not re-escalated by another path in the same digest.
   Never treat a reported unreadable state as classified; the shared library header owns that marker contract, and the marker does not clear or suppress possible-wedge aging for a nonterminal progress line.
-- **Auto-discovered supervisor pane** - the daemon resolves its own BACKEND (tmux, herdr, or t3code) and TARGET independently, mirroring `bin/fm-backend.sh`'s own runtime auto-detection.
-  Backend: `FM_SUPERVISOR_BACKEND` override, then `$TMUX_PANE` set (tmux), then `$HERDR_ENV=1` with `$HERDR_PANE_ID` present (herdr), then exactly one live T3 thread running in this home (t3code), then a tmux fallback.
-  Target: `FM_SUPERVISOR_TARGET` override (a tmux target, a herdr `"<session>:<pane-id>"` target, or a T3 thread id), then `$TMUX_PANE`, then `"${HERDR_SESSION:-default}:${HERDR_PANE_ID}"` under herdr, then that T3 thread id, then a `firstmate:0` fallback with a warning.
-  T3 puts nothing into the agent's environment, so the t3code rule is a cwd match over the T3 shell snapshot (`bin/backends/t3code.sh` `fm_backend_t3code_thread_for_home`), consulted only when a T3 origin and bearer are configured; two live threads in one home is an error that names both ids and asks for `FM_SUPERVISOR_TARGET`.
-  Both resolution sources are logged at startup so a wrong-but-resolving fallback is detectable.
+- **Auto-discovered supervisor endpoint** - the daemon resolves its own backend and target independently from the task-spawn backend, then logs both sources; [`docs/configuration.md`](../../../docs/configuration.md#away-mode-supervisor-backend-fm_supervisor_backend--fm_supervisor_target) owns the precedence and [`docs/t3code-backend.md`](../../../docs/t3code-backend.md#away-mode) owns T3 discovery.
   Other runtime backends, including zellij, orca, and cmux, are not yet supported as supervisor backends; the daemon refuses loudly at startup instead of misapplying tmux primitives to a pane that isn't one (docs/herdr-backend.md "Away-mode supervisor support").
 
 ### Stale-artifact lifecycle
@@ -245,7 +241,7 @@ The single-line format makes submission unambiguous across harnesses; the carrie
 Treat `state/.subsuper-escalations`, its `.since` sidecar, `state/.subsuper-inject-wedged`, and `state/.subsuper-unknown-acked` as session-scoped delivery artifacts, not as the durable work record.
 Always enter through `bin/fm-afk-launch.sh`, which clears prior-session artifacts only for a fresh entry and preserves the current session's buffer on refresh.
 Always exit through `bin/fm-afk-launch.sh stop`, which keeps `state/.afk` present through the daemon's shutdown flush, clears it, and archives the posture record last.
-`docs/herdr-backend.md` "Away-mode supervisor support" owns the current mechanism, and `docs/verification/runtime-backends.md` "Away-mode transport" owns active evidence.
+`docs/herdr-backend.md` "Away-mode supervisor support" and `docs/t3code-backend.md` "Away mode" own the backend mechanisms, and `docs/verification/runtime-backends.md` "Away-mode transport" owns active evidence.
 
 ### Reliability properties
 
