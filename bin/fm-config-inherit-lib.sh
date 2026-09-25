@@ -27,6 +27,8 @@
 # Secondmate; see docs/trace-context.md.
 # Primary approval-mode settings follow the same inheritance rules as other
 # declared configuration.
+# T3 Code always runs full-access and refuses `auto` instead of silently
+# widening it (docs/t3code-backend.md "Active limits").
 # Primary config/keep-ai-trailers is a home-wide commit-attribution choice, so
 # a secondmate's own crewmates keep AI co-author trailers too.
 # Primary config/supervision-host-off is the fleet's supervision-host opt-out,

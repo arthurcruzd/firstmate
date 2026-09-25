@@ -433,6 +433,9 @@ fm_control_absence_recheck_applies() {  # <backend> <raw-state>
 #     (rex_server, from the task's [meta]); the recheck refuses unless the
 #     server this process reaches - starting a stopped personal server, which
 #     then answers with authority - is that one.
+#   t3code CAN prove it for exit. `missing` means archived or HTTP 404, while
+#     an unreachable server reads `unreadable`; the proof re-reads the thread.
+#     Relaunch still refuses because the thread cannot host a replacement.
 #   tmux CANNOT. `list-windows -a` describes only the server the CURRENT
 #     process addresses (its TMUX_TMPDIR/socket), and a task's record does not
 #     carry the endpoint's socket identity - so a different but running server

@@ -36,6 +36,10 @@
 # rex`/`FM_BACKEND=rex`/config/backend, and behind runtime auto-detection when
 # firstmate itself runs directly inside a Rex block (TERM_PROGRAM=rex with
 # REX_BLOCK); see docs/rex-backend.md.
+# marker is not a selection; see docs/paseo-backend.md.
+# The experimental T3 Code adapter owns agent sessions over HTTP while
+# Treehouse owns task worktrees. It can be selected explicitly or detected
+# from a configured T3 shell snapshot with one live thread in this home.
 # Codex App is intentionally not in the known set yet.
 # docs/codex-app-backend.md owns that blocked backend contract.
 #
@@ -43,8 +47,8 @@
 # treats that as `tmux` (fm_backend_of_meta), and fm-spawn.sh does not write
 # `backend=tmux` for a default-backend task, so existing and newly spawned
 # default-path metas stay byte-identical. Only a task spawned on a non-tmux
-# spawn-capable backend, currently herdr, zellij, orca, cmux, paseo, or rex, carries
-# an explicit `backend=` line.
+# spawn-capable backend, currently herdr, zellij, orca, cmux, paseo, rex, or
+# t3code, carries an explicit `backend=` line.
 #
 # Event-source framing (herdr-addendum "Events as the core abstraction"): a
 # backend's supervision surface is conceptually an EVENT SOURCE - it produces
@@ -282,12 +286,13 @@ fm_backend_detect_cmux_app_is_ancestor() {
 # per-task `--backend` flag is parsed by the caller (fm-spawn.sh) and takes
 # precedence over this resolution entirely; it is not read here. Auto-detect
 # fires only when nothing was explicitly configured, so an explicit setting
-# always wins. Auto-detected herdr and rex stay silent like tmux. Selecting cmux via
-# auto-detect prints one loud stderr notice because cmux remains experimental;
-# the notice names the winning signal, so a fallback-detected cmux (bundle id or
-# ancestry, after the claude wrapper stripped CMUX_WORKSPACE_ID) is visibly
-# distinct from the primary-marker case. Paseo is never auto-detected, so it
-# only ever comes out of this function from FM_BACKEND or config/backend.
+# always wins. Auto-detected herdr and rex stay silent like tmux. Auto-detected
+# cmux and t3code print a loud stderr notice because both remain experimental.
+# The cmux notice names the winning signal, so a fallback-detected cmux (bundle
+# id or ancestry, after the claude wrapper stripped CMUX_WORKSPACE_ID) is
+# visibly distinct from the primary-marker case.
+# Paseo is never auto-detected, so it only ever comes out of this function
+# from FM_BACKEND or config/backend.
 fm_backend_name() {
   local line v detected marker
   if [ -n "${FM_BACKEND:-}" ]; then

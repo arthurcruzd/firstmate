@@ -31,7 +31,7 @@ Mint a session with the version the descriptor reports:
 npx t3@<serverVersion> auth session issue --json --ttl 30d --label firstmate
 ```
 
-Write the JSON `token` field to `config/t3code-token` as one line with mode 0600.
+Write the JSON `token` field to the local, gitignored `config/t3code-token` as one line with mode 0600.
 The session carries the `orchestration:read` and `orchestration:operate` scopes, and desktop restarts do not revoke it.
 A missing token or a 401 refuses with one error that names this mint command with the live server version.
 A secondmate spawned on this backend gets `config/t3code-token` as a symlink to the primary's token file, so its own daemon and crew use the same bearer without a copy of the secret, and a re-minted token reaches them.
@@ -104,6 +104,7 @@ A remote secondmate is unaffected by this backend: it always runs on the remote 
 
 Cleanup keeps all shared Firstmate safety checks.
 Before the slot returns to the pool, or before a secondmate home is removed, teardown stops the session and archives the thread (`thread.session.stop`, then `thread.archive`), because a live thread whose worktree path disappears re-creates that worktree on its next turn.
+If spawn aborts after creating the thread, cleanup uses the same order and keeps the lease when stop or archive fails, then prints the manual archive and `treehouse return --force` steps.
 The kill is idempotent, so an already archived or deleted thread is the end state, and an unreachable server refuses the teardown rather than returning a slot a live thread still points at.
 Archiving keeps the transcript visible in T3 Code.
 The `fm-` project of a torn-down secondmate home stays in T3 Code pointing at the removed directory until the operator deletes it there: `project.delete` refuses while the archived thread exists, and forcing it would delete that thread's transcript, which is the only record once the home is gone.
@@ -170,6 +171,7 @@ The live guard below refreshes version and protocol evidence after an upgrade.
 
 - T3 Code remains experimental and runs only `claude` and `codex`.
 - T3 starts the agent at `full-access` with its provider instance's account and environment, so a spawn refuses `config/claude-permission-mode=auto` for `claude`, `config/launch-env-allowlist`, and a worker account pin; select the account through `config/t3code-instances` instead.
+- T3 owns the Claude provider command, so Firstmate cannot add its command-line prompt-suggestion, feedback-draft, or attribution controls; configure equivalent provider-instance settings in T3 when those policies are required.
 - `fm-control.sh relaunch` is refused because a thread is bound to its existing driver.
 - A tracked `.codex/config.toml` that already defines `[shell_environment_policy]` is refused by file and table name before a slot is leased.
 - While a tracked Codex overlay is installed, do not edit that file or clear its `skip-worktree` flag; configuration changes require cleanup first.

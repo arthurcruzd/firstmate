@@ -42,10 +42,12 @@
 #              plane's per-backend absence
 #              proof (fm_control_endpoint_absence_verdict) before anything is
 #              claimed about it, because `missing` also covers an endpoint that
-#              is merely unreachable from this seat. That proof exists only on
-#              HERDR, whose reads are scoped to the session the record names,
-#              and REX, whose never-reused ids answer a structured not-found
-#              from the server the record names: proven gone reports `endpoint-gone` rather than
+#              is merely unreachable from this seat. Herdr proves absence by
+#              reading the session the record names; REX proves it because its
+#              never-reused ids answer a structured not-found from the server
+#              the record names; T3 Code proves it by re-reading a thread whose
+#              missing result means archived or 404.
+#              proven gone reports `endpoint-gone` rather than
 #              `already-stopped`, because the endpoint this verb normally
 #              preserves did not survive; a pane that turns out to be there and
 #              idle is the ordinary `already-stopped`; one whose agent is back
@@ -53,7 +55,7 @@
 #              always REFUSES: a task record carries no socket identity for its
 #              endpoint, so this verb cannot tell a destroyed window from one on
 #              a tmux server it cannot address, and it will not claim a stop it
-#              cannot see.
+#              cannot see. A missing T3 thread reports `endpoint-gone`.
 #              On T3 Code the exit command is the server's own session stop,
 #              since a thread has no composer (bin/fm-control-lib.sh
 #              fm_control_backend_native_exit); the postcondition is unchanged.
@@ -108,8 +110,8 @@
 #
 # `resume` is not a verb: it is not deterministic across the verified adapters
 # (bin/fm-control-lib.sh's header owns that reasoning). `relaunch` covers the
-# same need for every adapter because the brief on disk, not a harness-private
-# session, is the durable instruction.
+# same need where the backend can host a replacement because the brief on disk,
+# not a harness-private session, is the durable instruction.
 #
 # Targeting is EXACT: only a bare task id with a state/<id>.meta record in
 # THIS home is accepted, and the record must pass the shared endpoint-identity
@@ -127,8 +129,9 @@
 #   - A backend that cannot deliver the harness's interrupt key is refused
 #     (Orca's terminal API has no Escape).
 #   - `exit` and `relaunch` require a backend with a recovery-grade agent-state
-#     classifier (tmux, herdr, rex), because without one the "the agent stopped"
-#     postcondition cannot be proven. zellij, orca, cmux, and paseo are refused
+#     classifier (tmux, herdr, rex, or t3code), because without one the "the
+#     agent stopped" postcondition cannot be proven. Relaunch also requires
+#     replacement support, which t3code lacks. zellij, orca, cmux, and paseo are refused
 #     rather than reported as successful blind.
 #   - An ambiguous or unreadable endpoint state refuses; only a positively
 #     classified state acts (a Rex `unreadable` first goes through the absence

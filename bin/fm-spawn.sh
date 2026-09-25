@@ -74,9 +74,11 @@
 #   positional, and batch pairs are all refused alongside it; only harness,
 #   model, and effort may change, which is what makes a harness switch one
 #   ordinary relaunch. It refuses unless the recorded endpoint is positively
-#   agent-free on a backend with a recovery-grade agent-state classifier (tmux
-#   or herdr), and clears the previous harness's per-task wiring before arming
-#   the new incarnation. Two verdicts are agent-free: a `dead` endpoint is
+#   agent-free on a backend with both a recovery-grade agent-state classifier
+#   and replacement-agent support (tmux or herdr), and clears the previous
+#   harness's per-task wiring before arming the new incarnation. T3 Code has
+#   the classifier but refuses relaunch because a thread stays bound to its
+#   original driver. Two verdicts are agent-free: a `dead` endpoint is
 #   ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
@@ -111,21 +113,23 @@
 #   exact task only (docs/configuration.md "Runtime backend" owns when that flag
 #   is authorized). Without it, the script resolves FM_BACKEND, then
 #   config/backend, then runtime auto-detection from the runtime firstmate's
-#   environment: $TMUX, HERDR_ENV=1, TERM_PROGRAM=rex with REX_BLOCK, or cmux
-#   runtime signals (via bin/fm-backend.sh's fm_backend_detect, with cmux
-#   fallback details in docs/cmux-backend.md),
+#   environment: $TMUX, HERDR_ENV=1, TERM_PROGRAM=rex with REX_BLOCK, cmux
+#   runtime signals, or a configured T3 shell snapshot matching this home (via
+#   bin/fm-backend.sh's fm_backend_detect, with cmux fallback details in
+#   docs/cmux-backend.md),
 #   then tmux.
 #   Spawn-capable backends are the reference tmux adapter, verified herdr
-#   adapter, and experimental zellij, orca, cmux, paseo, and rex adapters. Orca owns
-#   both the task worktree and terminal, so ship/scout Orca spawns do not run
-#   treehouse get; cmux, paseo, and rex are session providers only, exactly like
-#   herdr/zellij, so they do. Auto-detected herdr and rex stay silent like tmux;
-#   auto-detected cmux prints a loud stderr notice; zellij, orca, and paseo are
-#   never auto-detected (paseo's markers leak into every descendant process).
+#   adapter, and experimental zellij, orca, cmux, paseo, rex, and t3code
+#   adapters. Orca owns both the task worktree and terminal, so ship/scout Orca
+#   spawns do not run treehouse get; cmux, paseo, and rex are session providers
+#   only, exactly like herdr/zellij, so they do. Auto-detected herdr and rex stay
+#   silent like tmux; auto-detected cmux and t3code print a loud stderr notice;
+#   zellij, orca, and paseo are never auto-detected (paseo's markers leak into
+#   every descendant process).
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
 #   blocked backend contract. Default tmux spawns do not write backend= to meta;
-#   absent backend= means tmux. cmux and paseo do not support --secondmate
-#   spawns yet.
+#   absent backend= means tmux. Orca, cmux, and paseo do not support --secondmate
+#   spawns.
 #   A rex crewmate or scout opens one tab in the Rex session the launching
 #   firstmate runs in when it runs directly inside Rex, otherwise in its home's
 #   own Rex session; a --secondmate launch opens its tab in that secondmate
@@ -311,9 +315,9 @@
 #   itself a linked worktree of the project repository still launches. A pane
 #   that never reaches an isolated worktree refuses at the end of that wait,
 #   naming the last path seen and why it was rejected.
-#   That placement is proven only at launch. Every ship or scout pane therefore
-#   also receives `export FM_TASK_ID=<task-id>` before the launch command, on
-#   the same channel as GOTMPDIR, and bin/fm-test-run.sh refuses to execute the
+#   That placement is proven only at launch. Every ship or scout therefore
+#   receives `FM_TASK_ID=<task-id>` before launch, on the same backend-specific
+#   environment channel as GOTMPDIR, and bin/fm-test-run.sh refuses to execute the
 #   behavior suite from the repository primary checkout while that marker is
 #   set (its header owns the refusal). A secondmate runs in its own home and is
 #   not marked.
@@ -345,9 +349,10 @@
 #   multi-task shell loop (the tool shell is zsh, which does not word-split unquoted
 #   $vars and silently breaks ad-hoc `for ... in $pairs` loops).
 # Launch delivery:
-#   Every harness and backend receives its complete launch command from a
-#   never-reused 0600 file in a 0700 home-scoped task namespace under /tmp, while
-#   the pane receives only a short source line.
+#   Every pane-backed launch receives its complete command from a never-reused
+#   0600 file in a 0700 home-scoped task namespace under /tmp, while the pane
+#   receives only a short source line. T3 Code starts a turn over HTTP instead
+#   and carries the encoded brief directly.
 #   This keeps commands beyond the terminal's roughly 1,024-byte input boundary
 #   intact, prevents a delayed source line from being rebound by a relaunch, and
 #   prevents equal task ids in different Firstmate homes from sharing a file.
@@ -355,8 +360,10 @@
 #   task teardown removes only the current home's launch namespace.
 # Launch environment (config/launch-env-allowlist):
 #   Absent means unchanged ambient inheritance. A present readable regular file
-#   opts every launch (ship, scout, secondmate, raw command, and relaunch) into
-#   /usr/bin/env -i followed by /bin/sh -c of the existing launch command.
+#   opts every supported command-line launch (ship, scout, secondmate, raw
+#   command, and relaunch) into /usr/bin/env -i followed by /bin/sh -c of the
+#   existing launch command. T3 Code refuses the file because T3 owns the
+#   provider process environment.
 #   Each line is one POSIX environment name, never a value or shell expression;
 #   blank lines and lines beginning with # are ignored. Invalid input refuses
 #   before launch, as do path inspection errors such as inaccessible config
@@ -433,6 +440,7 @@
 #   file. Both files apply to ships, scouts, secondmates, and relaunches.
 #   bin/fm-approval-failover.sh owns captain-approved durable failover after
 #   firstmate observes a bypass approval prompt or policy refusal; no polling.
+#   T3 Code always uses full-access and refuses Claude `auto` before mutation.
 # Worker tool exclusions:
 #   docs/configuration.md "Worker tool exclusions" owns config/crew-exclude-tools
 #   and its operator contract. Resolve it with bin/fm-exclude-tools-lib.sh
@@ -440,7 +448,7 @@
 # Worker account pin (config/claude-account, config/pi-account):
 #   Opt-in. With no file, a Claude or Pi launch is unchanged: Claude still
 #   receives this process's own CLAUDE_CONFIG_DIR when it is set, and Pi the
-#   destination pane's ambient account. A present file pins every launch of
+#   destination pane's ambient account. A present file pins every supported launch of
 #   that runner from this home - ship, scout, local secondmate, raw Claude
 #   command, and relaunch - to the declared account root, and the spawn
 #   refuses before any endpoint, worktree, or record exists when the file is
@@ -453,6 +461,7 @@
 #   secondmate first checks config/secondmate-accounts/<id>/<runner>-account
 #   in this launching home, then falls back to its home-wide pin when absent.
 #   Pins are never inherited; remote per-mate overrides refuse locally.
+#   T3 Code refuses a pin because its provider instance owns the account.
 #   bin/fm-worker-account-lib.sh owns parsing, the check, and the shed list.
 #   Launch templates live in launch_template() below; placeholders replaced before launch:
 #     __BRIEF__    absolute path to data/<task-id>/brief.md
@@ -571,8 +580,8 @@
 # park owns that home's supervision (docs/supervision-protocols/cursor.md).
 # claude is the one harness whose pre-launch setup can REFUSE the spawn: before
 # any per-task state exists, and before its busy hooks are written, every
-# claude launch pre-registers the directory the pane
-# starts in - the task worktree, or the secondmate home for a --secondmate spawn -
+# claude launch pre-registers its launch directory -
+# the task worktree, or the secondmate home for a --secondmate spawn -
 # in the launching user's own Claude trust store through bin/fm-claude-trust.sh,
 # because Claude's interactive workspace-trust dialog gates a folder it has never
 # seen and firstmate cannot answer it. That helper's header owns the structural
@@ -615,6 +624,8 @@
 # actually running in so a project husky hook still runs. Author identity is
 # not rewritten. A forge=external ship installs that directory even under
 # config/keep-ai-trailers, because its pre-push wrapper carries the push guard.
+# T3 Code owns its provider command and cannot carry the inline settings;
+# docs/t3code-backend.md records that limit.
 # Publishing the record and moving this home's backlog item to In flight are one
 # step, not two: bin/fm-backlog-transition-lib.sh owns that invariant, and this
 # script performs the transition under the task's own meta lock before it reports
@@ -6919,8 +6930,8 @@ fi
 if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
   spawn_send_text_line "$T" "export FM_TASK_ID=$ID"
 fi
-# Send through the exact channel that already ships GOTMPDIR, so every backend
-# and harness - ship, scout, and secondmate - gets it before launch. Skipped
+# Send through the exact pane channel that already ships GOTMPDIR, so every pane
+# backend and harness - ship, scout, and secondmate - gets it before launch. Skipped
 # entirely when trace context is off.
 if [ -n "$SPAWN_TRACEPARENT" ]; then
   if spawn_send_text_line "$T" "export TRACEPARENT=$SPAWN_TRACEPARENT"; then
