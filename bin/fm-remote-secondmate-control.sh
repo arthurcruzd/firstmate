@@ -208,7 +208,7 @@ cmd_launch() {
   if ! out=$(HERDR_SESSION="$REMOTE_HERDR_SESSION" FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
     FM_STATE_OVERRIDE="$CONTROL_STATE" FM_DATA_OVERRIDE="$CONTROL_DATA" \
     FM_CONFIG_OVERRIDE="$TARGET_HOME/config" FM_SKIP_SECONDMATE_INHERIT=1 \
-    FM_SKIP_SECONDMATE_SYNC=1 FM_SKIP_HERDR_PINS=1 \
+    FM_SKIP_SECONDMATE_SYNC=1 \
     "$SCRIPT_DIR/fm-spawn.sh" "${ARGS[@]}" 2>&1); then
     [ -z "$out" ] || printf '%s\n' "$out" >&2
     die "remote host-local secondmate launch failed"
@@ -259,7 +259,7 @@ cmd_relaunch() {
   HERDR_SESSION="$REMOTE_HERDR_SESSION" FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
     FM_STATE_OVERRIDE="$CONTROL_STATE" FM_DATA_OVERRIDE="$CONTROL_DATA" \
     FM_CONFIG_OVERRIDE="$TARGET_HOME/config" FM_SKIP_SECONDMATE_INHERIT=1 \
-    FM_SKIP_SECONDMATE_SYNC=1 FM_SKIP_HERDR_PINS=1 \
+    FM_SKIP_SECONDMATE_SYNC=1 \
     "$SCRIPT_DIR/fm-control.sh" "${control_args[@]}"
   # A parent tracking this route needs the identity the relaunch actually
   # produced, not the one it asked for, so it can republish its own record the
@@ -439,9 +439,7 @@ cmd_retire() {
 # Pinned-agent tokens for the parent's Herdr view: config/pinned-agents lives
 # in the PARENT home, so the parent passes rank, host, and label, while this
 # host resolves the pane from its own endpoint record and owns the fm-remote
-# server the view belongs on. bin/fm-herdr-pins.sh owns the contract; the
-# host-local launch and relaunch legs above skip it because the parent applies
-# pins itself once they return.
+# server the view belongs on. bin/fm-herdr-pins.sh owns the contract.
 cmd_pin() {
   local id=$1 rank=$2 host=$3 label=$4
   validate_id "$id"
