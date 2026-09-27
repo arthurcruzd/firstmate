@@ -14,7 +14,7 @@
 #   fm-remote-secondmate-control.sh update <id>
 #   fm-remote-secondmate-control.sh retire <id> [--force]
 #   fm-remote-secondmate-control.sh pin <id> <rank> <host> <label>
-#   fm-remote-secondmate-control.sh unpin <id> [--view]
+#   fm-remote-secondmate-control.sh unpin <id>
 #
 # Remote placement ends here, but the second-mate agent always runs on the
 # Herdr backend in the dedicated fm-remote session, so launch refuses any other
@@ -441,8 +441,7 @@ cmd_retire() {
 # host resolves the pane from its own endpoint record and owns the fm-remote
 # server the view belongs on. bin/fm-herdr-pins.sh owns the contract; the
 # host-local launch and relaunch legs above skip it because the parent applies
-# pins itself once they return. `--view` also clears the view, which the parent
-# asks for only when it has nothing left pinned.
+# pins itself once they return.
 cmd_pin() {
   local id=$1 rank=$2 host=$3 label=$4
   validate_id "$id"
@@ -450,19 +449,16 @@ cmd_pin() {
   remote_endpoint_require "$id"
   "$SCRIPT_DIR/fm-herdr-pins.sh" tag "$REMOTE_HERDR_SESSION" "${REMOTE_ENDPOINT_TARGET#*:}" \
     "$rank" "$host" "$label" || die "herdr did not confirm the pin tokens"
-  "$SCRIPT_DIR/fm-herdr-pins.sh" view "$REMOTE_HERDR_SESSION" set || die "herdr did not confirm the pinned view"
+  "$SCRIPT_DIR/fm-herdr-pins.sh" view "$REMOTE_HERDR_SESSION" || die "herdr did not confirm the pinned view"
 }
 
 cmd_unpin() {
-  local id=$1 view=${2:-}
-  [ -z "$view" ] || [ "$view" = --view ] || usage
+  local id=$1
   validate_id "$id"
   validate_home "$id"
   remote_endpoint_require "$id"
   "$SCRIPT_DIR/fm-herdr-pins.sh" untag "$REMOTE_HERDR_SESSION" "${REMOTE_ENDPOINT_TARGET#*:}" \
     || die "herdr did not confirm the pin tokens were cleared"
-  [ -z "$view" ] || "$SCRIPT_DIR/fm-herdr-pins.sh" view "$REMOTE_HERDR_SESSION" clear \
-    || die "herdr did not confirm the pinned view was cleared"
 }
 
 case "${1:-}" in
@@ -478,7 +474,7 @@ case "${1:-}" in
   update) shift; [ "$#" -eq 1 ] || usage; cmd_update "$@" ;;
   retire) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_retire "$@" ;;
   pin) shift; [ "$#" -eq 4 ] || usage; cmd_pin "$@" ;;
-  unpin) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_unpin "$@" ;;
+  unpin) shift; [ "$#" -eq 1 ] || usage; cmd_unpin "$@" ;;
   ''|-h|--help|help) usage ;;
   *) die "unknown command: $1" ;;
 esac

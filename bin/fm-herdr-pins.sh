@@ -5,14 +5,13 @@
 # Usage:
 #   fm-herdr-pins.sh sync [<id>]
 #   fm-herdr-pins.sh clear <id>
-#   fm-herdr-pins.sh check
 #   fm-herdr-pins.sh tag <session> <pane> <rank> <host> <label>
 #   fm-herdr-pins.sh untag <session> <pane>
-#   fm-herdr-pins.sh view <session> [set|clear]
+#   fm-herdr-pins.sh view <session>
 #
 # Herdr has no native pin. Each pinned agent's pane instead carries three
 # display tokens reported under source `firstmate-pins` (pin_rank, pin_label,
-# pin_host), and every server that hosts one carries a static agent view
+# pin_host), and every Herdr session that hosts one carries a static agent view
 # (source `firstmate:pins`, label "Pinned") that shows only panes with a
 # pin_rank token, sorted by it. Herdr keeps neither across a server restart,
 # and a relaunch can land an agent in a new pane, so Firstmate re-applies both
@@ -20,24 +19,19 @@
 # secondmate liveness tick. docs/configuration.md "Pinned Herdr agents" owns
 # the config/pinned-agents schema and the operator-facing behavior.
 #
-# sync applies every config entry this home owns, or only <id>'s. It resolves
-# each agent's CURRENT pane from its recorded endpoint, never from a stored
-# pane id: `self` is this firstmate's own supervisor pane
-# (bin/fm-supervisor-target-lib.sh), a local secondmate is its validated
-# state/<id>.meta endpoint, and a remote secondmate is tagged on its own host
-# through `fm-remote-secondmate-control.sh pin`, which reads that host's
-# endpoint record and installs the view on its fm-remote server. A full sync
-# (no <id>) also clears the tokens of any agent the previous full sync pinned
-# that the config no longer lists, and when the config lists nothing (or is
-# gone) it also clears the view it installed, so removing the file undoes the
-# feature. state/.herdr-pins-applied records what the last full sync applied
-# (`pin <id>` and `view <session>` lines) for exactly that cleanup.
+# sync applies every config entry this home owns, or only <id>'s, and names
+# each rejected config line on stderr. It resolves each agent's CURRENT pane
+# from its recorded endpoint, never from a stored pane id: `self` is this
+# firstmate's own supervisor pane (bin/fm-supervisor-target-lib.sh), a local
+# secondmate is its validated state/<id>.meta endpoint, and a remote secondmate
+# is tagged on its own host through `fm-remote-secondmate-control.sh pin`,
+# which reads that host's endpoint record and installs the view on its
+# fm-remote session. A remote host that does not answer (ssh exit 255 or the
+# per-call bound) is skipped for the rest of that pass, so one sleeping machine
+# costs one bounded call rather than one per agent it hosts.
 #
-# clear removes <id>'s tokens (secondmate retirement calls it) and drops it
-# from that record.
-#
-# check validates the config, prints each accepted entry as
-# `<rank>\t<id>\t<host>\t<label>`, and exits 1 when any line was rejected.
+# clear removes <id>'s tokens when the config pins <id>; secondmate retirement
+# calls it.
 #
 # tag, untag, and view are the host-local primitives: they act on one exact
 # pane or session of the local Herdr server and exit non-zero when Herdr does
@@ -46,10 +40,10 @@
 #
 # Best effort by contract: sync and clear always exit 0, print one line per
 # entry (`pinned`, `cleared`, or `skipped <id>: <reason>`), and are silent
-# no-ops when neither config/pinned-agents nor the applied record exists, when
-# an agent is not on Herdr, or when Herdr (or python3, for the view) is
-# missing or unreachable. Callers discard the output and never fail a spawn,
-# relaunch, retirement, or liveness pass on it.
+# no-ops without config/pinned-agents. An agent not on Herdr, or a missing or
+# unreachable Herdr (or python3, for the view), is skipped. Callers discard
+# the output and never fail a spawn, relaunch, retirement, or liveness pass on
+# it.
 #
 # Environment:
 #   FM_HERDR_PINS_CALL_TIMEOUT   seconds per local Herdr call (default 10)
@@ -64,18 +58,17 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 PINS_CONFIG="$CONFIG/pinned-agents"
-PINS_APPLIED="$STATE/.herdr-pins-applied"
 PIN_SOURCE=firstmate-pins
 
-usage() { sed -n '5,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '5,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 CMD=${1:-}
 case "$CMD" in
   sync|clear)
-    # The off path costs two file tests and sources nothing.
-    [ -f "$PINS_CONFIG" ] || [ -f "$PINS_APPLIED" ] || exit 0
+    # The off path costs one file test and sources nothing.
+    [ -f "$PINS_CONFIG" ] || exit 0
     ;;
-  check|tag|untag|view) ;;
+  tag|untag|view) ;;
   *) usage ;;
 esac
 
@@ -106,36 +99,38 @@ valid_label() {
 # --- config ------------------------------------------------------------------
 
 # pins_parse: accepted entries as `<rank>\t<id>\t<host>\t<label>` on stdout,
-# one rejection per line on stderr; fails when any line was rejected. A later
-# line for an id already accepted is rejected rather than silently winning.
+# one rejection per line on stderr. Every entry names its host explicitly. A
+# later line for an id already accepted is rejected rather than silently
+# winning.
 pins_parse() {
-  local line n=0 bad=0 rank id host label seen='|'
+  local line n=0 rank id host label seen='|'
   [ -f "$PINS_CONFIG" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
     line=${line%$'\r'}
     read -r rank id host label <<< "$line"
     case "$rank" in ''|'#'*) continue ;; esac
+    if [ -z "$label" ] || [ "$host" = - ]; then
+      printf 'pinned-agents line %s: missing host or label; expected <rank> <id> <host> <label>\n' "$n" >&2
+      continue
+    fi
     case "$rank" in
       [0-9]|[0-9][0-9]) rank=$(printf '%02d' "$((10#$rank))") ;;
       *) rank=bad ;;
     esac
     if ! valid_rank "$rank" || ! valid_id "$id" || ! valid_host "$host" || ! valid_label "$label"; then
-      printf 'pinned-agents line %s: expected <rank 1-99> <self|secondmate-id> <host|-> <label>\n' "$n" >&2
-      bad=1
+      printf 'pinned-agents line %s: expected <rank 1-99> <self|secondmate-id> <host> <label>\n' "$n" >&2
       continue
     fi
     case "$seen" in
       *"|$id|"*)
         printf 'pinned-agents line %s: %s is already pinned by an earlier line\n' "$n" "$id" >&2
-        bad=1
         continue
         ;;
     esac
     seen="$seen$id|"
     printf '%s\t%s\t%s\t%s\n' "$rank" "$id" "$host" "$label"
   done < "$PINS_CONFIG"
-  [ "$bad" -eq 0 ]
 }
 
 # --- host-local Herdr primitives ---------------------------------------------
@@ -159,24 +154,25 @@ pins_untag() {  # <session> <pane>
     --clear-token pin_rank --clear-token pin_label --clear-token pin_host
 }
 
-pins_view() {  # <session> <set|clear>
-  local session=$1 action=$2 sock
+pins_view() {  # <session>
+  local session=$1 sock
   command -v herdr >/dev/null 2>&1 || return 127
   [ -n "${FM_HERDR_PINS_VIEW_SETTER:-}" ] || command -v python3 >/dev/null 2>&1 || return 127
   fm_backend_source herdr >/dev/null 2>&1 || return 1
   sock=$(fm_backend_herdr_socket_path "$session")
   [ -n "$sock" ] || return 1
-  fm_run_timed "$CALL_TIMEOUT" "$VIEW_SETTER" "$sock" "$action" </dev/null >/dev/null 2>&1
+  fm_run_timed "$CALL_TIMEOUT" "$VIEW_SETTER" "$sock" </dev/null >/dev/null 2>&1
 }
 
 # --- endpoint resolution -----------------------------------------------------
 
-# pins_resolve <id>: sets PIN_KIND (local|remote|skip), PIN_SESSION, PIN_PANE,
-# PIN_DEFAULT_HOST, and PIN_REASON on skip. Every value is read from the
-# endpoint's current record, so a relaunch into a new pane is followed.
+# pins_resolve <id>: sets PIN_KIND (local|remote|skip), PIN_SESSION and
+# PIN_PANE for a local pane, PIN_REMOTE_HOST for a remote secondmate, and
+# PIN_REASON on skip. Every value is read from the endpoint's current record,
+# so a relaunch into a new pane is followed.
 pins_resolve() {
-  local id=$1 meta backend target remote_host
-  PIN_KIND=skip PIN_SESSION='' PIN_PANE='' PIN_DEFAULT_HOST='' PIN_REASON=''
+  local id=$1 meta backend target
+  PIN_KIND=skip PIN_SESSION='' PIN_PANE='' PIN_REMOTE_HOST='' PIN_REASON=''
   if [ "$id" = self ]; then
     backend=$(discover_supervisor_backend) || { PIN_REASON="no supervisor pane detected"; return 0; }
     [ "$backend" = herdr ] || { PIN_REASON="supervisor pane is on $backend, not herdr"; return 0; }
@@ -185,10 +181,9 @@ pins_resolve() {
     meta="$STATE/$id.meta"
     [ -f "$meta" ] && [ ! -L "$meta" ] || { PIN_REASON="no endpoint record"; return 0; }
     [ "$(fm_meta_get "$meta" kind)" = secondmate ] || { PIN_REASON="not a secondmate"; return 0; }
-    remote_host=$(fm_meta_get "$meta" remote_host)
-    if [ -n "$remote_host" ]; then
+    PIN_REMOTE_HOST=$(fm_meta_get "$meta" remote_host)
+    if [ -n "$PIN_REMOTE_HOST" ]; then
       PIN_KIND=remote
-      PIN_DEFAULT_HOST=$remote_host
       return 0
     fi
     fm_backend_validate_task_endpoint "$meta" "$id" >/dev/null 2>&1 \
@@ -204,8 +199,6 @@ pins_resolve() {
     return 0
   fi
   PIN_KIND=local
-  PIN_DEFAULT_HOST=$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)
-  valid_host "$PIN_DEFAULT_HOST" || PIN_DEFAULT_HOST=local
 }
 
 pins_remote() {  # <id> <control-verb-args...>
@@ -215,65 +208,18 @@ pins_remote() {  # <id> <control-verb-args...>
     fm-remote-secondmate-control.sh "$@" </dev/null >/dev/null 2>&1
 }
 
-# --- applied record ----------------------------------------------------------
-
-applied_list() {  # <pin|view>
-  [ -f "$PINS_APPLIED" ] || return 0
-  awk -v kind="$1" '$1 == kind && NF == 2 { print $2 }' "$PINS_APPLIED" 2>/dev/null
-}
-
-applied_write() {  # <pin-ids-lines> <view-sessions-lines>
-  local tmp
-  if [ -z "$1" ] && [ -z "$2" ]; then
-    rm -f "$PINS_APPLIED"
-    return 0
-  fi
-  [ -d "$STATE" ] || return 0
-  tmp=$(mktemp "$STATE/.herdr-pins-applied.XXXXXX") || return 0
-  {
-    [ -z "$1" ] || printf '%s\n' "$1" | awk 'NF { print "pin " $1 }'
-    [ -z "$2" ] || printf '%s\n' "$2" | awk 'NF { print "view " $1 }'
-  } > "$tmp"
-  mv -f -- "$tmp" "$PINS_APPLIED" || rm -f "$tmp"
-}
-
-lines_has() { printf '%s\n' "$1" | grep -Fx -- "$2" >/dev/null 2>&1; }
-lines_add() { if lines_has "$1" "$2"; then printf '%s' "$1"; else printf '%s%s%s' "$1" "${1:+$'\n'}" "$2"; fi; }
-
 # --- verbs -------------------------------------------------------------------
 
-# pins_clear_one <id> [view]: clear <id>'s tokens; `view` also asks a remote
-# host to clear its view (used only when nothing stays pinned). Fails when the
-# clear was attempted and not confirmed.
-pins_clear_one() {
-  local id=$1 with_view=${2:-}
-  pins_resolve "$id"
-  case "$PIN_KIND" in
-    local) pins_untag "$PIN_SESSION" "$PIN_PANE" || return 1 ;;
-    remote)
-      if [ -n "$with_view" ]; then
-        pins_remote "$id" unpin "$id" --view || return 1
-      else
-        pins_remote "$id" unpin "$id" || return 1
-      fi
-      ;;
-    *) printf 'skipped %s: %s\n' "$id" "$PIN_REASON"; return 0 ;;
-  esac
-  printf 'cleared %s\n' "$id"
-}
-
 cmd_sync() {
-  local only=${1:-} entries rank id host label pinned='' views='' prev_pins prev_views keep=''
+  local only=${1:-} entries rank id host label rc views='|' down='|'
   if [ -n "$only" ]; then
     valid_id "$only" || usage
   fi
-  entries=$(pins_parse 2>/dev/null) || true
+  entries=$(pins_parse)
   while IFS=$'\t' read -r rank id host label; do
     [ -n "$id" ] || continue
     [ -z "$only" ] || [ "$id" = "$only" ] || continue
-    pinned=$(lines_add "$pinned" "$id")
     pins_resolve "$id"
-    [ "$host" != - ] || host=$PIN_DEFAULT_HOST
     case "$PIN_KIND" in
       local)
         if pins_tag "$PIN_SESSION" "$PIN_PANE" "$rank" "$host" "$label"; then
@@ -281,14 +227,27 @@ cmd_sync() {
         else
           printf 'skipped %s: herdr did not confirm the tokens\n' "$id"
         fi
-        if ! lines_has "$views" "$PIN_SESSION"; then
-          pins_view "$PIN_SESSION" set || printf 'skipped view %s: herdr did not confirm the view\n' "$PIN_SESSION"
-          views=$(lines_add "$views" "$PIN_SESSION")
-        fi
+        case "$views" in
+          *"|$PIN_SESSION|"*) ;;
+          *)
+            pins_view "$PIN_SESSION" || printf 'skipped view %s: herdr did not confirm the view\n' "$PIN_SESSION"
+            views="$views$PIN_SESSION|"
+            ;;
+        esac
         ;;
       remote)
-        if pins_remote "$id" pin "$id" "$rank" "$host" "$label"; then
+        case "$down" in
+          *"|$PIN_REMOTE_HOST|"*)
+            printf 'skipped %s: host %s unreachable this pass\n' "$id" "$PIN_REMOTE_HOST"
+            continue
+            ;;
+        esac
+        if pins_remote "$id" pin "$id" "$rank" "$host" "$label"; then rc=0; else rc=$?; fi
+        if [ "$rc" -eq 0 ]; then
           printf 'pinned %s remote\n' "$id"
+        elif [ "$rc" -eq 255 ] || fm_timed_out "$rc"; then
+          printf 'skipped %s: host %s unreachable this pass\n' "$id" "$PIN_REMOTE_HOST"
+          down="$down$PIN_REMOTE_HOST|"
         else
           printf 'skipped %s: remote pin did not complete\n' "$id"
         fi
@@ -296,56 +255,30 @@ cmd_sync() {
       *) printf 'skipped %s: %s\n' "$id" "$PIN_REASON" ;;
     esac
   done <<< "$entries"
-  [ -z "$only" ] || return 0
-
-  # A full sync reconciles what the previous one applied.
-  prev_pins=$(applied_list pin)
-  prev_views=$(applied_list view)
-  while IFS= read -r id; do
-    [ -n "$id" ] || continue
-    lines_has "$pinned" "$id" && continue
-    if [ -z "$pinned" ]; then
-      pins_clear_one "$id" view || keep=$(lines_add "$keep" "$id")
-    else
-      pins_clear_one "$id" || keep=$(lines_add "$keep" "$id")
-    fi
-  done <<< "$prev_pins"
-  if [ -z "$pinned" ]; then
-    while IFS= read -r id; do
-      [ -n "$id" ] || continue
-      pins_view "$id" clear || true
-    done <<< "$prev_views"
-  else
-    while IFS= read -r id; do
-      [ -n "$id" ] || continue
-      views=$(lines_add "$views" "$id")
-    done <<< "$prev_views"
-  fi
-  while IFS= read -r id; do
-    [ -n "$id" ] || continue
-    pinned=$(lines_add "$pinned" "$id")
-  done <<< "$keep"
-  applied_write "$pinned" "$views"
 }
 
 cmd_clear() {
-  local id=$1 rest=''
+  local id=$1
   valid_id "$id" || usage
-  pins_clear_one "$id" || true
-  if lines_has "$(applied_list pin)" "$id"; then
-    rest=$(applied_list pin | grep -Fvx -- "$id" || true)
-    applied_write "$rest" "$(applied_list view)"
-  fi
+  pins_parse 2>/dev/null | cut -f2 | grep -Fx -- "$id" >/dev/null || return 0
+  pins_resolve "$id"
+  case "$PIN_KIND" in
+    local)
+      pins_untag "$PIN_SESSION" "$PIN_PANE" \
+        || { printf 'skipped %s: herdr did not confirm the clear\n' "$id"; return 0; }
+      ;;
+    remote)
+      pins_remote "$id" unpin "$id" \
+        || { printf 'skipped %s: remote unpin did not complete\n' "$id"; return 0; }
+      ;;
+    *) printf 'skipped %s: %s\n' "$id" "$PIN_REASON"; return 0 ;;
+  esac
+  printf 'cleared %s\n' "$id"
 }
 
 case "$CMD" in
   sync) [ "$#" -le 2 ] || usage; cmd_sync "${2:-}"; exit 0 ;;
   clear) [ "$#" -eq 2 ] || usage; cmd_clear "$2"; exit 0 ;;
-  check)
-    [ "$#" -eq 1 ] || usage
-    [ -f "$PINS_CONFIG" ] || { echo "no $PINS_CONFIG; herdr pins are off" >&2; exit 0; }
-    pins_parse
-    ;;
   tag)
     [ "$#" -eq 6 ] || usage
     if ! valid_id "$2" || [ -z "$3" ] || ! valid_rank "$4" || ! valid_host "$5" || ! valid_label "$6"; then
@@ -359,9 +292,8 @@ case "$CMD" in
     pins_untag "$2" "$3"
     ;;
   view)
-    [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
+    [ "$#" -eq 2 ] || usage
     valid_id "$2" || usage
-    case "${3:-set}" in set|clear) ;; *) usage ;; esac
-    pins_view "$2" "${3:-set}"
+    pins_view "$2"
     ;;
 esac

@@ -32,8 +32,8 @@
 #                       when this session actually holds the lock. Detect-only
 #                       diagnostics always run. Bootstrap's seven MUTATING sweeps
 #                       (same-home backlog reconciliation,
-#                       secondmate convergence, secondmate liveness, the opt-in
-#                       Herdr pin re-assert, pending remote handoff retry,
+#                       secondmate convergence, secondmate liveness, pending
+#                       remote handoff retry, the opt-in Herdr pin re-assert,
 #                       X-mode artifact writes, fleet sync) also run only when
 #                       locked; the five network sweeps run in the deferred
 #                       stage rather than this synchronous bootstrap section.
@@ -207,8 +207,8 @@
 #             mutating sweeps that startup already reconciled - the stale Herdr
 #             projection cleanup and bootstrap's seven mutating sweeps (fleet
 #             sync, same-home backlog reconciliation, secondmate convergence and
-#             liveness, the opt-in Herdr pin re-assert, pending remote handoff
-#             retry, X-mode
+#             liveness, pending remote handoff retry, the opt-in Herdr pin
+#             re-assert, X-mode
 #             artifact writes) - and
 #             re-emit the rest. Wake-queue presentation is NOT skipped: queued
 #             records are this turn's work queue, they arrived after startup,

@@ -261,12 +261,11 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 # session-start sweep (full) always re-applies them and the watcher tick
 # (poll) does so at most every FM_HERDR_PINS_SECS (default 300). The whole
 # pass is bounded by FM_HERDR_PINS_TIMEOUT (default 120) and never fails its
-# caller; with neither config/pinned-agents nor an applied record it costs two
-# file tests.
+# caller; without config/pinned-agents it costs one file test.
 fm_secondmate_liveness_pins() {  # <full|poll>
   local mode=$1 config secs marker last now timeout
   config=${CONFIG:-${FM_CONFIG_OVERRIDE:-$FM_HOME/config}}
-  [ -f "$config/pinned-agents" ] || [ -f "$STATE/.herdr-pins-applied" ] || return 0
+  [ -f "$config/pinned-agents" ] || return 0
   if [ "$mode" = poll ]; then
     secs=${FM_HERDR_PINS_SECS:-}
     case "$secs" in ''|*[!0-9]*|0) secs=300 ;; esac

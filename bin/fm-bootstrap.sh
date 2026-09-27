@@ -103,8 +103,8 @@
 #          it reports.
 #          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the seven MUTATING sweeps
 #          (backlog_record_reconcile, secondmate_sync,
-#          secondmate_liveness_sweep, the opt-in Herdr pin re-assert,
-#          secondmate_handoff_resume, x_mode_setup, fleet_sync) while still
+#          secondmate_liveness_sweep, secondmate_handoff_resume, the opt-in
+#          Herdr pin re-assert, x_mode_setup, fleet_sync) while still
 #          printing every read-only detect line
 #          above; the TANGLE line switches to advisory-only wording with no
 #          checkout command. Used by
@@ -121,9 +121,9 @@
 #                 step. Unrecognized values fall back here on purpose: a typo
 #                 must never silently skip a safety sweep.
 #            skip - every LOCAL step, and none of the network ones. Skips
-#                 `gh auth status`, secondmate_liveness_sweep, the opt-in
-#                 Herdr pin re-assert (bin/fm-herdr-pins.sh), secondmate_sync,
-#                 secondmate_handoff_resume, and fleet_sync.
+#                 `gh auth status`, secondmate_liveness_sweep, secondmate_sync,
+#                 secondmate_handoff_resume, the opt-in Herdr pin re-assert
+#                 (bin/fm-herdr-pins.sh), and fleet_sync.
 #            only - ONLY those network steps and nothing else. No tool detection,
 #                 no version floors, no tangle check, no backlog
 #                 reconciliation, no x_mode_setup: those already ran on the
@@ -1564,11 +1564,6 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
       secondmate_liveness_sweep
       fm_timing_record phase secondmate-liveness "$__fm_timing_stamp"
     fi
-    if network_sweep_authorized 'herdr pin re-assert'; then
-      __fm_timing_stamp=$(fm_timing_now_ms)
-      fm_secondmate_liveness_pins full
-      fm_timing_record phase herdr-pins "$__fm_timing_stamp"
-    fi
     if network_sweep_authorized 'secondmate convergence'; then
       __fm_timing_stamp=$(fm_timing_now_ms)
       secondmate_sync
@@ -1578,6 +1573,11 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
       __fm_timing_stamp=$(fm_timing_now_ms)
       secondmate_handoff_resume
       fm_timing_record phase handoff-delivery "$__fm_timing_stamp"
+    fi
+    if network_sweep_authorized 'herdr pin re-assert'; then
+      __fm_timing_stamp=$(fm_timing_now_ms)
+      fm_secondmate_liveness_pins full
+      fm_timing_record phase herdr-pins "$__fm_timing_stamp"
     fi
   fi
   # x_mode_setup writes local Relay artifacts only and never leaves the machine.

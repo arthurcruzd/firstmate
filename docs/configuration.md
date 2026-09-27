@@ -520,25 +520,27 @@ Each non-blank line that does not start with `#` names one agent:
 
 - `rank` is 1 to 99 and sets the order; it becomes the two-digit `pin_rank` token.
 - `id` is `self` for the firstmate running this home, or the id of a secondmate this home launched.
-- `host` becomes the `pin_host` token: letters, digits, `.`, `_`, `@`, or `-`, up to 32 characters.
-  `-` uses the remote host alias for a remote secondmate and this machine's short hostname otherwise.
+- `host` is required on every line and becomes the `pin_host` token: letters, digits, `.`, `_`, `@`, or `-`, up to 32 characters.
   Herdr's built-in `machine` field cannot name the host, because it shows "Local" for whichever machine the viewer runs on.
 - `label` is the rest of the line, up to 48 characters, and becomes the `pin_label` token.
 
-A malformed line or a repeated id is skipped, and `bin/fm-herdr-pins.sh check` reports it.
+A malformed line, a line without both a host and a label, or a repeated id is skipped.
 The file is per home and is not inherited into secondmate homes.
 
 Firstmate applies the pins at secondmate launch and relaunch, at primary session start, and on the secondmate liveness tick at most every `FM_HERDR_PINS_SECS`, because Herdr drops tokens and views on a server restart and a relaunch can move an agent to a new pane.
 Each pass reads the agent's current pane from its recorded endpoint.
-A remote secondmate is tagged on its own host, and the view is installed on that host's `fm-remote` server as well as on this home's own Herdr session.
-Retiring a secondmate clears its tokens.
-Removing a line clears that agent's tokens at the next full pass, and removing every line or the whole file also clears the view this home installed.
+A remote secondmate is tagged on its own host.
+The view is installed only on the Herdr sessions that host a pinned agent: this home's own session when `self` or a local secondmate is pinned, and the `fm-remote` session on each pinned remote secondmate's host.
+No other session or server receives it.
+Retiring a pinned secondmate clears its tokens.
+Removing a line or the whole file stops re-applying those pins; tokens and views already applied stay until the agent retires or moves to a new pane, or until its Herdr server restarts.
 
 The passes are best effort and never fail a launch, relaunch, retirement, or supervision pass.
 An agent that is not on Herdr, an unreachable host, and a Herdr build without agent views are skipped silently.
+A host that does not answer is skipped for the rest of that pass, so its other pinned agents do not each wait out their own timeout.
 Herdr keeps one agent view per server, so a plugin that sets its own view competes with this one until the next pass.
 The captain's client decides how rows render and which keys jump to them, for example `$pin_label` and `$pin_host` in `[ui.sidebar.agents] rows` and `focus_agent`; Firstmate does not manage that client configuration.
-The [`bin/fm-herdr-pins.sh` header](../bin/fm-herdr-pins.sh) owns the commands, the tokens and view it writes, and its applied record.
+The [`bin/fm-herdr-pins.sh` header](../bin/fm-herdr-pins.sh) owns the commands and the tokens and view they write.
 
 ### Zellij sessions
 
