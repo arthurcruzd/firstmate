@@ -13,6 +13,8 @@
 #   fm-remote-secondmate-control.sh sync <id> [<parent-commit>]
 #   fm-remote-secondmate-control.sh update <id>
 #   fm-remote-secondmate-control.sh retire <id> [--force]
+#   fm-remote-secondmate-control.sh pin <id> <rank> <host> <label>
+#   fm-remote-secondmate-control.sh unpin <id> [--view]
 #
 # Remote placement ends here, but the second-mate agent always runs on the
 # Herdr backend in the dedicated fm-remote session, so launch refuses any other
@@ -71,7 +73,7 @@ REMOTE_HERDR_SESSION=fm-remote
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 validate_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $1" ;; esac; }
 
 validate_home() { # <id> [allow-absent]
@@ -206,7 +208,7 @@ cmd_launch() {
   if ! out=$(HERDR_SESSION="$REMOTE_HERDR_SESSION" FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
     FM_STATE_OVERRIDE="$CONTROL_STATE" FM_DATA_OVERRIDE="$CONTROL_DATA" \
     FM_CONFIG_OVERRIDE="$TARGET_HOME/config" FM_SKIP_SECONDMATE_INHERIT=1 \
-    FM_SKIP_SECONDMATE_SYNC=1 \
+    FM_SKIP_SECONDMATE_SYNC=1 FM_SKIP_HERDR_PINS=1 \
     "$SCRIPT_DIR/fm-spawn.sh" "${ARGS[@]}" 2>&1); then
     [ -z "$out" ] || printf '%s\n' "$out" >&2
     die "remote host-local secondmate launch failed"
@@ -257,7 +259,7 @@ cmd_relaunch() {
   HERDR_SESSION="$REMOTE_HERDR_SESSION" FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
     FM_STATE_OVERRIDE="$CONTROL_STATE" FM_DATA_OVERRIDE="$CONTROL_DATA" \
     FM_CONFIG_OVERRIDE="$TARGET_HOME/config" FM_SKIP_SECONDMATE_INHERIT=1 \
-    FM_SKIP_SECONDMATE_SYNC=1 \
+    FM_SKIP_SECONDMATE_SYNC=1 FM_SKIP_HERDR_PINS=1 \
     "$SCRIPT_DIR/fm-control.sh" "${control_args[@]}"
   # A parent tracking this route needs the identity the relaunch actually
   # produced, not the one it asked for, so it can republish its own record the
@@ -434,6 +436,35 @@ cmd_retire() {
   fi
 }
 
+# Pinned-agent tokens for the parent's Herdr view: config/pinned-agents lives
+# in the PARENT home, so the parent passes rank, host, and label, while this
+# host resolves the pane from its own endpoint record and owns the fm-remote
+# server the view belongs on. bin/fm-herdr-pins.sh owns the contract; the
+# host-local launch and relaunch legs above skip it because the parent applies
+# pins itself once they return. `--view` also clears the view, which the parent
+# asks for only when it has nothing left pinned.
+cmd_pin() {
+  local id=$1 rank=$2 host=$3 label=$4
+  validate_id "$id"
+  validate_home "$id"
+  remote_endpoint_require "$id"
+  "$SCRIPT_DIR/fm-herdr-pins.sh" tag "$REMOTE_HERDR_SESSION" "${REMOTE_ENDPOINT_TARGET#*:}" \
+    "$rank" "$host" "$label" || die "herdr did not confirm the pin tokens"
+  "$SCRIPT_DIR/fm-herdr-pins.sh" view "$REMOTE_HERDR_SESSION" set || die "herdr did not confirm the pinned view"
+}
+
+cmd_unpin() {
+  local id=$1 view=${2:-}
+  [ -z "$view" ] || [ "$view" = --view ] || usage
+  validate_id "$id"
+  validate_home "$id"
+  remote_endpoint_require "$id"
+  "$SCRIPT_DIR/fm-herdr-pins.sh" untag "$REMOTE_HERDR_SESSION" "${REMOTE_ENDPOINT_TARGET#*:}" \
+    || die "herdr did not confirm the pin tokens were cleared"
+  [ -z "$view" ] || "$SCRIPT_DIR/fm-herdr-pins.sh" view "$REMOTE_HERDR_SESSION" clear \
+    || die "herdr did not confirm the pinned view was cleared"
+}
+
 case "${1:-}" in
   launch) shift; [ "$#" -ge 5 ] && [ "$#" -le 6 ] || usage; cmd_launch "$@" ;;
   relaunch) shift; [ "$#" -eq 4 ] || usage; cmd_relaunch "$@" ;;
@@ -446,6 +477,8 @@ case "${1:-}" in
   sync) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_sync "$@" ;;
   update) shift; [ "$#" -eq 1 ] || usage; cmd_update "$@" ;;
   retire) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_retire "$@" ;;
+  pin) shift; [ "$#" -eq 4 ] || usage; cmd_pin "$@" ;;
+  unpin) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_unpin "$@" ;;
   ''|-h|--help|help) usage ;;
   *) die "unknown command: $1" ;;
 esac

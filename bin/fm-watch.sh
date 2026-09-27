@@ -1106,6 +1106,7 @@ secondmate_liveness_tick() {
       failed=1
     fi
   done
+  fm_secondmate_liveness_pins poll
   [ -z "$first_reason" ] || wake "$first_reason"
   [ "$failed" -eq 0 ]
 }

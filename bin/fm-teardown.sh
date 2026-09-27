@@ -1015,6 +1015,8 @@ remote_secondmate_teardown() {
     return 1
   }
   "$FM_ROOT/bin/fm-guard.sh" || true
+  # Opt-in Herdr pin (bin/fm-herdr-pins.sh): clear the retiring mate's tokens; best effort.
+  "$SCRIPT_DIR/fm-herdr-pins.sh" clear "$ID" >/dev/null 2>&1 || true
   if [ "$FORCE" = --force ]; then
     if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-secondmate-control.sh retire "$ID" --force < /dev/null 2>&1); then rc=0; else rc=$?; fi
   else
@@ -3351,6 +3353,8 @@ fi
 
 if [ "$KIND" = secondmate ]; then
   preflight_firstmate_home_process_event_tree "$HOME_PATH" "secondmate home" || exit 1
+  # Opt-in Herdr pin (bin/fm-herdr-pins.sh): clear the retiring mate's tokens; best effort.
+  "$SCRIPT_DIR/fm-herdr-pins.sh" clear "$ID" >/dev/null 2>&1 || true
 fi
 
 if [ "$KIND" = secondmate ] && [ "$FORCE" = "--force" ]; then
