@@ -1015,7 +1015,8 @@ remote_secondmate_teardown() {
     return 1
   }
   "$FM_ROOT/bin/fm-guard.sh" || true
-  # Opt-in Herdr pin (bin/fm-herdr-pins.sh): clear the retiring mate's tokens; best effort.
+  # Opt-in Herdr pin (bin/fm-herdr-pins.sh): clear the retiring mate's tokens
+  # just before retirement, and re-pin below if retirement does not complete.
   "$SCRIPT_DIR/fm-herdr-pins.sh" clear "$ID" >/dev/null 2>&1 || true
   if [ "$FORCE" = --force ]; then
     if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-secondmate-control.sh retire "$ID" --force < /dev/null 2>&1); then rc=0; else rc=$?; fi
@@ -1024,6 +1025,7 @@ remote_secondmate_teardown() {
   fi
   if [ "$rc" -ne 0 ]; then
     [ -z "$out" ] || printf '%s\n' "$out" >&2
+    "$SCRIPT_DIR/fm-herdr-pins.sh" sync "$ID" >/dev/null 2>&1 || true
     if [ "$rc" -eq 255 ]; then
       echo "error: remote retirement completion is unknown; preserving the route and local records for same-host reconciliation" >&2
     elif ! "$SCRIPT_DIR/fm-procevent-remote-reply.sh" arm-locked "$ID" >/dev/null 2>&1; then
@@ -3353,8 +3355,6 @@ fi
 
 if [ "$KIND" = secondmate ]; then
   preflight_firstmate_home_process_event_tree "$HOME_PATH" "secondmate home" || exit 1
-  # Opt-in Herdr pin (bin/fm-herdr-pins.sh): clear the retiring mate's tokens; best effort.
-  "$SCRIPT_DIR/fm-herdr-pins.sh" clear "$ID" >/dev/null 2>&1 || true
 fi
 
 if [ "$KIND" = secondmate ] && [ "$FORCE" = "--force" ]; then
@@ -3624,6 +3624,10 @@ if [ "$BACKEND" = herdr ] \
   fi
 fi
 
+# Opt-in Herdr pin (bin/fm-herdr-pins.sh): a retiring secondmate's tokens are
+# cleared only once teardown reaches its endpoint close, and re-pinned below
+# when that close leaves the pane alive.
+[ "$KIND" != secondmate ] || "$SCRIPT_DIR/fm-herdr-pins.sh" clear "$ID" >/dev/null 2>&1 || true
 if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   # The presentation lock was acquired before the worktree return above; a
   # contended lock already refused this teardown while everything was intact.
@@ -3674,6 +3678,7 @@ if [ "$BACKEND" = herdr ]; then
     exit 1
   fi
   if ! fm_backend_herdr_endpoint_confirmed_gone "$T"; then
+    [ "$KIND" != secondmate ] || "$SCRIPT_DIR/fm-herdr-pins.sh" sync "$ID" >/dev/null 2>&1 || true
     echo "error: herdr pane $T for $ID is not confirmed gone after its close was refused, skipped, or failed; retaining every durable task record - rerun teardown once the close can run under the session lock" >&2
     exit 1
   fi

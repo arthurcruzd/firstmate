@@ -1107,6 +1107,9 @@ secondmate_liveness_tick() {
     fi
   done
   [ -z "$first_reason" ] || wake "$first_reason"
+  # Periodic pin re-assert while a watcher runs. A home with no watcher still
+  # recovers from a Herdr restart: the restart ends the primary's own process,
+  # and the resumed primary's session start re-asserts every pin.
   fm_secondmate_liveness_pins poll
   [ "$failed" -eq 0 ]
 }

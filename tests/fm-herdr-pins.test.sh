@@ -76,7 +76,8 @@ SH
 chmod +x "$FAKEBIN/view-setter"
 
 # FAKE_SSH_FAIL=<status> makes every call exit with it after it is logged;
-# FAKE_SSH_SLEEP=<secs> makes every call hang that long first.
+# FAKE_SSH_SLEEP=<secs> makes every call hang that long first;
+# FAKE_SSH_STDERR=<text> is printed on stderr, as the remote command's own.
 cat > "$FAKEBIN/fake-ssh" <<'SH'
 #!/usr/bin/env bash
 while [ "$#" -gt 0 ]; do
@@ -89,6 +90,7 @@ perl -MMIME::Base64=decode_base64 -e '
   print join("|", @args), "\n";
 ' "$6" >> "$FAKE_SSH_LOG"
 [ "${FAKE_SSH_SLEEP:-0}" = 0 ] || sleep "$FAKE_SSH_SLEEP"
+[ -z "${FAKE_SSH_STDERR:-}" ] || printf '%s\n' "$FAKE_SSH_STDERR" >&2
 exit "${FAKE_SSH_FAIL:-0}"
 SH
 chmod +x "$FAKEBIN/fake-ssh"
@@ -100,7 +102,7 @@ pins() {
     HERDR_ENV=1 HERDR_PANE_ID="${PIN_SELF_PANE:-w1:p1}" HERDR_SESSION=fm-lab-pins \
     FAKE_HERDR_LOG="$HERDR_LOG" FAKE_VIEW_LOG="$VIEW_LOG" FAKE_SSH_LOG="$SSH_LOG" \
     FAKE_HERDR_FAIL="${FAKE_HERDR_FAIL:-0}" FAKE_SSH_FAIL="${FAKE_SSH_FAIL:-0}" \
-    FAKE_SSH_SLEEP="${FAKE_SSH_SLEEP:-0}" \
+    FAKE_SSH_SLEEP="${FAKE_SSH_SLEEP:-0}" FAKE_SSH_STDERR="${FAKE_SSH_STDERR:-}" \
     FM_HERDR_PINS_REMOTE_TIMEOUT="${FM_HERDR_PINS_REMOTE_TIMEOUT:-45}" \
     FM_HERDR_PINS_VIEW_SETTER="$FAKEBIN/view-setter" FM_SSH_BIN="$FAKEBIN/fake-ssh" \
     "$ROOT/bin/fm-herdr-pins.sh" "$@" 2>&1
@@ -312,6 +314,23 @@ assert_contains "$OUT" "skipped mac: remote pin did not complete" "a remote-side
 assert_equals 2 "$(wc -l < "$SSH_LOG" | tr -d ' ')" "a host that answers should be tried for each of its agents"
 pass "an unreachable remote host costs one bounded call per pass"
 
+# --- a remote code root older than the pin verbs is skipped quietly ----------
+reset_logs
+OUT=$(FAKE_SSH_FAIL=1 FAKE_SSH_STDERR='error: unknown command: pin' pins sync); RC=$?
+expect_code 0 "$RC" "sync against a host without the pin verb"$'\n'"$OUT"
+assert_contains "$OUT" "skipped ios: host remote-mac runs a Firstmate without pinning; update it with /updatefirstmate" \
+  "a host without the pin verb should be named as needing an update"
+assert_contains "$OUT" "skipped mac: host remote-mac unreachable this pass" \
+  "the host's other agents should be skipped without another call"
+assert_equals 1 "$(wc -l < "$SSH_LOG" | tr -d ' ')" "a host without the pin verb should be contacted only once per pass"
+assert_contains "$OUT" "pinned legal fm-lab-pins:w8:p5" "local agents should still be pinned"
+printf '3 ios Mac Power BI\n' > "$HOME_DIR/config/pinned-agents"
+OUT=$(FAKE_SSH_FAIL=1 FAKE_SSH_STDERR='error: unknown command: unpin' pins clear ios); RC=$?
+expect_code 0 "$RC" "clear against a host without the unpin verb"
+assert_equals "skipped ios: host remote-mac runs a Firstmate without pinning" "$OUT" \
+  "a clear against a host without the unpin verb should be skipped quietly"
+pass "a remote Firstmate that predates pinning is skipped quietly, once per pass"
+
 # --- clear <id> ---------------------------------------------------------------
 printf '2 legal Mac Legal Clerk\n3 ios Mac Power BI\n' > "$HOME_DIR/config/pinned-agents"
 reset_logs
@@ -393,6 +412,28 @@ tick poll
 [ ! -s "$HERDR_LOG" ] || fail "the tick must not call Herdr when pins are off"
 assert_absent "$HOME_DIR/state/.herdr-pins-tick" "the tick must leave no marker when pins are off"
 pass "the liveness tick re-asserts on its own cadence and session start always does"
+
+# --- an idle home pinning only self is re-pinned by session start -------------
+# A Herdr restart ends the primary's own process, so the resumed primary runs
+# session start again; its deferred network stage re-asserts the pins with no
+# watcher and no secondmates in the home.
+IDLE_HOME="$TMP/idle-home"
+mkdir -p "$IDLE_HOME/data" "$IDLE_HOME/state" "$IDLE_HOME/config"
+printf '1 self VPS Firstmate\n' > "$IDLE_HOME/config/pinned-agents"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$FAKEBIN/gh"
+chmod +x "$FAKEBIN/gh"
+reset_logs
+OUT=$(env -u TMUX -u TMUX_PANE -u FM_SUPERVISOR_TARGET -u FM_SUPERVISOR_BACKEND \
+  PATH="$FAKEBIN:$BASE_PATH" FM_HOME="$IDLE_HOME" FM_BOOTSTRAP_NETWORK=only FM_INHERITABLE_CONFIG='' \
+  HERDR_ENV=1 HERDR_PANE_ID=w1:p1 HERDR_SESSION=fm-lab-pins \
+  FAKE_HERDR_LOG="$HERDR_LOG" FAKE_VIEW_LOG="$VIEW_LOG" FM_HERDR_PINS_VIEW_SETTER="$FAKEBIN/view-setter" \
+  "$ROOT/bin/fm-bootstrap.sh" 2>&1); RC=$?
+expect_code 0 "$RC" "the session-start network stage in an idle home"$'\n'"$OUT"
+assert_equals "pane report-metadata w1:p1 $TOKENS_SOURCE --token pin_rank=01 --token pin_label=Firstmate --token pin_host=VPS --session fm-lab-pins" \
+  "$(cat "$HERDR_LOG")" "session start should re-pin self in a home with no secondmates"
+assert_equals "/tmp/fm-lab-pins.sock" "$(cat "$VIEW_LOG")" "session start should re-install the view on self's session"
+assert_absent "$IDLE_HOME/state/.herdr-pins-tick" "session start should not need the watcher's cadence marker"
+pass "session start re-pins self in an idle home without a watcher"
 
 # --- the agent-view transport sends only its fixed request --------------------
 if command -v python3 >/dev/null 2>&1; then
