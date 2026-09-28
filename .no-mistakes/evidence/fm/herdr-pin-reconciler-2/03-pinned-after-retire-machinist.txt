@@ -1,0 +1,36 @@
+ spaces                        │   1       unpinned     legal-clerk     machinist     pbi     +                                     
+                               │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO▕
+ ○ firstmate                   │T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F▕
+                               │M_HOME=/tmp/fmhp-home.KMLW /tmp/fmhp-tick.sh poll > /tmp/fmhp-out.tb 2>&1; echo $? > /tmp/fmhp-out.▕
+                               │tb.rc                                                                                              ▕
+                               │disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R % cd /Users/disco/.no-mistakes/worktrees/57▕
+                               │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO▕
+                               │T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F▕
+                               │M_HOME=/tmp/fmhp-home.KMLW /tmp/fmhp-tick.sh full > /tmp/fmhp-out.tc 2>&1; echo $? > /tmp/fmhp-out.▕
+                               │tc.rc                                                                                              ▕
+                               │disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R % cd /Users/disco/.no-mistakes/worktrees/57▕
+                               │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO▕
+                               │T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F▕
+                               │M_HOME=/tmp/fmhp-home.KMLW bin/fm-herdr-pins.sh untag fm-lab-pins-97740-22828 w1:p7 > /tmp/fmhp-out▕
+                               │.untag2 2>&1; echo $? > /tmp/fmhp-out.untag2.rc                                                    ▐
+                               │disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R % cd /Users/disco/.no-mistakes/worktrees/57▐
+                               │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO▐
+ new                       menu│T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F▐
+───────────────────────────────│M_HOME=/tmp/fmhp-home.KMLW FM_HERDR_PINS_SECS=2 /tmp/fmhp-tick.sh poll > /tmp/fmhp-out.td 2>&1; ech▐
+ agents                  Pinned│o $? > /tmp/fmhp-out.td.rc                                                                         ▐
+                               │disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R % cd /Users/disco/.no-mistakes/worktrees/57▐
+ ○ Firstmate · VPS             │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO▐
+   firstmate                   │T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F▐
+ ○ Legal Clerk · Mac           │M_HOME=/tmp/fmhp-home.KMLW bin/fm-herdr-pins.sh clear unpinned-mate > /tmp/fmhp-out.clr0 2>&1; echo▐
+   firstmate                   │ $? > /tmp/fmhp-out.clr0.rc                                                                        ▐
+ ○ Power BI · WSL              │disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R % cd /Users/disco/.no-mistakes/worktrees/57▐
+   firstmate                   │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO▐
+                               │T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F▐
+                               │M_HOME=/tmp/fmhp-home.KMLW bin/fm-herdr-pins.sh clear machinist > /tmp/fmhp-out.clr1 2>&1; echo $? ▐
+                               │> /tmp/fmhp-out.clr1.rc                                                                            ▐
+                               │disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R % cd /Users/disco/.no-mistakes/worktrees/57▐
+                               │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO▐
+                               │T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F▐
+                               │M_HOME=/tmp/fmhp-home.KMLW bin/fm-herdr-pins.sh sync > /tmp/fmhp-out.s3 2>&1; echo $? > /tmp/fmhp-o▐
+                               │ut.s3.rc                                                                                           ▐
+                              «│disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R %                                          ▐

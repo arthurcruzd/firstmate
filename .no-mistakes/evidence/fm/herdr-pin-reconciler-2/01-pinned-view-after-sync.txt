@@ -1,0 +1,36 @@
+ spaces                        │   1       legal-clerk     machinist     pbi      unpinned    +                                     
+                               │disco@Discoverys-MacBook-Air tmp % env | grep ^HERDR_ > /tmp/fmhp-p1-env.txt; echo HOME=$HOME >> /t 
+ ○ firstmate                   │mp/fmhp-p1-env.txt                                                                                  
+                               │disco@Discoverys-MacBook-Air tmp % cd /Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M3JV6SZ25S 
+                               │SN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROOT_OVERRIDE -u FM_STATE_ 
+                               │OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE FM_HOME=/tmp/fmhp-home.K 
+                               │MLW bin/fm-herdr-pins.sh sync > /tmp/fmhp-out.off-sync 2>&1; echo $? > /tmp/fmhp-out.off-sync.rc    
+                               │disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R % cd /Users/disco/.no-mistakes/worktrees/57 
+                               │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO 
+                               │T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F 
+                               │M_HOME=/tmp/fmhp-home.KMLW bin/fm-herdr-pins.sh clear legal-clerk > /tmp/fmhp-out.off-clear 2>&1; e 
+                               │cho $? > /tmp/fmhp-out.off-clear.rc                                                                 
+                               │disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R % cd /Users/disco/.no-mistakes/worktrees/57 
+                               │17c0e0ae7f/01M3JV6SZ25SSN35AEMYR4G84R && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROO 
+                               │T_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE F 
+                               │M_HOME=/tmp/fmhp-home.KMLW bin/fm-herdr-pins.sh sync > /tmp/fmhp-out.sync1 2>&1; echo $? > /tmp/fmh 
+                               │p-out.sync1.rc                                                                                      
+ new                       menu│disco@Discoverys-MacBook-Air 01M3JV6SZ25SSN35AEMYR4G84R %                                           
+───────────────────────────────│                                                                                                    
+ agents                  Pinned│                                                                                                    
+                               │                                                                                                    
+ ○ Firstmate · VPS             │                                                                                                    
+   firstmate                   │                                                                                                    
+ ○ Legal Clerk · Mac           │                                                                                                    
+   firstmate                   │                                                                                                    
+ ○ Machinist · Mac             │                                                                                                    
+   firstmate                   │                                                                                                    
+ ○ Power BI · WSL              │                                                                                                    
+   firstmate                   │                                                                                                    
+                               │                                                                                                    
+                               │                                                                                                    
+                               │                                                                                                    
+                               │                                                                                                    
+                               │                                                                                                    
+                               │                                                                                                    
+                              «│                                                                                                    

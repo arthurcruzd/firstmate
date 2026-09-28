@@ -1,0 +1,3 @@
+23:14:20 {"id":"fmhp-ev","result":{"type":"subscription_started"}}
+23:14:25 {"data":{"pane":{"agent_status":"unknown","cwd":"/private/tmp/fmhp-sub.yOC4","focused":false,"foreground_cwd":"/private/tmp/fmhp-sub.yOC4","pane_id":"w2:p2","revision":2,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w2:t2","terminal_id":"term_65c819ca14805a","workspace_id":"w2"},"type":"pane_updated"},"event":"pane_updated"}
+23:14:31 {"data":{"pane_id":"w2:p2","type":"pane_closed","workspace_id":"w2"},"event":"pane_closed"}
