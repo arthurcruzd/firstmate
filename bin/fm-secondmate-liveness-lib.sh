@@ -260,10 +260,10 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 # restart even when an agent resumes natively without a relaunch, so the
 # session-start sweep (full) always re-applies them and the watcher tick
 # (poll) does so at most every FM_HERDR_PINS_SECS (default 300). The whole
-# pass is bounded by FM_HERDR_PINS_TIMEOUT (default 120) and never fails its
-# caller; without config/pinned-agents it costs one file test.
+# pass is bounded to 120 seconds and never fails its caller; without
+# config/pinned-agents it costs one file test.
 fm_secondmate_liveness_pins() {  # <full|poll>
-  local mode=$1 config secs marker last now timeout
+  local mode=$1 config secs marker last now
   config=${CONFIG:-${FM_CONFIG_OVERRIDE:-$FM_HOME/config}}
   [ -f "$config/pinned-agents" ] || return 0
   if [ "$mode" = poll ]; then
@@ -276,9 +276,7 @@ fm_secondmate_liveness_pins() {  # <full|poll>
     [ $((now - last)) -ge "$secs" ] || return 0
     printf '%s\n' "$now" > "$marker" 2>/dev/null || return 0
   fi
-  timeout=${FM_HERDR_PINS_TIMEOUT:-}
-  case "$timeout" in ''|*[!0-9]*|0) timeout=120 ;; esac
-  fm_run_timed "$timeout" env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+  fm_run_timed 120 env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
     FM_CONFIG_OVERRIDE="$config" "$FM_SM_LIVE_LIB_DIR/fm-herdr-pins.sh" sync >/dev/null 2>&1 || true
   return 0
 }

@@ -46,7 +46,6 @@
 # it.
 #
 # Environment:
-#   FM_HERDR_PINS_CALL_TIMEOUT   seconds per local Herdr call (default 10)
 #   FM_HERDR_PINS_REMOTE_TIMEOUT seconds per remote pin/unpin call (default 45)
 #   FM_HERDR_PINS_VIEW_SETTER    view transport (default
 #                                bin/backends/herdr-agent-view.py)
@@ -72,8 +71,7 @@ case "$CMD" in
   *) usage ;;
 esac
 
-CALL_TIMEOUT=${FM_HERDR_PINS_CALL_TIMEOUT:-}
-case "$CALL_TIMEOUT" in ''|*[!0-9]*|0) CALL_TIMEOUT=10 ;; esac
+CALL_TIMEOUT=10
 REMOTE_TIMEOUT=${FM_HERDR_PINS_REMOTE_TIMEOUT:-}
 case "$REMOTE_TIMEOUT" in ''|*[!0-9]*|0) REMOTE_TIMEOUT=45 ;; esac
 VIEW_SETTER=${FM_HERDR_PINS_VIEW_SETTER:-$SCRIPT_DIR/backends/herdr-agent-view.py}
