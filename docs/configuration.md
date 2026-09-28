@@ -534,7 +534,8 @@ Pinning after a spawn runs detached, so a slow host never stretches the spawn pa
 A remote secondmate is tagged on its own host.
 The view is installed only on the Herdr sessions that host a pinned agent: this home's own session when `self` or a local secondmate is pinned, and the `fm-remote` session on each pinned remote secondmate's host.
 No other session or server receives it.
-Retiring a pinned secondmate clears its tokens once retirement reaches the mate's endpoint, and re-pins it when that retirement refuses or its result is unknown.
+Retiring a pinned secondmate clears its tokens once retirement reaches the mate's endpoint, and re-pins it when that retirement refuses or leaves the endpoint alive.
+When a remote host does not answer the retirement, the re-pin is left to the next pass rather than waiting on that host again.
 Removing a line or the whole file stops re-applying those pins; tokens and views already applied stay until the agent retires or moves to a new pane, or until its Herdr server restarts.
 
 The passes are best effort and never fail a launch, relaunch, retirement, or supervision pass.

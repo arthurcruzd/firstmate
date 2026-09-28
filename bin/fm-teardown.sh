@@ -1016,7 +1016,9 @@ remote_secondmate_teardown() {
   }
   "$FM_ROOT/bin/fm-guard.sh" || true
   # Opt-in Herdr pin (bin/fm-herdr-pins.sh): clear the retiring mate's tokens
-  # just before retirement, and re-pin below if retirement does not complete.
+  # just before retirement, and re-pin below if the host refuses retirement.
+  # An unknown result (255) means the host did not answer, so no re-pin is
+  # tried then; the next pin pass re-applies it from the preserved route.
   "$SCRIPT_DIR/fm-herdr-pins.sh" clear "$ID" >/dev/null 2>&1 || true
   if [ "$FORCE" = --force ]; then
     if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-secondmate-control.sh retire "$ID" --force < /dev/null 2>&1); then rc=0; else rc=$?; fi
@@ -1025,7 +1027,7 @@ remote_secondmate_teardown() {
   fi
   if [ "$rc" -ne 0 ]; then
     [ -z "$out" ] || printf '%s\n' "$out" >&2
-    "$SCRIPT_DIR/fm-herdr-pins.sh" sync "$ID" >/dev/null 2>&1 || true
+    [ "$rc" -eq 255 ] || "$SCRIPT_DIR/fm-herdr-pins.sh" sync "$ID" >/dev/null 2>&1 || true
     if [ "$rc" -eq 255 ]; then
       echo "error: remote retirement completion is unknown; preserving the route and local records for same-host reconciliation" >&2
     elif ! "$SCRIPT_DIR/fm-procevent-remote-reply.sh" arm-locked "$ID" >/dev/null 2>&1; then
