@@ -1,0 +1,13 @@
+herdr 0.9.1
+helper exit: 0
+captured request: {"id": "fm-herdr-pins", "method": "agent.view.set", "params": {"filter": {"field": {"token": "pin_rank"}, "op": "exists"}, "label": "Pinned", "sort": [{"field": {"token": "pin_rank"}, "order": "asc"}], "source": "firstmate:pins"}}
+herdr schema protocol: 22 | request method known to this Herdr: True
+request vs AgentViewSetParams: VALID
+agent_view response branch requires: ['type', 'active'] | helper checks type+active against it: True
+token names valid for PaneReportMetadataParams.tokens: {'pin_rank': True, 'pin_label': True, 'pin_host': True} | maxProperties: 16
+
+$ herdr pane report-metadata --help | grep -E -- "--(source|token|clear-token)"
+Usage: herdr pane report-metadata [OPTIONS] --source <ID> <PANE_ID>
+      --source <ID>
+      --token <NAME=VALUE>
+      --clear-token <NAME>

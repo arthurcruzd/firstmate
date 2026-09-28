@@ -1,0 +1,15 @@
+ok - with no config the helper is a silent no-op
+ok - sync accepts the documented shape and names every rejected line
+ok - sync pins self, local, and remote agents on their current endpoints and skips the rest
+ok - sync is idempotent
+ok - each pass resolves the current pane rather than a stored one
+ok - a single-id sync pins only that agent
+ok - self is skipped when this firstmate is not on Herdr
+ok - an unreachable or missing Herdr never fails the pass
+ok - an unreachable remote host costs one bounded call per pass
+ok - a remote Firstmate that predates pinning is a quiet non-fatal skip
+ok - clear removes the tokens of an agent the config pins and ignores the rest
+ok - the remote pin and unpin verbs act on the host's own endpoint record
+ok - the liveness tick re-asserts on its own cadence and session start always does
+ok - session start re-pins self in an idle home without a watcher
+ok - the agent-view transport sends only the fixed view request

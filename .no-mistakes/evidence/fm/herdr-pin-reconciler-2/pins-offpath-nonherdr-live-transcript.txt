@@ -1,0 +1,155 @@
+supervisor pane: TMUX_PANE=unset HERDR_ENV=unset  FM_HOME=$LAB
+
+===== A. pins OFF: no config/pinned-agents =====
+
+$ bin/fm-herdr-pins.sh sync
+[exit 0]
+
+$ bin/fm-herdr-pins.sh clear legal-clerk
+[exit 0]
+
+$ tick poll
+[exit 0]
+
+$ ls -A $LAB/state
+[exit 0]
+>> herdr invocations so far: 0
+
+===== B. pins ON (captain's labels), firstmate + a local mate on tmux =====
+
+$ cat $LAB/config/pinned-agents
+# <rank> <id> <host> <label>
+1 self        VPS Firstmate
+2 legal-clerk Mac Legal Clerk
+3 machinist   Mac Machinist
+5 pbi         WSL Power BI
+[exit 0]
+
+$ bin/fm-herdr-pins.sh sync
+skipped self: no supervisor pane detected
+skipped legal-clerk: no endpoint record
+skipped machinist: endpoint is on tmux, not herdr
+skipped pbi: no endpoint record
+[exit 0]
+
+$ bin/fm-herdr-pins.sh sync machinist
+skipped machinist: endpoint is on tmux, not herdr
+[exit 0]
+
+$ env FM_SUPERVISOR_BACKEND=tmux FM_SUPERVISOR_TARGET=firstmate:0.0 bin/fm-herdr-pins.sh sync self
+skipped self: supervisor pane is on tmux, not herdr
+[exit 0]
+
+$ bin/fm-herdr-pins.sh clear machinist
+skipped machinist: endpoint is on tmux, not herdr
+[exit 0]
+
+$ bin/fm-herdr-pins.sh clear not-pinned
+[exit 0]
+>> herdr invocations so far: 0
+
+===== C. session-start network stage with pins ON (tmux) =====
+
+$ FM_BOOTSTRAP_NETWORK=only FM_TIMING_LOG=... bin/fm-bootstrap.sh
+[exit 0]
+  | SECONDMATE_LIVENESS: secondmate machinist: skipped: endpoint probe unreadable (backend=tmux)
+  | SECONDMATE_SYNC: secondmate machinist: skipped: primary default-branch commit cannot be resolved
+
+$ grep phase timing.log (phase, name, ms)
+  v1	phase	gh-auth	0	0	
+  v1	phase	secondmate-liveness	0	0	
+  v1	phase	secondmate-sync	0	0	
+  v1	phase	handoff-delivery	1000	0	
+  v1	phase	herdr-pins	1000	0	
+  v1	phase	fleet-sync	0	4000	
+>> herdr invocations so far: 0
+
+===== D. watcher liveness tick cadence (FM_HERDR_PINS_SECS default 300) =====
+
+$ tick poll
+[exit 0]
+marker after 1st poll: 1790584579
+
+$ tick poll
+[exit 0]
+marker after 2nd poll (inside cadence): 1790584579  -> unchanged, no re-assert
+
+$ tick poll
+[exit 0]
+marker with FM_HERDR_PINS_SECS=1 after 2s: 1790584581 -> re-asserted
+
+$ tick poll
+[exit 0]
+marker with pins off: absent
+>> herdr invocations so far: 0
+
+===== E. adversarial input never reaches Herdr =====
+
+$ bin/fm-herdr-pins.sh sync
+pinned-agents line 2: expected <rank 1-99> <self|secondmate-id> <host> <label>
+pinned-agents line 3: expected <rank 1-99> <self|secondmate-id> <host> <label>
+pinned-agents line 4: expected <rank 1-99> <self|secondmate-id> <host> <label>
+pinned-agents line 5: expected <rank 1-99> <self|secondmate-id> <host> <label>
+pinned-agents line 6: missing host or label; expected <rank> <id> <host> <label>
+pinned-agents line 7: missing host or label; expected <rank> <id> <host> <label>
+pinned-agents line 9: dup is already pinned by an earlier line
+skipped self: no supervisor pane detected
+skipped dup: no endpoint record
+[exit 0]
+
+$ bin/fm-herdr-pins.sh tag fm-lab-x w1:p1 3 Mac Label
+Usage:
+  fm-herdr-pins.sh sync [<id>]
+  fm-herdr-pins.sh clear <id>
+  fm-herdr-pins.sh tag <session> <pane> <rank> <host> <label>
+  fm-herdr-pins.sh untag <session> <pane>
+  fm-herdr-pins.sh view <session>
+[exit 2]
+
+$ bin/fm-herdr-pins.sh tag fm-lab-x w1:p1 03 bad host Label
+Usage:
+  fm-herdr-pins.sh sync [<id>]
+  fm-herdr-pins.sh clear <id>
+  fm-herdr-pins.sh tag <session> <pane> <rank> <host> <label>
+  fm-herdr-pins.sh untag <session> <pane>
+  fm-herdr-pins.sh view <session>
+[exit 2]
+
+$ bin/fm-herdr-pins.sh tag fm-lab-x w1:p1 03 Mac evil[2Jlabel
+Usage:
+  fm-herdr-pins.sh sync [<id>]
+  fm-herdr-pins.sh clear <id>
+  fm-herdr-pins.sh tag <session> <pane> <rank> <host> <label>
+  fm-herdr-pins.sh untag <session> <pane>
+  fm-herdr-pins.sh view <session>
+[exit 2]
+
+$ bin/fm-herdr-pins.sh view ../evil
+Usage:
+  fm-herdr-pins.sh sync [<id>]
+  fm-herdr-pins.sh clear <id>
+  fm-herdr-pins.sh tag <session> <pane> <rank> <host> <label>
+  fm-herdr-pins.sh untag <session> <pane>
+  fm-herdr-pins.sh view <session>
+[exit 2]
+
+$ bin/fm-herdr-pins.sh untag a;b w1:p1
+Usage:
+  fm-herdr-pins.sh sync [<id>]
+  fm-herdr-pins.sh clear <id>
+  fm-herdr-pins.sh tag <session> <pane> <rank> <host> <label>
+  fm-herdr-pins.sh untag <session> <pane>
+  fm-herdr-pins.sh view <session>
+[exit 2]
+
+$ bin/backends/herdr-agent-view.py relative.sock
+[exit 2]
+
+$ bin/backends/herdr-agent-view.py /nonexistent/socket clear
+[exit 2]
+
+$ bin/backends/herdr-agent-view.py /nonexistent/socket
+[exit 2]
+>> herdr invocations so far: 0
+
+DRIVER DONE
