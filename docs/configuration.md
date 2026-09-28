@@ -530,7 +530,7 @@ The file is per home and is not inherited into secondmate homes.
 Firstmate applies the pins at secondmate launch and relaunch, at primary session start, and on the secondmate liveness tick at most every `FM_HERDR_PINS_SECS`, because Herdr drops tokens and views on a server restart and a relaunch can move an agent to a new pane.
 Each pass reads the agent's current pane from its recorded endpoint.
 A Herdr restart ends the primary's own process, so the resumed primary's session start re-applies every pin; a home that pins only `self` needs no watcher for that.
-Launch and relaunch pinning runs detached, so a slow host never stretches a spawn past its time limit or changes its result.
+Pinning after a spawn runs detached, so a slow host never stretches the spawn past its time limit or changes its result.
 A remote secondmate is tagged on its own host.
 The view is installed only on the Herdr sessions that host a pinned agent: this home's own session when `self` or a local secondmate is pinned, and the `fm-remote` session on each pinned remote secondmate's host.
 No other session or server receives it.
