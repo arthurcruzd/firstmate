@@ -28,9 +28,7 @@
 # which reads that host's endpoint record and installs the view on its
 # fm-remote session. A remote host that does not answer (ssh exit 255 or the
 # per-call bound) is skipped for the rest of that pass, so one sleeping machine
-# costs one bounded call rather than one per agent it hosts. A remote code root
-# older than the pin verbs answers `unknown command`; that host is skipped the
-# same way, quietly, until /updatefirstmate brings its code root forward.
+# costs one bounded call rather than one per agent it hosts.
 #
 # clear removes <id>'s tokens when the config pins <id>; secondmate retirement
 # calls it.
@@ -201,20 +199,11 @@ pins_resolve() {
   PIN_KIND=local
 }
 
-# pins_remote <id> <verb> [args...]: run one host-local pin verb. Sets
-# PIN_REMOTE_UNSUPPORTED=1 when the host's code root predates the verb.
-pins_remote() {
-  local id=$1 out rc
+pins_remote() {  # <id> <control-verb-args...>
+  local id=$1
   shift
-  PIN_REMOTE_UNSUPPORTED=0
-  if out=$(fm_run_timed "$REMOTE_TIMEOUT" "$SCRIPT_DIR/fm-on.sh" "$id" \
-    fm-remote-secondmate-control.sh "$@" </dev/null 2>&1); then
-    return 0
-  else
-    rc=$?
-  fi
-  case "$out" in *"unknown command: $1"*) PIN_REMOTE_UNSUPPORTED=1 ;; esac
-  return "$rc"
+  fm_run_timed "$REMOTE_TIMEOUT" "$SCRIPT_DIR/fm-on.sh" "$id" \
+    fm-remote-secondmate-control.sh "$@" </dev/null >/dev/null 2>&1
 }
 
 # --- verbs -------------------------------------------------------------------
@@ -254,9 +243,6 @@ cmd_sync() {
         if pins_remote "$id" pin "$id" "$rank" "$host" "$label"; then rc=0; else rc=$?; fi
         if [ "$rc" -eq 0 ]; then
           printf 'pinned %s remote\n' "$id"
-        elif [ "$PIN_REMOTE_UNSUPPORTED" = 1 ]; then
-          printf 'skipped %s: host %s runs a Firstmate without pinning; update it with /updatefirstmate\n' "$id" "$PIN_REMOTE_HOST"
-          down="$down$PIN_REMOTE_HOST|"
         elif [ "$rc" -eq 255 ] || fm_timed_out "$rc"; then
           printf 'skipped %s: host %s unreachable this pass\n' "$id" "$PIN_REMOTE_HOST"
           down="$down$PIN_REMOTE_HOST|"
@@ -280,14 +266,8 @@ cmd_clear() {
         || { printf 'skipped %s: herdr did not confirm the clear\n' "$id"; return 0; }
       ;;
     remote)
-      if ! pins_remote "$id" unpin "$id"; then
-        if [ "$PIN_REMOTE_UNSUPPORTED" = 1 ]; then
-          printf 'skipped %s: host %s runs a Firstmate without pinning\n' "$id" "$PIN_REMOTE_HOST"
-        else
-          printf 'skipped %s: remote unpin did not complete\n' "$id"
-        fi
-        return 0
-      fi
+      pins_remote "$id" unpin "$id" \
+        || { printf 'skipped %s: remote unpin did not complete\n' "$id"; return 0; }
       ;;
     *) printf 'skipped %s: %s\n' "$id" "$PIN_REASON"; return 0 ;;
   esac

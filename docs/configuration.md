@@ -540,7 +540,6 @@ Removing a line or the whole file stops re-applying those pins; tokens and views
 The passes are best effort and never fail a launch, relaunch, retirement, or supervision pass.
 An agent that is not on Herdr, an unreachable host, and a Herdr build without agent views are skipped silently.
 A host that does not answer is skipped for the rest of that pass, so its other pinned agents do not each wait out their own timeout.
-A remote host whose Firstmate code root predates pinning is skipped the same way until `/updatefirstmate` updates it.
 Herdr keeps one agent view per server, so a plugin that sets its own view competes with this one until the next pass.
 The captain's client decides how rows render and which keys jump to them, for example `$pin_label` and `$pin_host` in `[ui.sidebar.agents] rows` and `focus_agent`; Firstmate does not manage that client configuration.
 The [`bin/fm-herdr-pins.sh` header](../bin/fm-herdr-pins.sh) owns the commands and the tokens and view they write.

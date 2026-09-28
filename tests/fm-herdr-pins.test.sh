@@ -318,18 +318,18 @@ pass "an unreachable remote host costs one bounded call per pass"
 reset_logs
 OUT=$(FAKE_SSH_FAIL=1 FAKE_SSH_STDERR='error: unknown command: pin' pins sync); RC=$?
 expect_code 0 "$RC" "sync against a host without the pin verb"$'\n'"$OUT"
-assert_contains "$OUT" "skipped ios: host remote-mac runs a Firstmate without pinning; update it with /updatefirstmate" \
-  "a host without the pin verb should be named as needing an update"
-assert_contains "$OUT" "skipped mac: host remote-mac unreachable this pass" \
-  "the host's other agents should be skipped without another call"
-assert_equals 1 "$(wc -l < "$SSH_LOG" | tr -d ' ')" "a host without the pin verb should be contacted only once per pass"
+assert_contains "$OUT" "skipped ios: remote pin did not complete" \
+  "a host without the pin verb should be skipped like any refused pin"
+assert_contains "$OUT" "skipped mac: remote pin did not complete" \
+  "a host without the pin verb should be skipped for each of its agents"
 assert_contains "$OUT" "pinned legal fm-lab-pins:w8:p5" "local agents should still be pinned"
+case "$OUT" in *"unknown command"*) fail "the old host's own error should not leak into the pass output" ;; esac
 printf '3 ios Mac Power BI\n' > "$HOME_DIR/config/pinned-agents"
 OUT=$(FAKE_SSH_FAIL=1 FAKE_SSH_STDERR='error: unknown command: unpin' pins clear ios); RC=$?
 expect_code 0 "$RC" "clear against a host without the unpin verb"
-assert_equals "skipped ios: host remote-mac runs a Firstmate without pinning" "$OUT" \
+assert_equals "skipped ios: remote unpin did not complete" "$OUT" \
   "a clear against a host without the unpin verb should be skipped quietly"
-pass "a remote Firstmate that predates pinning is skipped quietly, once per pass"
+pass "a remote Firstmate that predates pinning is a quiet non-fatal skip"
 
 # --- clear <id> ---------------------------------------------------------------
 printf '2 legal Mac Legal Clerk\n3 ios Mac Power BI\n' > "$HOME_DIR/config/pinned-agents"
