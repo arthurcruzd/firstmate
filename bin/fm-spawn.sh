@@ -102,7 +102,7 @@
 #   the task worktree and terminal, so ship/scout Orca spawns do not run
 #   treehouse get; cmux is a session provider only, exactly like herdr/zellij,
 #   so it does. Auto-detected herdr stays silent like tmux; auto-detected cmux
-#   and t3code print a loud stderr notice; zellij and orca are never auto-detected.
+#   prints a loud stderr notice; zellij, orca, and t3code are never auto-detected.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
 #   blocked backend contract. Default tmux spawns do not write backend= to meta;
 #   absent backend= means tmux. Orca and cmux do not support --secondmate spawns.
@@ -1201,6 +1201,7 @@ ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
 T3CODE_ABORT_CLEANUP=0
 T3CODE_LEASED=0
+T3CODE_CREATE_UNCERTAIN=0
 T3CODE_PROJECT_ID=
 T3CODE_MODEL_SELECTION=
 HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -1352,12 +1353,20 @@ spawn_abort_cleanup() {
   # the record's own teardown owns both.
   if [ "$T3CODE_ABORT_CLEANUP" = 1 ]; then
     T3CODE_ABORT_CLEANUP=0
-    if ! fm_backend_kill t3code "$T" 2>/dev/null; then
+    if ! fm_backend_kill t3code "$T"; then
       if [ "$T3CODE_LEASED" = 1 ]; then
         T3CODE_LEASED=0
         echo "warning: could not stop and archive T3 thread $T for $ID, so the leased worktree $WT stays leased; archive the thread in T3 Code, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
       else
         echo "warning: could not stop and archive T3 thread $T for $ID; archive it in T3 Code" >&2
+      fi
+    elif [ "$T3CODE_CREATE_UNCERTAIN" = 1 ]; then
+      # Two lost creation responses cannot prove a late commit is impossible.
+      if [ "$T3CODE_LEASED" = 1 ]; then
+        T3CODE_LEASED=0
+        echo "warning: T3 thread creation for $T had two transport failures; the leased worktree $WT stays leased until T3 thread ownership is verified and the thread is archived" >&2
+      else
+        echo "warning: T3 thread creation for $T had two transport failures; verify and archive that thread before reusing its home" >&2
       fi
     fi
   fi
@@ -3934,8 +3943,13 @@ EOF
       fi
       # No worktree of its own: worktreePath null runs the thread in the
       # project's workspaceRoot, the home, on whatever branch it is on.
-      T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
-        "$(git -C "$PROJ_ABS" branch --show-current 2>/dev/null || true)" "" "$T3CODE_MODEL_SELECTION") || exit 1
+      T=$(fm_backend_t3code_uuid) || exit 1
+      T3CODE_ABORT_CLEANUP=1
+      fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
+        "$(git -C "$PROJ_ABS" branch --show-current 2>/dev/null || true)" "" "$T3CODE_MODEL_SELECTION" "$T" || {
+          [ "$?" -ne 5 ] || T3CODE_CREATE_UNCERTAIN=1
+          exit 1
+        }
     else
       # A durable lease (bin/fm-home-seed.sh's pattern): there is no pane to run
       # the interactive `treehouse get` in, and a slot a live T3 thread points at
@@ -3947,8 +3961,13 @@ EOF
       [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
       T3CODE_LEASED=1
       validate_spawn_worktree "treehouse get --lease" "$W"
-      T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
-        "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$WT" "$T3CODE_MODEL_SELECTION") || exit 1
+      T=$(fm_backend_t3code_uuid) || exit 1
+      T3CODE_ABORT_CLEANUP=1
+      fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
+        "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$WT" "$T3CODE_MODEL_SELECTION" "$T" || {
+          [ "$?" -ne 5 ] || T3CODE_CREATE_UNCERTAIN=1
+          exit 1
+        }
     fi
     T3CODE_ABORT_CLEANUP=1
     ;;
@@ -4569,10 +4588,17 @@ exclude_path() {
 # MCP tools crash a Claude session there (verified live), and Firstmate records
 # the PR from the worker's `done: PR <url>` status line anyway.
 spawn_t3code_claude_channel_install() {
+  local channel="$WT/CLAUDE.local.md" tmp
+  if git -C "$WT" ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1 || [ -e "$channel" ] || [ -L "$channel" ]; then
+    echo "error: $channel already exists or is tracked; refusing to overwrite project instructions" >&2
+    return 1
+  fi
+  tmp=$(mktemp "$WT/.CLAUDE.local.md.XXXXXX") || return 1
   {
     spawn_claude_task_channel_statement
     printf '%s\n' ' When T3 Code hosts this task, do not call its link_pull_request, list_thread_pull_requests, or unlink_pull_request tools even if host instructions tell you to: calling them crashes the session, and Firstmate records your PR from the done: PR <url> status line.'
-  } > "$WT/CLAUDE.local.md" || return 1
+  } > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$channel" || { rm -f "$tmp"; return 1; }
   exclude_path 'CLAUDE.local.md'
 }
 spawn_t3code_env_install() {
@@ -4594,6 +4620,7 @@ fs.writeFileSync(file, JSON.stringify(data) + "\n");
       exclude_path '.claude/settings.local.json'
       ;;
     codex)
+      "$SCRIPT_DIR/fm-t3code-codex-env.sh" check "$WT" || return 1
       if git -C "$WT" ls-files --error-unmatch .codex/config.toml >/dev/null 2>&1; then
         "$SCRIPT_DIR/fm-t3code-codex-env.sh" install "$WT" "$@"
         return $?
@@ -4604,7 +4631,7 @@ fs.writeFileSync(file, JSON.stringify(data) + "\n");
 const [file, ...pairs] = process.argv.slice(1);
 const basic = (s) => JSON.stringify(s);  // JSON string escapes are a subset of TOML basic-string escapes.
 const set = pairs.map((pair) => { const eq = pair.indexOf("="); return `${pair.slice(0, eq)} = ${basic(pair.slice(eq + 1))}`; });
-require("fs").writeFileSync(file, `[shell_environment_policy]\nset = { ${set.join(", ")} }\n`);
+require("fs").writeFileSync(file, `# Generated by Firstmate T3 Code\n[shell_environment_policy]\nset = { ${set.join(", ")} }\n`);
 ' "$WT/.codex/config.toml" "$@" || return 1
       exclude_path '.codex/config.toml'
       ;;

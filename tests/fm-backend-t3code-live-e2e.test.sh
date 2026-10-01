@@ -52,7 +52,8 @@ version=$(fm_backend_t3code_api GET /.well-known/t3/environment | node -e 'proce
 fm_backend_t3code_runtime_check
 project=$(fm_backend_t3code_project_ensure "$TMP_ROOT")
 selection=$(fm_backend_t3code_model_selection codex "${FM_T3CODE_LIVE_MODEL:-gpt-5.6-sol}" default "$project")
-thread=$(fm_backend_t3code_thread_create "$project" fm-live-guard '' '' "$selection")
+thread=$(fm_backend_t3code_uuid)
+fm_backend_t3code_thread_create "$project" fm-live-guard '' '' "$selection" "$thread"
 fm_backend_t3code_thread_read "$thread" 1 | node -e '
 const t=JSON.parse(require("fs").readFileSync(0,"utf8")).thread;
 if (t.id !== process.argv[1] || t.projectId !== process.argv[2] || t.worktreePath !== null) process.exit(1);

@@ -21,7 +21,10 @@ const clean = (value) => String(value ?? '').replace(/[\t\r\n]/g, ' ');
 function row(thread) {
   if (!thread || !wanted.has(thread.id)) return;
   const pending = thread.hasPendingApprovals === true || thread.hasPendingUserInput === true;
-  const status = thread.archivedAt ? 'archived' : thread.session?.status || 'idle';
+  const status = thread.archivedAt ? 'archived' :
+    thread.backgroundLiveness ? 'running' :
+    thread.session?.status === 'stopped' && thread.settledAt ? 'settled-stopped' :
+    thread.session?.status || 'idle';
   console.log([thread.id, thread.projectId, status, pending, thread.modelSelection?.instanceId || 'unknown'].map(clean).join('\t'));
 }
 (async () => {
@@ -30,6 +33,7 @@ function row(thread) {
   if (!token) return finish(2);
   const response = await fetch(new URL('/api/auth/websocket-ticket', origin), {
     method: 'POST', headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) return finish(2);
   const { ticket } = await response.json();
