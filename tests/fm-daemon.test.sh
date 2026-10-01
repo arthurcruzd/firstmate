@@ -3087,9 +3087,8 @@ test_pane_is_busy_t3code_trusts_native_verdict_without_capture() {
     if FM_FAKE_T3_NATIVE=idle FM_STATE_OVERRIDE="$dir/state" FM_DAEMON_PRIMARY_HARNESS=claude pane_is_busy thread-captain t3code; then
       fail "a ready T3 session must read idle without a rendered-tail fallback"
     fi
-    if FM_FAKE_T3_NATIVE=unknown FM_STATE_OVERRIDE="$dir/state" FM_DAEMON_PRIMARY_HARNESS=claude pane_is_busy thread-captain t3code; then
-      fail "an unreadable T3 server must not read busy"
-    fi
+    FM_FAKE_T3_NATIVE=unknown FM_STATE_OVERRIDE="$dir/state" FM_DAEMON_PRIMARY_HARNESS=claude pane_is_busy thread-captain t3code \
+      || fail "T3 native uncertainty must defer injection"
   ) || fail "t3code pane_is_busy subshell failed"
   pass "pane_is_busy: t3code trusts the native verdict for busy and idle and never reads a rendered tail"
 }

@@ -45,6 +45,10 @@ const server = http.createServer((req, res) => {
     if (url.pathname === "/api/orchestration/shell") {
       if (world.shellFailure === "timeout") return;
       if (world.shellFailure === "http-error") return send(503, { reason: "shell unavailable" });
+      if (world.shellFailure === "malformed") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end("{");
+      }
       return send(200, world.shell);
     }
     const thread = url.pathname.match(/^\/api\/orchestration\/threads\/([^/]+)$/);
@@ -647,24 +651,62 @@ t3_shell_reads() {
   grep -c '"path":"/api/orchestration/shell"' "$LOG"
 }
 
-test_probe_preserves_detail_when_shell_unavailable() {
-  local status got
+test_probe_preserves_liveness_when_shell_unavailable() {
+  local status got state harness
   for status in ready idle interrupted; do
     t3_case "shell-failure-$status" "$status"
     t3_world_set 'w.shellFailure = "http-error"'
     got=$(t3_run 'fm_backend_t3code_probe thread-live')
-    [ "$got" = "$status" ] || fail "a failed shell request must preserve detail status $status, got $got"
-    [ "$(t3_run 'fm_backend_t3code_busy_state thread-live')" = idle ] || fail "$status must remain idle when the shell request fails"
+    [ "$got" = alive-unknown ] || fail "a failed shell request on $status must report alive-unknown, got $got"
+    [ "$(t3_run 'fm_backend_t3code_busy_state thread-live')" = unknown ] || fail "$status busy state must be unknown when the shell request fails"
     [ "$(t3_run 'fm_backend_t3code_agent_state thread-live')" = alive ] || fail "$status must remain alive when the shell request fails"
     t3_run 'fm_backend_t3code_target_exists thread-live' || fail "$status must remain an existing thread when the shell request fails"
     [ "$(t3_shell_reads)" = 4 ] || fail "each live status read must attempt the failing shell request"
+    state="$CASE_DIR/state"
+    mkdir -p "$state"
+    # A previously idle hook record must not override native uncertainty.
+    "$ROOT/bin/fm-busy-event.sh" arm "$state" worker --state idle --source claude-hook --event stop >/dev/null
+    fm_write_meta "$state/worker.meta" "window=fm-worker" "backend=t3code" "t3_thread_id=thread-live" "harness=claude"
+    for harness in claude codex; do
+      got=$(t3_run '. "$0/bin/fm-busy-lib.sh"; fm_busy_classify t3code thread-live "$1" worker "$2"' "$harness" "$state")
+      [ "$got" = 'unknown t3code-native' ] || fail "$status/$harness must preserve native uncertainty, got $got"
+      got=$(t3_run '. "$0/bin/fm-pending-reply-lib.sh"; fm_pending_reply_backend_observation t3code thread-live fm-worker "$1"' "$harness")
+      [ "$got" = unknown ] || fail "$status/$harness reply tracking must preserve native uncertainty, got $got"
+    done
+    got=$(t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=claude
+      afk_enter "$1"
+      inject_msg "worker needs attention" "$1"; rc=$?
+      printf "%s:%s:%s" "$rc" "$INJECT_SUBMIT_ATTEMPTED" "$INJECT_LAST_FAILURE"
+    ' "$state")
+    [ "$got" = '1:0:deferred: supervisor pane busy (agent mid-turn)' ] || fail "$status must defer away-mode injection before submitting, got $got"
+    t3_run '. "$0/bin/fm-supervise-daemon.sh"; stale_window_is_busy thread-live "$1"' "$state" \
+      || fail "$status must defer the stale-task busy guard"
+    t3_run '
+      FM_STATE_OVERRIDE=$1; export FM_STATE_OVERRIDE
+      . "$0/bin/fm-watch.sh"
+      fm_busy_is_busy t3code thread-live claude worker "$STATE" || exit 1
+      window_is_busy thread-live "" || exit 1
+      rec=$(fm_task_inbox_write "$STATE" worker "please continue") || exit 1
+      touch -t 200001010000 "$rec"
+      FM_TASK_INBOX_GRACE_SECS=1
+      case "$(fm_task_inbox_due_action "$STATE" worker)" in ring\ *) ;; *) exit 1 ;; esac
+      inbox_steer_check thread-live worker
+      [ -f "$rec" ] && [ ! -e "$STATE/worker.inbox/.ring-state" ] && [ ! -e "$STATE/.wake-queue" ]
+    ' "$state" || fail "$status must defer the watcher doorbell and preserve its durable instruction"
+    [ -z "$(t3_dispatch_types)" ] || fail "$status with unknown background work must not start a turn"
   done
   t3_case shell-timeout interrupted
   t3_world_set 'w.shellFailure = "timeout"'
   got=$(t3_run 'word=$(fm_backend_t3code_probe thread-live); printf "%s:%s" "$word" "$(fm_backend_t3code_state_row "$word")"')
-  [ "$got" = 'interrupted:idle alive' ] || fail "a timed-out shell request must preserve the live detail verdict, got $got"
+  [ "$got" = 'alive-unknown:unknown alive' ] || fail "a timed-out shell request must preserve liveness with unknown busy state, got $got"
   [ "$(t3_shell_reads)" = 1 ] || fail "the timeout case must attempt the shell request"
-  pass "t3code probe: shell HTTP failures and timeouts preserve readable live thread detail"
+  t3_case shell-malformed ready
+  t3_world_set 'w.shellFailure = "malformed"'
+  got=$(t3_run 'fm_backend_t3code_state_row "$(fm_backend_t3code_probe thread-live)"')
+  [ "$got" = 'unknown alive' ] || fail "an invalid shell response must preserve liveness with unknown busy state, got $got"
+  pass "t3code probe: shell failures preserve liveness, report unknown busy state, and defer away-mode injection"
 }
 
 test_kill_stops_then_archives_and_tolerates_gone() {
@@ -750,8 +792,8 @@ test_busy_classify_trusts_native_idle_and_busy() {
   [ "$out" = "idle t3code-native" ] || fail "a ready t3code session with no record must classify idle t3code-native, got '$out'"
   t3_world "$(t3_thread_json thread-live error null)"
   out=$(FM_T3CODE_ORIGIN="$ORIGIN" FM_CONFIG_OVERRIDE="$CONFIG" bash -c '. "$0/bin/fm-backend.sh"; . "$0/bin/fm-busy-lib.sh"; fm_busy_classify t3code thread-live claude "$1" "$2"' "$ROOT" "$id" "$state")
-  [ "$out" = "unknown missing" ] || fail "an error session must fall through to unknown missing, got '$out'"
-  pass "fm_busy_classify: t3code native busy and idle are both trusted without a record"
+  [ "$out" = "unknown t3code-native" ] || fail "an error session must preserve native uncertainty, got '$out'"
+  pass "fm_busy_classify: t3code native busy, idle, and unknown are trusted without a record"
 }
 
 test_stale_classifier_resolves_t3_thread() {
@@ -1555,7 +1597,7 @@ test_teardown_refuses_when_t3_is_unreachable() {
   pass "fm-teardown.sh backend=t3code: refuses to return a slot a live thread still points at"
 }
 
-test_probe_preserves_detail_when_shell_unavailable
+test_probe_preserves_liveness_when_shell_unavailable
 test_stale_classifier_resolves_t3_thread
 test_t3_stale_watcher running absorb
 test_t3_stale_watcher running absorb claude

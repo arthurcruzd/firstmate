@@ -52,9 +52,9 @@
 # Classification (fm_busy_classify): busy | idle | unknown | dead, always
 # with the producing source as the second token. Precedence:
 #   1. dead endpoint (fm_busy_classify_live only) -> dead endpoint-gone
-#   2. a t3code task: the T3 server's own session status when it reads busy
-#      or idle (the provider reports it for claude and codex alike, and no
-#      shell sits in front of the agent); an unreadable server falls through
+#   2. a t3code task: the T3 server's busy, idle, or unknown verdict
+#      (the provider reports it for claude and codex alike, and no
+#      shell sits in front of the agent)
 #   3. standalone Kimi before verification       -> unknown kimi-unverified
 #   4. a valid, gen-matching, source-trusted record -> its state and source,
 #      UNLESS the record is still the untouched seed fm-spawn wrote at arm
@@ -1024,12 +1024,12 @@ fm_busy_classify() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
   local backend=$1 target=$2 harness=$3 id=$4 state=$5 tail40=${6-}
   local out rc r_state r_source native log
   # t3code first: the T3 server reports the session status for claude and
-  # codex alike, so a codex crew is classified from it instead of falling to
-  # the codex-unverified gate below; only an unreadable server falls through.
+  # codex alike. Native uncertainty must not fall through to a stale idle
+  # record or a harness-specific fallback.
   if [ "$backend" = t3code ] && command -v fm_backend_busy_state >/dev/null 2>&1; then
     native=$(fm_backend_busy_state "$backend" "$target" 2>/dev/null || true)
     case "$native" in
-      busy|idle)
+      busy|idle|unknown)
         printf '%s t3code-native' "$native"
         return 0
         ;;
@@ -1218,13 +1218,14 @@ fm_busy_classify_meta() {  # <meta-file> <id> <state-dir> [tail40]
   fm_busy_classify "$backend" "$target" "$harness" "$id" "$state" "$tail40"
 }
 
-# fm_busy_is_busy: boolean view for callers that only gate on provable
-# activity. 0 iff the classification verdict is exactly busy; idle, unknown,
-# and dead all return 1, so an unknown can never be silently promoted to
-# either boolean pole - callers that must distinguish idle from unknown read
-# the full classification instead.
+# fm_busy_is_busy: boolean activity guard. T3 native uncertainty returns 0
+# to defer delivery until idle is proven. Other unknown sources, idle, and
+# dead return 1.
 fm_busy_is_busy() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
   local verdict
   verdict=$(fm_busy_classify "$@")
-  [ "${verdict%% *}" = busy ]
+  case "$verdict" in
+    busy\ *|unknown\ t3code-native) return 0 ;;
+    *) return 1 ;;
+  esac
 }

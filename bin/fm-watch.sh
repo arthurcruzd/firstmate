@@ -428,9 +428,9 @@ hash_pane() {
   if command -v md5 >/dev/null 2>&1; then md5 -q; else md5sum | cut -d' ' -f1; fi
 }
 
-# window_is_busy: 0 (busy) iff the task's harness is PROVABLY working, through
-# the semantic busy-state contract (bin/fm-busy-lib.sh). Only an exact busy
-# verdict returns 0: idle, unknown, and dead all return 1, so a converted
+# window_is_busy: 0 when the semantic busy-state contract (bin/fm-busy-lib.sh)
+# reports busy or T3 native uncertainty, so delivery waits for idle proof.
+# Idle, other unknown sources, and dead return 1, so a converted
 # adapter whose semantic state is missing, malformed, stale, or unverified is
 # treated as not-provably-working and surfaces rather than being absorbed.
 # <tail40> is the same bounded capture already read for hashing and is passed
@@ -447,7 +447,10 @@ window_is_busy() {  # <window> <tail40>
     verdict=$(fm_busy_classify "$(window_backend "$w")" "$w" "$(window_harness "$w")" \
       "${task:-unknown}" "$STATE" "$tail40")
   fi
-  [ "${verdict%% *}" = busy ]
+  case "$verdict" in
+    busy\ *|unknown\ t3code-native) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 window_kind() {

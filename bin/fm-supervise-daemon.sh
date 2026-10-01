@@ -696,13 +696,11 @@ pane_is_busy() {  # <target> [backend]
   local target=$1 backend=${2:-tmux} native tail40 harness
   harness=$(fm_daemon_primary_harness)
   native=$(fm_backend_busy_state "$backend" "$target" 2>/dev/null)
+  # T3 has no rendered busy fallback, so require positive idle proof.
+  [ "$backend" != t3code ] || { [ "$native" != idle ]; return; }
   case "$native" in
     busy) return 0 ;;
   esac
-  # t3code's verdict is its shared thread classification, trusted for idle
-  # as well as busy (bin/fm-busy-lib.sh), and its capture is a synthetic
-  # transcript rather than a terminal, so the rendered-tail reader never applies.
-  [ "$backend" != t3code ] || return 1
   tail40=$(fm_backend_capture "$backend" "$target" 40 2>/dev/null) || return 1
   printf '%s' "$tail40" | grep -v '^[[:space:]]*$' | tail -12 \
     | fm_busy_lines_match "$harness"
@@ -730,11 +728,10 @@ task_window_harness() {  # <window> <state>
   grep '^harness=' "$meta" 2>/dev/null | cut -d= -f2- || true
 }
 
-# stale_window_is_busy: 0 when the task is PROVABLY working through the
-# semantic busy-state contract (bin/fm-busy-lib.sh), 1 when it is not, and 2
-# when the endpoint could not be read at all. Only an exact busy verdict is
-# working: unknown semantic state never becomes busy and never becomes a
-# silent idle, so a stale pane whose state cannot be proven surfaces.
+# stale_window_is_busy: 0 when the semantic busy-state contract
+# (bin/fm-busy-lib.sh) reports busy or T3 native uncertainty, 2 when capture
+# fails, and 1 otherwise. Other unknown sources surface rather than reading
+# silently idle; T3 native uncertainty defers until busy state is readable.
 stale_window_is_busy() {  # <window> <state>
   local win=$1 state=$2 backend harness label task tail40 verdict
   backend=$(task_window_backend "$win" "$state")
@@ -743,7 +740,10 @@ stale_window_is_busy() {  # <window> <state>
   label="fm-$task"
   tail40=$(fm_backend_capture "$backend" "$win" 40 "$label" 2>/dev/null) || return 2
   verdict=$(fm_busy_classify "$backend" "$win" "$harness" "$task" "$state" "$tail40")
-  [ "${verdict%% *}" = busy ]
+  case "$verdict" in
+    busy\ *|unknown\ t3code-native) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 escalate_add() {  # <state> <distilled-item>
