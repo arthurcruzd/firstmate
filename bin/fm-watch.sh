@@ -1570,9 +1570,11 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
 # window's capture is the thread's messages plus a session line, so it stays
 # byte-identical through a long tool call where a pane would keep repainting;
 # a still-running session is therefore read from the server itself before the
-# quiet transcript is reported. Only `running` defers: `starting`, a settled
-# session, a stopped or failed one, and an unreadable server all keep the
-# unchanged escalation, so a leftover status can never excuse a dead thread.
+# quiet transcript is reported. Only `running` defers, which the adapter's
+# shared rule also gives a live session with `working` background work:
+# `starting`, a settled session, `monitoring` background work, a stopped or
+# failed session whatever job outlives it, and an unreadable server all keep
+# the unchanged escalation, so a leftover status can never excuse a dead thread.
 # Returns 0 when it has handled the window, 1 to escalate on the unchanged path.
 wedge_defer_t3code_running() {  # <window> <since-file> <triage-label> <idle-age>
   local win=$1 since_file=$2 label=$3 age=$4

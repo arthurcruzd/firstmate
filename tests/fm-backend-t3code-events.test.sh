@@ -52,6 +52,8 @@ server.on('upgrade',(req,socket) => {
     if(current==='malformed') return socket.write(frame({_tag:'Chunk',requestId:'1',values:[{kind:'snapshot',snapshot:{}}]}));
     const snapshotThread = current==='level' ? thread(true) :
       current==='background' ? {...thread(false),session:{status:'ready'},backgroundLiveness:'working'} :
+      current==='monitoring' ? {...thread(false),session:{status:'ready'},backgroundLiveness:'monitoring'} :
+      current==='stopped-background' ? {...thread(false),session:{status:'stopped'},backgroundLiveness:'working'} :
       thread(false);
     chunk([{kind:'snapshot',snapshot:{threads:[snapshotThread]}}]);
     if(current==='drop') return socket.destroy();
@@ -98,7 +100,13 @@ printf 'background\n' > "$TMP_ROOT/mode"
 FM_T3CODE_RUNTIME_FILE="$TMP_ROOT/missing-runtime" FM_T3CODE_TOKEN_FILE="$TMP_ROOT/config/t3code-token" \
   node "$ROOT/bin/backends/t3code-eventwait.cjs" 0.2 owned > "$TMP_ROOT/background-events"
 assert_grep $'owned\tproject\trunning\tfalse\tcodex' "$TMP_ROOT/background-events" 'background work must be reported as running despite a ready session'
-pass 'T3 stream treats background liveness as active work'
+for mode in monitoring:ready stopped-background:stopped; do
+  printf '%s\n' "${mode%%:*}" > "$TMP_ROOT/mode"
+  FM_T3CODE_RUNTIME_FILE="$TMP_ROOT/missing-runtime" FM_T3CODE_TOKEN_FILE="$TMP_ROOT/config/t3code-token" \
+    node "$ROOT/bin/backends/t3code-eventwait.cjs" 0.2 owned > "$TMP_ROOT/background-events"
+  assert_grep $'owned\tproject\t'"${mode#*:}"$'\tfalse\tcodex' "$TMP_ROOT/background-events" "${mode%%:*} must keep the session's own status"
+done
+pass 'T3 stream treats working background liveness on a live session as active work, and only that'
 
 # Exercise the real watcher boundary with this HTTP/WebSocket server. Only the
 # final sleep/wake callbacks are replaced so fallback budgets remain observable.

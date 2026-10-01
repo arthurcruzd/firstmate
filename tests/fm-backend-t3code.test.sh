@@ -611,13 +611,14 @@ test_status_table() {
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
   [ "$got" = idle:alive ] || fail "a settled and stopped thread must not be reported dead, got $got"
   t3_world "$(t3_thread_json thread-live ready null)"
-  t3_world_set 'w.shell.threads = [{ id: "thread-live", projectId: "proj-1", session: { status: "ready" }, backgroundLiveness: "monitoring" }]'
-  got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
-  [ "$got" = busy:alive ] || fail "background work on a ready session must classify busy:alive as the stream does, got $got"
-  for status in stopped error; do
-    t3_world_set "w.threads['thread-live'].session.status = '$status'"
+  for status in ready:working:busy:alive ready:monitoring:idle:alive stopped:working:idle:dead error:working:unknown:dead; do
+    FM_T3_CASE="$status" t3_world_set '
+const [session, background] = process.env.FM_T3_CASE.split(":");
+w.threads["thread-live"].session.status = session;
+w.shell.threads = [{ id: "thread-live", projectId: "proj-1", session: { status: session }, backgroundLiveness: background }];'
+    expect=${status#*:*:}
     got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
-    [ "$got" = busy:alive ] || fail "background work on a $status session must classify busy:alive as the stream does, got $got"
+    [ "$got" = "$expect" ] || fail "${status%:*:*} background on a session should classify $expect as the stream does, got $got"
   done
   t3_world_set 'w.threads["thread-live"].session.status = "running"'
   : > "$LOG"
@@ -746,11 +747,15 @@ test_stale_classifier_resolves_t3_thread() {
 # Drive the real watcher with an unchanged transcript and an expired wedge
 # timer. The pipeline fixture binds to a real repository's branch and HEAD,
 # so fm-crew-state.sh performs its ordinary run attribution.
-test_t3_stale_watcher() {  # <session-status> <absorb|surface|dead> [harness]
-  local session=$1 expected=$2 harness=${3:-codex} state fb hash out i
+test_t3_stale_watcher() {  # <session-status> <absorb|surface|dead> [harness] [background-liveness]
+  local session=$1 expected=$2 harness=${3:-codex} background=${4:-} state fb hash out i
   local thread=6a0e1f2b-3c4d-4a5b-8c6d-0123456789ab
-  t3_case "watch-$session-$harness" "$session"
+  t3_case "watch-$session-$harness-${background:-none}" "$session"
   t3_world "$(t3_thread_json "$thread" "$session" null)"
+  if [ -n "$background" ]; then
+    FM_T3_BG="$background" FM_T3_THREAD="$thread" \
+      t3_world_set 'w.shell.threads = [{ id: process.env.FM_T3_THREAD, projectId: "proj-1", backgroundLiveness: process.env.FM_T3_BG }]'
+  fi
   if [ "$session" = running ]; then
     t3_world_set 'Object.values(w.threads)[0].latestTurn.state = "running"'
   fi
@@ -806,7 +811,7 @@ SH
   fi
   wait "$WATCH_PID" 2>/dev/null || true
   WATCH_PID=
-  pass "T3 stale watcher: harness=$harness session=$session -> $expected"
+  pass "T3 stale watcher: harness=$harness session=$session background=${background:-none} -> $expected"
 }
 
 test_control_lib_tables() {
@@ -1533,6 +1538,10 @@ test_t3_stale_watcher starting surface
 test_t3_stale_watcher ready surface
 test_t3_stale_watcher stopped dead
 test_t3_stale_watcher error dead
+test_t3_stale_watcher ready absorb codex working
+test_t3_stale_watcher ready surface codex monitoring
+test_t3_stale_watcher stopped dead codex working
+test_t3_stale_watcher error dead codex working
 test_missing_token_names_mint_command
 test_rejected_token_names_mint_command
 test_missing_origin_names_runtime_file
