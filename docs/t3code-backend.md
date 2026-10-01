@@ -124,6 +124,7 @@ Thread persistence alone does not prove a live agent.
 While HTTP is unavailable, Firstmate reads `unknown unreadable` and does not treat the outage as proof that a replacement agent is safe.
 After reconnection, `starting` and `running` read busy/alive; `ready`, `idle`, and `interrupted` read idle/alive; `stopped` and `error` read dead; a settled thread whose session was stopped by T3 reads idle/alive; an archived thread or HTTP 404 reads missing.
 A thread whose shell row reports background work, such as a terminal job that outlived its turn, reads busy/alive unless the thread is archived.
+That includes `monitoring`, because T3's own auto-settle treats any background liveness as unsettled, and the watcher's busy-age bound still surfaces a wedge.
 The stream reader and the HTTP probe share that rule in `bin/backends/t3code-thread-status.cjs`, and the status table in `bin/backends/t3code.sh` owns these mappings for the watcher and recovery callers.
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
 A new turn continues the same driver and transcript; `fm-control.sh relaunch` remains refused.
@@ -174,8 +175,11 @@ There is no override.
 A task still in flight when T3 Code upgrades to V2 cannot be torn down through Firstmate, so release it by hand:
 
 1. Archive the task's thread in T3 Code.
-2. For a worker, return its slot with `treehouse return --force <worktree>` from its project.
-3. Remove the task record, `state/<id>.meta`, and its other `state/<id>.*` files.
+2. For a worker, undo the per-worktree environment with `bin/fm-t3code-codex-env.sh cleanup <worktree>`, then remove `CLAUDE.local.md` and `.claude/settings.local.json` from the worktree.
+   Skipping this hands the next holder of the slot a hidden `.codex/config.toml` overlay carrying the dead task's environment, and refuses the next T3 Codex spawn there.
+3. For a worker, return its slot with `treehouse return --force <worktree>` from its project.
+   A secondmate has no slot: release its own tasks the same way, then remove its home by hand and its line from `data/secondmates.md`.
+4. Remove the task record, `state/<id>.meta`, and its other `state/<id>.*` files.
 
 The live guard below refreshes version and protocol evidence after an upgrade.
 
