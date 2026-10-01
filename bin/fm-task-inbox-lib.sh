@@ -12,15 +12,14 @@
 # none of them restates the format.
 #
 # Design (captain-adopted, data/fm-send-reliability-reframe-s1/report.md): the
-# payload moves to the filesystem, which is reliable; the endpoint receives only
-# a short constant doorbell. Pane backends type its line, while T3 Code starts a
-# native turn with the same text. While the endpoint remains available, that
+# payload moves to the filesystem, which is reliable; the terminal carries only
+# a short constant doorbell line. While the endpoint remains available, that
 # line does not need to be reliable because ringing it again is free. A
 # duplicated doorbell is a no-op by construction (the worker finds the inbox
 # empty or already handled), and a swallowed doorbell is detected by the
 # absence of the worker's acknowledgement and re-rung on a bounded schedule.
 # A positively dead or missing endpoint bypasses that schedule without being
-# rung, and its unhandled record surfaces through the ordinary stale wake
+# typed into, and its unhandled record surfaces through the ordinary stale wake
 # into stuck-crewmate-recovery.
 #
 # Layout under <state-dir>:
@@ -53,7 +52,7 @@
 # attempt may ring or be skipped to protect another draft in a proven pending
 # composer; an unsubmitted copy of this doorbell is retried. After
 # FM_TASK_INBOX_RING_MAX attempts without an acknowledgement it escalates. The
-# caller owns the busy and recovery-grade endpoint checks: a busy endpoint waits,
+# caller owns the busy and recovery-grade endpoint checks: a busy pane waits,
 # while a positively dead or missing endpoint skips delivery and the ladder and
 # escalates directly. This library owns only the schedule and escalation marker.
 # If attempt bookkeeping cannot be persisted while the record remains unhandled,
@@ -334,11 +333,10 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
       return 0
       ;;
   esac
-  # Accepted pane-backend residual race: terminal input and Enter are separate
-  # delivery steps, so an agent exiting after the liveness check could leave a
-  # bare shell only a suffix; the `: ` prefix protects complete lines only. T3
-  # Code's native turn is one operation. Do not add process-bound atomic
-  # delivery here unless an incident reopens this.
+  # Accepted residual race: terminal input and Enter are separate delivery
+  # steps, so an agent exiting after the liveness check could leave a bare
+  # shell only a suffix; the `: ` prefix protects complete lines only. Do not
+  # add process-bound atomic delivery here unless an incident reopens this.
   if ! verdict=$(fm_backend_send_text_submit "$backend" "$target" "$line" 2 0.4 0.3 "$label" 2>/dev/null); then
     return 2
   fi

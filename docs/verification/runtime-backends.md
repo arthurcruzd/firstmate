@@ -1963,9 +1963,35 @@ The portable classifier regression is `tests/fm-backend-cmux.test.sh`.
 
 ## T3 Code
 
+### Stable source pin
+
+Verified on 2026-10-01 against the read-only T3 Code `v0.0.44` tag (`451afcb22d93f06cb24f9bc16703404564952553`).
+The contracts and server source contain the V1 HTTP shell, thread detail, dispatch, environment descriptor, WebSocket ticket and subscription, every command the adapter dispatches, `threadAutoSettleOptOut`, and the per-thread `thread.auto-settle.set` command.
+The checked command set is `project.create`, `project.delete`, `thread.create`, `thread.delete`, `thread.archive`, `thread.auto-settle.set`, `thread.turn.start`, `thread.turn.interrupt`, and `thread.session.stop`.
+The checked stream records are `snapshot`, `synchronized`, `project-upserted`, `project-removed`, `thread-upserted`, and `thread-removed`, with `backgroundLiveness` on shell thread rows.
+The server descriptor reports `orchestrationProtocolVersion`, and the adapter refuses V2 before mutations.
+The local running server was a later nightly, so the stable pin has source verification and portable fake-server coverage, not a live v0.0.44 run.
+
+```sh
+git -C <read-only-t3code-clone> checkout v0.0.44
+git -C <read-only-t3code-clone> describe --tags --exact-match
+rg -n 'orchestrationProtocolVersion|threadAutoSettleOptOut|thread.auto-settle.set' <read-only-t3code-clone>/packages/contracts/src <read-only-t3code-clone>/apps/server/src/environment
+rg -n 'orchestration/shell|orchestration/threads|orchestration/dispatch|websocket-ticket' <read-only-t3code-clone>/packages/contracts/src/environmentHttp.ts
+```
+
+```text
+v0.0.44
+environment.ts:146: threadAutoSettleOptOut
+environment.ts:197: orchestrationProtocolVersion
+orchestration.ts:1227: thread.auto-settle.set
+environmentHttp.ts:441: /api/auth/websocket-ticket
+environmentHttp.ts:524: /api/orchestration/threads/:threadId
+environmentHttp.ts:533: /api/orchestration/dispatch
+```
+
 ### Live lifecycle guard
 
-Verified on 2026-09-15 against T3 Code `0.0.41-nightly.20260914.1722`.
+The earlier live lifecycle guard ran on 2026-09-15 against T3 Code `0.0.41-nightly.20260914.1722`, before the stable v0.0.44 pin.
 The token-free guard checks the descriptor and strict version floor, project registration, thread creation and read, native state, capture, stop, and deletion of its own thread and project.
 It also opens the real `/ws` shell subscription with a short-lived ticket, requires its synchronized snapshot to contain the owned thread, and checks the reader completes its budget successfully.
 It uses only a fresh temporary project and never starts a model turn unless `FM_T3CODE_PROMPT_LIVE=1` or `FM_LIVE=1` is set.
