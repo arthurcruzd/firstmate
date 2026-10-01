@@ -1056,9 +1056,9 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # `missing` only in this recovery-grade view. Zellij remains unverified because
 # its secondmate ghost-tab and agent-process recovery path has not been
 # empirically validated. Orca and cmux do not support secondmate spawns. The
-# t3code adapter maps the server's own session status through its one status
-# table (bin/backends/t3code.sh): there is no process to attribute, so the
-# provider's word is the classifier.
+# t3code adapter uses its shared thread classification and status table
+# (bin/backends/t3code-thread-status.cjs and bin/backends/t3code.sh); there is
+# no process to attribute locally.
 fm_backend_agent_state() {  # <backend> <target>
   local backend=$1 target=$2
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }

@@ -2020,12 +2020,14 @@ ok - T3 Code 0.0.41-nightly.20260914.1722 live lifecycle and cleanup
 
 ```sh
 tests/fm-backend-t3code.test.sh
+tests/fm-backend-t3code-events.test.sh
 tests/fm-backend.test.sh
 tests/fm-daemon.test.sh
 ```
 
 The fake-server suite covers the token and version gates, project matching, create and turn-start payloads, effort option ids, capture, keys, native status, stop-then-archive cleanup, per-directory environment, worker and secondmate spawn, the secondmate bearer link, launch-setting refusals, abort cleanup lease retention, tracked Codex configuration preservation, teardown ordering, native exit, relaunch refusal, and away-target lookup.
-It also drives the watcher through the T3 wedge and dead-agent paths.
+It also drives the watcher through the T3 wedge and dead-agent paths, including stopped or failed sessions with background work, live working jobs, and idle monitoring jobs.
+`tests/fm-backend-t3code-events.test.sh` covers the shared classification on the stream path, subscription framing, thread filtering, reconnect reconciliation, deduplication, and polling fallback.
 `tests/fm-daemon.test.sh` covers discovery precedence and native busy state.
 
 The tracked Codex configuration guard passed on 2026-09-15 with `codex-cli 0.154.0` and Python 3.14.7.
@@ -2042,7 +2044,7 @@ ok - codex-cli 0.154.0: project config retained; shell FM_TASK_ID=t3codextrk2
 
 ### Additional live evidence
 
-The initial API probe ran on 2026-09-14 against the verified floor, T3 Code `0.0.41-nightly.20260914.1707`.
+The initial API probe ran on 2026-09-14 against the then-current floor, T3 Code `0.0.41-nightly.20260914.1707`, which the current version gate rejects.
 It proved bearer authorization, project and external-worktree binding, Claude mid-turn steering, interrupt, the `null` to `starting` to `running` to `ready` to `stopped` status sequence, and that thread archive or deletion does not remove the worktree.
 
 Additional adapter smokes ran on 2026-09-15 against T3 Code `0.0.41-nightly.20260914.1722`.

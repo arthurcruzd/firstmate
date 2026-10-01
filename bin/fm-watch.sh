@@ -76,8 +76,8 @@
 #                          agent, for human inspection only - never an automatic
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
-#                          At escalation time a T3 Code session the server still
-#                          reports running resets the timer instead
+#                          At escalation time a T3 Code thread whose shared
+#                          classification still reads running resets the timer
 #                          (wedge_defer_t3code_running).
 #   stale: <window> (unread firstmate instruction: ...)
 #                          the steering-inbox ladder spent its delivery-attempt
@@ -1520,8 +1520,8 @@ wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-h
 # already own on their existing bounded cadences and only a pane that would
 # otherwise alarm pays for a backend read. A T3 Code window gets one more
 # consult after those (wedge_defer_t3code_running): its transcript can stay
-# byte-identical through a long tool call, so the server's own session status
-# is read before a still-running turn is reported as a wedge.
+# byte-identical through a long tool call, so the shared thread classification
+# is rechecked before active work is reported as a wedge.
 wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-file> <task> <pane-hash>
   local win=$1 since_file=$2 label=$3 escalation_file=$4 task=$5 hash=$6 since age n reason evidence
   since=$(cat "$since_file" 2>/dev/null || true)
@@ -1572,7 +1572,7 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
 # a still-running session is therefore read from the server itself before the
 # quiet transcript is reported. Only `running` defers, which the adapter's
 # shared rule also gives a live session with `working` background work:
-# `starting`, a settled session, `monitoring` background work, a stopped or
+# `starting`, a settled session, idle `monitoring` background work, a stopped or
 # failed session whatever job outlives it, and an unreadable server all keep
 # the unchanged escalation, so a leftover status can never excuse a dead thread.
 # Returns 0 when it has handled the window, 1 to escalate on the unchanged path.
