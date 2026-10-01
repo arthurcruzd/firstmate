@@ -63,18 +63,18 @@ discover_supervisor_target() {
 
 # discover_supervisor_t3code_thread: the t3code rule both resolvers share.
 # Cheap gate first so a home that never selected t3code makes no HTTP call:
-# explicit t3code selection, a T3 origin (the runtime file or
-# FM_T3CODE_ORIGIN), and a bearer must all be present. Then the adapter's cwd
+# explicit t3code selection (fm_backend_explicit_name), a T3 origin (the
+# adapter's runtime file or FM_T3CODE_ORIGIN), and a bearer must all be present. Then the adapter's cwd
 # match over this home (bin/backends/t3code.sh
 # fm_backend_t3code_thread_for_home): exactly one live thread prints its id;
 # none or an unreadable server returns 1 silently; more than one returns 2
 # after the adapter has named the ids on stderr. Anything but 0 falls through.
 discover_supervisor_t3code_thread() {
   command -v fm_backend_source >/dev/null 2>&1 || return 1
-  [ "${FM_BACKEND:-}" = t3code ] || [ "$(cat "$FM_BACKEND_CONFIG_DIR/backend" 2>/dev/null)" = t3code ] || return 1
-  [ -n "${FM_T3CODE_ORIGIN:-}" ] || [ -f "${HOME:-}/.t3/userdata/server-runtime.json" ] || return 1
-  [ -s "$FM_BACKEND_CONFIG_DIR/t3code-token" ] || return 1
+  [ "$(fm_backend_explicit_name)" = t3code ] || return 1
   fm_backend_source t3code 2>/dev/null || return 1
+  [ -n "${FM_T3CODE_ORIGIN:-}" ] || [ -f "$(fm_backend_t3code_runtime_file)" ] || return 1
+  [ -s "$(fm_backend_t3code_config_dir)/t3code-token" ] || return 1
   fm_backend_t3code_thread_for_home "${FM_HOME:-.}"
 }
 

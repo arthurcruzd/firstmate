@@ -233,6 +233,26 @@ fm_backend_detect_cmux_app_is_ancestor() {
   return 1
 }
 
+# fm_backend_explicit_name: the explicitly selected backend, FM_BACKEND env
+# then config/backend; returns 1 when neither selects one. fm_backend_name and
+# the away-mode t3code discovery gate (bin/fm-supervisor-target-lib.sh) share it.
+fm_backend_explicit_name() {
+  local line v
+  if [ -n "${FM_BACKEND:-}" ]; then
+    printf '%s' "$FM_BACKEND"
+    return 0
+  fi
+  [ -f "$FM_BACKEND_CONFIG_DIR/backend" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    v=$(printf '%s' "$line" | tr -d '[:space:]')
+    if [ -n "$v" ]; then
+      printf '%s' "$v"
+      return 0
+    fi
+  done < "$FM_BACKEND_CONFIG_DIR/backend"
+  return 1
+}
+
 # fm_backend_name: resolve the ACTIVE backend for a NEW spawn, absent an
 # explicit per-task override. Precedence: FM_BACKEND env, then config/backend
 # (a single word on its first non-empty line, mirroring config/crew-harness),
@@ -246,20 +266,8 @@ fm_backend_detect_cmux_app_is_ancestor() {
 # or ancestry, after the claude wrapper stripped CMUX_WORKSPACE_ID) is visibly
 # distinct from the primary-marker case.
 fm_backend_name() {
-  local line v detected marker
-  if [ -n "${FM_BACKEND:-}" ]; then
-    printf '%s' "$FM_BACKEND"
-    return 0
-  fi
-  if [ -f "$FM_BACKEND_CONFIG_DIR/backend" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      v=$(printf '%s' "$line" | tr -d '[:space:]')
-      if [ -n "$v" ]; then
-        printf '%s' "$v"
-        return 0
-      fi
-    done < "$FM_BACKEND_CONFIG_DIR/backend"
-  fi
+  local detected marker
+  fm_backend_explicit_name && return 0
   # Called directly (not in a command substitution) so the detect signal
   # globals survive into the notice below.
   if fm_backend_detect >/dev/null; then

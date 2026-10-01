@@ -123,7 +123,8 @@ Thread persistence alone does not prove a live agent.
 
 While HTTP is unavailable, Firstmate reads `unknown unreadable` and does not treat the outage as proof that a replacement agent is safe.
 After reconnection, `starting` and `running` read busy/alive; `ready`, `idle`, and `interrupted` read idle/alive; `stopped` and `error` read dead; a settled thread whose session was stopped by T3 reads idle/alive; an archived thread or HTTP 404 reads missing.
-The status table in `bin/backends/t3code.sh` owns these mappings for the watcher and recovery callers.
+A thread whose shell row reports background work, such as a terminal job that outlived its turn, reads busy/alive unless the thread is archived.
+The stream reader and the HTTP probe share that rule in `bin/backends/t3code-thread-status.cjs`, and the status table in `bin/backends/t3code.sh` owns these mappings for the watcher and recovery callers.
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
 A new turn continues the same driver and transcript; `fm-control.sh relaunch` remains refused.
 Teardown still requires a successful stop and archive before returning the worktree.
@@ -169,6 +170,13 @@ The adapter compares the complete semantic version, including prerelease identif
 Build metadata does not affect ordering, and the stable `0.0.41` release sorts after its prereleases.
 The descriptor must advertise `threadAutoSettleOptOut` and report `orchestrationProtocolVersion` as absent or `1`, and the configured bearer must authorize a shell read.
 Orchestrator V2 removes the HTTP dispatch path and renames commands, so this adapter refuses it before spawn, control, or teardown mutations.
+There is no override.
+A task still in flight when T3 Code upgrades to V2 cannot be torn down through Firstmate, so release it by hand:
+
+1. Archive the task's thread in T3 Code.
+2. For a worker, return its slot with `treehouse return --force <worktree>` from its project.
+3. Remove the task record, `state/<id>.meta`, and its other `state/<id>.*` files.
+
 The live guard below refreshes version and protocol evidence after an upgrade.
 
 ## Active limits

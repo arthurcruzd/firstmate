@@ -3014,10 +3014,15 @@ test_discover_supervisor_t3code_after_env_tmux_and_herdr() {
     fi
     [ "$out" = firstmate:0 ] || fail "without explicit T3 selection the tmux fallback must stand"
     [ ! -s "$dir/calls" ] || fail "without explicit T3 selection the adapter must not be consulted"
-    printf 't3code\n' > "$dir/config/backend"
+    printf '\n t3code \n' > "$dir/config/backend"
+    [ "$(fm_backend_name)" = t3code ] || fail "spawns must read the padded config/backend as t3code"
     out=$(FM_SUPERVISOR_TARGET='' FM_SUPERVISOR_BACKEND='' TMUX_PANE='' HERDR_ENV='' HERDR_PANE_ID='' discover_supervisor_target) \
       || fail "one live T3 thread in the home must resolve the target cleanly"
     [ "$out" = thread-captain ] || fail "the target should be the live thread id, got '$out'"
+    if out=$(FM_BACKEND=tmux FM_SUPERVISOR_TARGET='' FM_SUPERVISOR_BACKEND='' TMUX_PANE='' HERDR_ENV='' HERDR_PANE_ID='' discover_supervisor_target); then
+      fail "FM_BACKEND=tmux must override config/backend for T3 supervisor discovery"
+    fi
+    [ "$out" = firstmate:0 ] || fail "FM_BACKEND=tmux must leave the tmux fallback, got '$out'"
     out=$(FM_SUPERVISOR_TARGET='' FM_SUPERVISOR_BACKEND='' TMUX_PANE='' HERDR_ENV='' HERDR_PANE_ID='' discover_supervisor_backend) \
       || fail "one live T3 thread in the home must resolve the backend cleanly"
     [ "$out" = t3code ] || fail "the backend should be t3code, got '$out'"
