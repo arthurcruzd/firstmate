@@ -351,6 +351,7 @@ process.stdout.write(require(process.argv[1])(t));
 # table. Thread detail omits backgroundLiveness, which can change only a live,
 # idle session's word, so only those rows read the thread's shell row and
 # apply the shared rule (t3code-thread-status.cjs) to its background work.
+# A failed shell request leaves the successful detail verdict intact.
 fm_backend_t3code_probe() {  # <thread-id>
   local word shell
   word=$(fm_backend_t3code_detail_word "$1")
@@ -358,7 +359,7 @@ fm_backend_t3code_probe() {  # <thread-id>
     ready|idle|interrupted) ;;
     *) printf '%s' "$word"; return 0 ;;
   esac
-  shell=$(fm_backend_t3code_api GET /api/orchestration/shell 2>/dev/null) || { printf 'http-failure'; return 0; }
+  shell=$(fm_backend_t3code_api GET /api/orchestration/shell 2>/dev/null) || { printf '%s' "$word"; return 0; }
   printf '%s' "$shell" | node -e '
 const [rule, id, status] = process.argv.slice(1);
 const row = (JSON.parse(require("fs").readFileSync(0, "utf8")).threads || []).find((t) => t.id === id);
