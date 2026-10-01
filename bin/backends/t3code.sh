@@ -173,7 +173,7 @@ const compare = (a, b) => {
 const have = parse(version), want = parse(min);
 const ok = have && want && compare(have, want) >= 0;
 if (!ok) { console.error(`error: backend=t3code requires a T3 server >= ${min}; this one reports ${version || "no version"}; upgrade T3 Code`); process.exit(1); }
-if (data.orchestrationProtocolVersion !== undefined && data.orchestrationProtocolVersion !== 1) { console.error(`error: backend=t3code requires orchestration protocol V1; T3 ${version} reports ${data.orchestrationProtocolVersion}; V2 removes HTTP dispatch`); process.exit(1); }
+if (data.orchestrationProtocolVersion !== undefined && data.orchestrationProtocolVersion !== 1) { console.error(`error: backend=t3code requires orchestration protocol V1; T3 ${version} reports ${data.orchestrationProtocolVersion}; V2 removes HTTP dispatch; to release a task already in flight, archive its thread in T3 Code, return its slot with treehouse return --force <worktree> from its project, and remove its state/<id>.* task record files (docs/t3code-backend.md)`); process.exit(1); }
 if (!(data.capabilities && data.capabilities.threadAutoSettleOptOut === true)) { console.error(`error: backend=t3code requires threadAutoSettleOptOut; T3 ${version} does not report it; upgrade T3 Code`); process.exit(1); }
 ' "$FM_BACKEND_T3CODE_MIN_VERSION" || return 1
   fm_backend_t3code_api GET /api/orchestration/shell >/dev/null || return 1
@@ -274,7 +274,7 @@ fm_backend_t3code_thread_create() {  # <project-id> <title> <branch> <worktree> 
     "$branch_field" "$worktree_field" createdAt=@now) || return 1
   fm_backend_t3code_dispatch "$cmd" >/dev/null || return $?
   cmd=$(fm_backend_t3code_command thread.auto-settle.set "threadId=$id" 'enabled:=false') || return 1
-  fm_backend_t3code_dispatch "$cmd" >/dev/null
+  fm_backend_t3code_dispatch "$cmd" >/dev/null || return 1
 }
 
 # fm_backend_t3code_thread_for_home <home>: the live T3 thread running the
@@ -332,20 +332,27 @@ fm_backend_t3code_thread_read() {  # <thread-id> <turn-limit>
 
 # fm_backend_t3code_probe: one word naming the thread's row in the status
 # table: a session status, `archived`, `http-404`, or `http-failure`. A thread
-# with no session yet (just created) reads `idle`.
+# with no session yet (just created) reads `idle`. Thread detail omits
+# backgroundLiveness, so the thread's shell row supplies it to the rule the
+# stream reader applies (t3code-thread-status.cjs).
 fm_backend_t3code_probe() {  # <thread-id>
-  local out rc
+  local out shell rc
   out=$(fm_backend_t3code_thread_read "$1" 1 2>/dev/null) && rc=0 || rc=$?
   case "$rc" in
     0) ;;
     4) printf 'http-404'; return 0 ;;
     *) printf 'http-failure'; return 0 ;;
   esac
-  printf '%s' "$out" | node -e '
+  out=$(printf '%s' "$out" | node -e '
 const t = JSON.parse(require("fs").readFileSync(0, "utf8")).thread || {};
-const status = (t.session && t.session.status) || "idle";
-process.stdout.write(t.archivedAt ? "archived" : (status === "stopped" && t.settledAt ? "settled-stopped" : status));
-' 2>/dev/null || printf 'http-failure'
+process.stdout.write(JSON.stringify({ archivedAt: t.archivedAt, settledAt: t.settledAt, session: t.session && { status: t.session.status } }));
+' 2>/dev/null) || { printf 'http-failure'; return 0; }
+  shell=$(fm_backend_t3code_api GET /api/orchestration/shell 2>/dev/null) || { printf 'http-failure'; return 0; }
+  printf '%s' "$shell" | node -e '
+const [rule, id, detail] = process.argv.slice(1);
+const row = (JSON.parse(require("fs").readFileSync(0, "utf8")).threads || []).find((t) => t.id === id);
+process.stdout.write(require(rule)({ ...JSON.parse(detail), backgroundLiveness: row && row.backgroundLiveness }));
+' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/t3code-thread-status.cjs" "$1" "$out" 2>/dev/null || printf 'http-failure'
 }
 
 # The one status table: "<busy_state> <agent_state>" per probe row.
@@ -432,7 +439,6 @@ fm_backend_t3code_send_key() {  # <thread-id> <key>
 # Idempotent: a thread with no session to stop is already the end state.
 fm_backend_t3code_agent_stop() {  # <thread-id>
   local cmd rc
-  fm_backend_t3code_runtime_check || return 1
   cmd=$(fm_backend_t3code_command thread.session.stop "threadId=$1" createdAt=@now) || return 1
   fm_backend_t3code_dispatch "$cmd" >/dev/null && rc=0 || rc=$?
   case "$rc" in 0) return 0 ;; *) return 1 ;; esac

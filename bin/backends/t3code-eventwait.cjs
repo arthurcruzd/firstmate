@@ -5,6 +5,7 @@
 // Prints subscribed, then tab-separated thread/project/session/pending/instance
 // rows. Exit 0 means a synchronized stream lasted the budget; 2 means fallback.
 const fs = require('node:fs');
+const threadStatus = require('./t3code-thread-status.cjs');
 const [seconds, ...ids] = process.argv.slice(2);
 const wanted = new Set(ids);
 let socket;
@@ -21,11 +22,7 @@ const clean = (value) => String(value ?? '').replace(/[\t\r\n]/g, ' ');
 function row(thread) {
   if (!thread || !wanted.has(thread.id)) return;
   const pending = thread.hasPendingApprovals === true || thread.hasPendingUserInput === true;
-  const status = thread.archivedAt ? 'archived' :
-    thread.backgroundLiveness ? 'running' :
-    thread.session?.status === 'stopped' && thread.settledAt ? 'settled-stopped' :
-    thread.session?.status || 'idle';
-  console.log([thread.id, thread.projectId, status, pending, thread.modelSelection?.instanceId || 'unknown'].map(clean).join('\t'));
+  console.log([thread.id, thread.projectId, threadStatus(thread), pending, thread.modelSelection?.instanceId || 'unknown'].map(clean).join('\t'));
 }
 (async () => {
   const origin = process.env.FM_T3CODE_ORIGIN || JSON.parse(fs.readFileSync(process.env.FM_T3CODE_RUNTIME_FILE, 'utf8')).origin;

@@ -67,8 +67,8 @@ const server = http.createServer((req, res) => {
         fs.writeFileSync(path.join(caseDir, "world.json"), JSON.stringify(world));
         return req.socket.destroy();
       }
-      if (parsed.type === "thread.create" && world.dropCreateResponses > 0) {
-        world.dropCreateResponses--;
+      if ((world.dropResponses || {})[parsed.type] > 0) {
+        world.dropResponses[parsed.type]--;
         fs.writeFileSync(path.join(caseDir, "world.json"), JSON.stringify(world));
         return req.socket.destroy();
       }
@@ -480,15 +480,18 @@ test_thread_create_retries_same_command() {
 }
 
 test_v2_and_dispatch_404_refuse_control() {
-  local out
-  t3_case control-v2 running
+  local out rc id=t3v2z1 thread=3d4e5f6a-7b8c-4d9e-8f0a-23456789abcd
+  make_t3_control_task control-v2 "$id" "$thread" running
   t3_world_set 'w.descriptor.orchestrationProtocolVersion = 2'
-  out=$(t3_run 'fm_backend_t3code_agent_stop thread-live' 2>&1) && fail "V2 control must refuse"
+  out=$(run_t3_control "$id" exit); rc=$?
+  expect_code 1 "$rc" "V2 control must refuse"$'\n'"$out"
   assert_contains "$out" "V2 removes HTTP dispatch" "V2 control must explain the refusal"
-  out=$(t3_run 'fm_backend_t3code_kill thread-live' 2>&1) && fail "V2 teardown must refuse"
+  assert_contains "$out" "archive its thread in T3 Code, return its slot with treehouse return --force" \
+    "V2 refusal must name the manual recovery for a task in flight"
+  out=$(t3_run 'fm_backend_t3code_kill "$1"' "$thread" 2>&1) && fail "V2 teardown must refuse"
   [ -z "$(t3_dispatch_types)" ] || fail "V2 must not dispatch any mutation"
   t3_world_set 'w.descriptor.orchestrationProtocolVersion = 1; w.dispatch["thread.session.stop"] = {status:404,body:{reason:"route absent"}}'
-  out=$(t3_run 'fm_backend_t3code_kill thread-live' 2>&1) && fail "dispatch 404 must not prove stop and archive"
+  out=$(t3_run 'fm_backend_t3code_kill "$1"' "$thread" 2>&1) && fail "dispatch 404 must not prove stop and archive"
   assert_contains "$out" "route absent" "dispatch 404 must surface the server reason"
   [ "$(t3_dispatch_types)" = thread.session.stop ] || fail "archive must not run after stop 404"
   pass "V2 and dispatch 404 refuse control and teardown without false success"
@@ -605,6 +608,10 @@ test_status_table() {
   t3_world_set 'w.threads["thread-live"].settledAt = "2026-09-29T00:00:00Z"'
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
   [ "$got" = idle:alive ] || fail "a settled and stopped thread must not be reported dead, got $got"
+  t3_world "$(t3_thread_json thread-live ready null)"
+  t3_world_set 'w.shell.threads = [{ id: "thread-live", projectId: "proj-1", session: { status: "ready" }, backgroundLiveness: "working" }]'
+  got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
+  [ "$got" = busy:alive ] || fail "background work on a ready session must classify busy:alive as the stream does, got $got"
   t3_world "$(t3_thread_json thread-live ready '"2026-09-14T00:00:00.000Z"')"
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
   [ "$got" = unknown:missing ] || fail "an archived thread should classify unknown:missing, got $got"
@@ -617,7 +624,7 @@ test_status_table() {
   t3_world "$(t3_thread_json thread-live ready null)"
   t3_run 'fm_backend_t3code_target_exists thread-live' || fail "a live thread must exist"
   [ "$(t3_run 'fm_backend_t3code_composer_state thread-live')" = empty ] || fail "a live thread's composer is always empty"
-  pass "t3code status table: every session status, archived, 404, and unreachable rows"
+  pass "t3code status table: every session status, background work, archived, 404, and unreachable rows"
 }
 
 test_kill_stops_then_archives_and_tolerates_gone() {
@@ -1364,7 +1371,7 @@ test_uncertain_thread_creation_keeps_lease() {
   local id out rc
   id=t3uncertain
   t3_case spawn-uncertain ready
-  t3_world_set 'w.dropCreateResponses = 2'
+  t3_world_set 'w.dropResponses = { "thread.create": 2 }'
   t3_worker_setup "$id"
   out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
   expect_code 1 "$rc" "two lost creation responses must abort spawn"
@@ -1373,6 +1380,21 @@ test_uncertain_thread_creation_keeps_lease() {
   [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -eq 0 ] || fail "uncertain creation returned the lease"
   assert_absent "$CASE_DIR/state/$id.meta" "uncertain creation must not publish metadata"
   pass "two lost creation responses retain the lease even when an immediate thread probe is 404"
+}
+
+test_lost_auto_settle_responses_return_archived_lease() {
+  local id=t3autosettle out rc
+  t3_case spawn-auto-settle ready
+  t3_world_set 'w.recordCreatedThreads = true; w.dropResponses = { "thread.auto-settle.set": 2 }'
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "two lost auto-settle responses must abort spawn"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = "thread.create thread.auto-settle.set thread.auto-settle.set thread.session.stop thread.archive" ] \
+    || fail "a created thread must be stopped and archived, got '$(t3_dispatch_types)'"
+  assert_not_contains "$out" "had two transport failures" "a known thread must not be reported as uncertain creation"
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt \
+    "$(t3_log_line_of 'r.body && r.body.type === "thread.archive"')" ] || fail "the lease must return after the archive"$'\n'"$out"
+  pass "lost auto-settle responses leave a known thread, so the abort archives it and returns the lease"
 }
 
 test_scout_teardown_stops_and_archives_before_slot_return() {
@@ -1537,3 +1559,4 @@ test_spawn_refuses_launch_settings_t3_cannot_honor launch-env-allowlist HOME "co
 test_spawn_abort_returns_lease_only_after_archive 200
 test_spawn_abort_returns_lease_only_after_archive 500
 test_uncertain_thread_creation_keeps_lease
+test_lost_auto_settle_responses_return_archived_lease
