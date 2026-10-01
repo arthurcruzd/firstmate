@@ -348,14 +348,14 @@ process.stdout.write(require(process.argv[1])(t));
 }
 
 # fm_backend_t3code_probe: one word naming the thread's row in the status
-# table. Thread detail omits backgroundLiveness, so for an idle row, the one
-# answer background work can change, the thread's shell row decides it.
+# table. Thread detail omits backgroundLiveness, so unless the thread is gone,
+# unreadable, or already busy, its shell row decides whether background work
+# makes it `running`.
 fm_backend_t3code_probe() {  # <thread-id>
   local word shell
   word=$(fm_backend_t3code_detail_word "$1")
   case "$word" in
-    ready|idle|interrupted|settled-stopped) ;;
-    *) printf '%s' "$word"; return 0 ;;
+    archived|http-404|http-failure|starting|running) printf '%s' "$word"; return 0 ;;
   esac
   shell=$(fm_backend_t3code_api GET /api/orchestration/shell 2>/dev/null) || { printf 'http-failure'; return 0; }
   printf '%s' "$shell" | node -e '
