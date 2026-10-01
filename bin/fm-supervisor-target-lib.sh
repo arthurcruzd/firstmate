@@ -70,9 +70,10 @@ discover_supervisor_target() {
 # after the adapter has named the ids on stderr. Anything but 0 falls through.
 discover_supervisor_t3code_thread() {
   command -v fm_backend_source >/dev/null 2>&1 || return 1
+  [ "${FM_BACKEND:-}" = t3code ] || [ "$(cat "$FM_BACKEND_CONFIG_DIR/backend" 2>/dev/null)" = t3code ] || return 1
+  [ -n "${FM_T3CODE_ORIGIN:-}" ] || [ -f "${HOME:-}/.t3/userdata/server-runtime.json" ] || return 1
+  [ -s "$FM_BACKEND_CONFIG_DIR/t3code-token" ] || return 1
   fm_backend_source t3code 2>/dev/null || return 1
-  [ -n "${FM_T3CODE_ORIGIN:-}" ] || [ -f "$(fm_backend_t3code_runtime_file)" ] || return 1
-  [ -f "$(fm_backend_t3code_config_dir)/t3code-token" ] || return 1
   fm_backend_t3code_thread_for_home "${FM_HOME:-.}"
 }
 

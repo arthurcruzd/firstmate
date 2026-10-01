@@ -170,18 +170,6 @@ fm_backend_detect() {
     printf 'cmux'
     return 0
   fi
-  # T3 injects no environment marker. Only a configured, authorized shell
-  # snapshot with one live worktree-less thread in this home proves the host.
-  if [ -s "$FM_BACKEND_CONFIG_DIR/t3code-token" ] && command -v node >/dev/null 2>&1; then
-    fm_backend_source t3code || return 1
-    if { [ -n "${FM_T3CODE_ORIGIN:-}" ] || [ -s "$(fm_backend_t3code_runtime_file)" ]; } \
-      && fm_backend_t3code_thread_for_home "$FM_HOME" >/dev/null 2>&1; then
-      FM_BACKEND_DETECTED=t3code
-      FM_BACKEND_DETECT_SIGNAL=T3-shell-cwd
-      printf 't3code'
-      return 0
-    fi
-  fi
   return 1
 }
 
@@ -254,7 +242,7 @@ fm_backend_detect_cmux_app_is_ancestor() {
 # precedence over this resolution entirely; it is not read here. Auto-detect
 # fires only when nothing was explicitly configured, so an explicit setting
 # always wins. Auto-detected herdr stays silent like tmux. Auto-detected cmux
-# and t3code print a loud stderr notice because both remain experimental. The
+# prints a loud stderr notice because it remains experimental. The
 # cmux notice names the winning signal, so a fallback-detected cmux (bundle id
 # or ancestry, after the claude wrapper stripped CMUX_WORKSPACE_ID) is visibly
 # distinct from the primary-marker case.
@@ -284,9 +272,6 @@ fm_backend_name() {
         *) marker="CMUX_WORKSPACE_ID" ;;
       esac
       echo "NOTICE: auto-detected cmux runtime ($marker) - spawning into the EXPERIMENTAL cmux backend. Set config/backend or pass --backend tmux to opt out." >&2
-    fi
-    if [ "$detected" = t3code ]; then
-      echo "NOTICE: auto-detected t3code runtime (T3 shell cwd matches this home) - spawning into the EXPERIMENTAL t3code backend. Set config/backend or pass --backend tmux to opt out." >&2
     fi
     printf '%s' "$detected"
     return 0
