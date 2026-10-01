@@ -12,16 +12,17 @@ T3 Code runs only the `claude` and `codex` harnesses; every other harness is ref
 
 Prerequisites:
 
-- A running T3 Code server, version 0.0.41-nightly.20260914.1707 or newer, whose `GET /.well-known/t3/environment` descriptor reports the `threadSettlement` capability.
+- A running T3 Code server at stable v0.0.44 or a later V1 build, whose `GET /.well-known/t3/environment` descriptor reports `threadAutoSettleOptOut`.
 - `node`, which the adapter uses to speak HTTP, and `treehouse`.
 - The universal harness and toolchain requirements in [`configuration.md`](configuration.md#toolchain).
 
 Select T3 Code with local `config/backend` containing `t3code`, `FM_BACKEND=t3code` for one launch, or `--backend t3code` for one task.
-Without an explicit selection, a configured server can identify the active supervisor by its home thread.
+T3 Code is explicit-only for task dispatch; a configured server does not select this backend automatically.
+An explicitly configured T3 home can identify its active supervisor by its home thread.
 The shared selection rules and precedence are in [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend).
 
 The server origin is read from `~/.t3/userdata/server-runtime.json` (`origin`); `FM_T3CODE_ORIGIN` overrides it.
-Before any spawn mutates repository state, Firstmate requires the descriptor to pass the version floor and capability check and requires an authorized read of `GET /api/orchestration/shell`.
+Before spawn, control, or teardown mutates T3 state, Firstmate requires the descriptor to report V1 (or omit the protocol version), pass the stable version and capability checks, and authorize a read of `GET /api/orchestration/shell`.
 
 ### Bearer token
 
@@ -32,7 +33,7 @@ npx t3@<serverVersion> auth session issue --json --ttl 30d --label firstmate
 ```
 
 Write the JSON `token` field to the local, gitignored `config/t3code-token` as one line with mode 0600.
-The session carries the `orchestration:read` and `orchestration:operate` scopes, and desktop restarts do not revoke it.
+The CLI-issued session is an administrative bearer that includes orchestration read and operate scopes; desktop restarts do not revoke it.
 A missing token or a 401 refuses with one error that names this mint command with the live server version.
 A secondmate spawned on this backend gets `config/t3code-token` as a symlink to the primary's token file, so its own daemon and crew use the same bearer without a copy of the secret, and a re-minted token reaches them.
 
@@ -41,7 +42,7 @@ A secondmate spawned on this backend gets `config/t3code-token` as a symlink to 
 `config/t3code-instances` maps a harness to a T3 provider instance id, one `harness=instanceId` line each; the defaults are `claude=claudeAgent` and `codex=codex`.
 The file is part of the primary's inherited local material, so every secondmate home receives the primary's mapping and its own T3 workers launch on the same provider instances; a home without the file falls back to those bare defaults, which need not name a configured account.
 A task's `--model` must be a slug in T3's model catalog; an unknown slug leaves the session in `error`.
-`--model default` uses the T3 project's default model selection and refuses when the project has none.
+`--model default` uses the T3 project's default model only when its instance matches `config/t3code-instances`; otherwise it refuses and asks for an explicit `--model`.
 `--effort` rides as a provider option, `effort` for claude (`low|medium|high|xhigh|max`) and `reasoningEffort` for codex (`low|medium|high|xhigh`); `default` sends no option, and a value outside a harness's set is refused.
 
 ## Task shape and metadata
@@ -67,7 +68,8 @@ A secondmate record carries the ordinary `home=` and `projects=` lines as on eve
 T3 sets environment variables per provider instance, never per thread, so nothing can be typed into a pane before launch.
 Each harness reads its own configuration from the thread's working directory instead, and Firstmate writes the facts a pane would have exported into that directory before the launch turn.
 For `claude` that is an `env` block in the directory's `.claude/settings.local.json`, merged alongside the busy hooks a worker already carries there; for `codex` it is a `.codex/config.toml` holding a `[shell_environment_policy]` `set` table.
-Untracked environment files are git-excluded and removed at teardown.
+Firstmate-created untracked environment files are git-excluded and removed at teardown.
+An existing untracked `.codex/config.toml` without Firstmate's marker is preserved and refused.
 For a tracked `.codex/config.toml`, Firstmate preserves the project bytes and appends its policy only if the file does not already define `shell_environment_policy`, including through dotted or quoted keys.
 `bin/fm-t3code-codex-env.sh` owns the tracked overlay, its private worktree Git journal, and its `skip-worktree` protection against ordinary staging and commits.
 Teardown restores the original bytes and prior Git flag before returning the slot; unexpected file or index edits refuse cleanup and retain the journal for recovery.
@@ -78,11 +80,11 @@ A secondmate additionally receives the launch prefix every other backend types (
 A `claude` ship or scout worker also receives the task-worker channel statement that a pane launch appends to the system prompt, written as a `CLAUDE.local.md` in its worktree because T3 owns the system prompt; a secondmate does not, as on every backend.
 Without it a Claude worker can refuse the launch brief as prompt injection, which happened live.
 The statement also tells the worker not to call T3's `link_pull_request`, `list_thread_pull_requests`, or `unlink_pull_request` tools even when host instructions request it, because those calls crash Claude's session and Firstmate already records the PR from the worker's `done: PR <url>` status line.
-A `claude` task refuses a project that tracks `CLAUDE.local.md`, because that file is the backend's channel and teardown removes it.
+A `claude` task checks the leased worktree and refuses a tracked, existing, or symlinked `CLAUDE.local.md`, because that file is the backend's channel and teardown removes it.
 
 ## Current lifecycle and safety
 
-Spawn matches the project (the home, for a secondmate) by real path against the T3 projects' `workspaceRoot`, creating one titled `fm-<directory name>` with `project.create` when absent, leases the worktree for a worker, creates the thread with `thread.create` (branch, worktree path or null, `full-access` runtime mode, the model selection), installs the harness hooks and the per-directory environment, records metadata, and then starts the launch turn with `thread.turn.start` carrying the encoded brief (the charter, for a secondmate).
+Spawn matches the project (the home, for a secondmate) by real path against the T3 projects' `workspaceRoot`, creating one titled `fm-<directory name>` with `project.create` when absent, leases the worktree for a worker, creates the thread with `thread.create` (branch, worktree path or null, `full-access` runtime mode, the model selection), disables automatic settlement for that thread with `thread.auto-settle.set`, installs the harness hooks and the per-directory environment, records metadata, and then starts the launch turn with `thread.turn.start` carrying the encoded brief (the charter, for a secondmate).
 Exact command payloads are owned by `bin/backends/t3code.sh`.
 
 `fm-peek.sh` renders `[role] text` for the recent messages followed by a `t3code: session=<status> turn=<state>` line.
@@ -105,6 +107,7 @@ A remote secondmate is unaffected by this backend: it always runs on the remote 
 Cleanup keeps all shared Firstmate safety checks.
 Before the slot returns to the pool, or before a secondmate home is removed, teardown stops the session and archives the thread (`thread.session.stop`, then `thread.archive`), because a live thread whose worktree path disappears re-creates that worktree on its next turn.
 If spawn aborts after creating the thread, cleanup uses the same order and keeps the lease when stop or archive fails, then prints the manual archive and `treehouse return --force` steps.
+Two lost `thread.create` transport responses leave ownership uncertain, so cleanup keeps the lease even when an immediate thread lookup returns 404; verify the thread before returning that slot.
 The kill is idempotent, so an already archived or deleted thread is the end state, and an unreachable server refuses the teardown rather than returning a slot a live thread still points at.
 Archiving keeps the transcript visible in T3 Code.
 The `fm-` project of a torn-down secondmate home stays in T3 Code pointing at the removed directory until the operator deletes it there: `project.delete` refuses while the archived thread exists, and forcing it would delete that thread's transcript, which is the only record once the home is gone.
@@ -119,7 +122,7 @@ If T3 cannot continue an orphaned provider session, its session projection becom
 Thread persistence alone does not prove a live agent.
 
 While HTTP is unavailable, Firstmate reads `unknown unreadable` and does not treat the outage as proof that a replacement agent is safe.
-After reconnection, `starting` and `running` read busy/alive; `ready`, `idle`, and `interrupted` read idle/alive; `stopped` and `error` read dead; an archived thread or HTTP 404 reads missing.
+After reconnection, `starting` and `running` read busy/alive; `ready`, `idle`, and `interrupted` read idle/alive; `stopped` and `error` read dead; a settled thread whose session was stopped by T3 reads idle/alive; an archived thread or HTTP 404 reads missing.
 The status table in `bin/backends/t3code.sh` owns these mappings for the watcher and recovery callers.
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
 A new turn continues the same driver and transcript; `fm-control.sh relaunch` remains refused.
@@ -159,12 +162,13 @@ Write `herdr` to `config/backend` and every new spawn uses the Herdr backend aga
 In-flight tasks keep the backend recorded in their own `state/<id>.meta`, so they are supervised and torn down through T3 Code until they finish.
 The branch can be left with `git switch main`.
 
-## Version floor
+## Verified version and protocol gate
 
-The minimum server version is `0.0.41-nightly.20260914.1707`, the verified nightly used as this adapter's floor.
+The verified source pin and minimum server version are stable `v0.0.44`.
 The adapter compares the complete semantic version, including prerelease identifiers; earlier nightlies and malformed versions fail with the installed version and required floor in the error.
 Build metadata does not affect ordering, and the stable `0.0.41` release sorts after its prereleases.
-The descriptor must also advertise `threadSettlement`, and the configured bearer must authorize a shell read before spawn mutates anything.
+The descriptor must advertise `threadAutoSettleOptOut` and report `orchestrationProtocolVersion` as absent or `1`, and the configured bearer must authorize a shell read.
+Orchestrator V2 removes the HTTP dispatch path and renames commands, so this adapter refuses it before spawn, control, or teardown mutations.
 The live guard below refreshes version and protocol evidence after an upgrade.
 
 ## Active limits
