@@ -614,6 +614,11 @@ test_status_table() {
   t3_world_set 'w.shell.threads = [{ id: "thread-live", projectId: "proj-1", session: { status: "ready" }, backgroundLiveness: "monitoring" }]'
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
   [ "$got" = busy:alive ] || fail "background work on a ready session must classify busy:alive as the stream does, got $got"
+  for status in stopped error; do
+    t3_world_set "w.threads['thread-live'].session.status = '$status'"
+    got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
+    [ "$got" = busy:alive ] || fail "background work on a $status session must classify busy:alive as the stream does, got $got"
+  done
   t3_world_set 'w.threads["thread-live"].session.status = "running"'
   : > "$LOG"
   [ "$(t3_run 'fm_backend_t3code_probe thread-live')" = running ] || fail "a running session must probe running"
