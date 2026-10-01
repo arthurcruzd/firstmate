@@ -124,6 +124,7 @@ Thread persistence alone does not prove a live agent.
 
 While HTTP is unavailable, Firstmate reads `unknown unreadable` and does not treat the outage as proof that a replacement agent is safe.
 After reconnection, `starting` and `running` read busy/alive; `ready`, `idle`, and `interrupted` read idle/alive; `stopped` and `error` read dead; a settled thread whose session was stopped by T3 reads idle/alive; an archived thread or HTTP 404 reads missing.
+If detail reports a live `ready`, `idle`, or `interrupted` session but the shell snapshot fails, the thread reads unknown/alive and busy guards defer until idle is proven.
 Background work follows T3's own classification.
 Background jobs never revive a stopped or failed session; the settled-stopped exception above still reads idle/alive.
 On a live session, a shell row reporting `working` background work, such as a terminal job that outlived its turn, reads busy/alive.
