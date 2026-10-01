@@ -42,7 +42,11 @@ const server = http.createServer((req, res) => {
     if ((req.headers.authorization || "") !== `Bearer ${world.token}`) {
       return send(401, { _tag: "EnvironmentUnauthorizedError", code: "unauthorized", reason: "bearer rejected" });
     }
-    if (url.pathname === "/api/orchestration/shell") return send(200, world.shell);
+    if (url.pathname === "/api/orchestration/shell") {
+      if (world.shellFailure === "timeout") return;
+      if (world.shellFailure === "http-error") return send(503, { reason: "shell unavailable" });
+      return send(200, world.shell);
+    }
     const thread = url.pathname.match(/^\/api\/orchestration\/threads\/([^/]+)$/);
     if (thread) {
       const hit = (world.threads || {})[thread[1]];
@@ -643,6 +647,26 @@ t3_shell_reads() {
   grep -c '"path":"/api/orchestration/shell"' "$LOG"
 }
 
+test_probe_preserves_detail_when_shell_unavailable() {
+  local status got
+  for status in ready idle interrupted; do
+    t3_case "shell-failure-$status" "$status"
+    t3_world_set 'w.shellFailure = "http-error"'
+    got=$(t3_run 'fm_backend_t3code_probe thread-live')
+    [ "$got" = "$status" ] || fail "a failed shell request must preserve detail status $status, got $got"
+    [ "$(t3_run 'fm_backend_t3code_busy_state thread-live')" = idle ] || fail "$status must remain idle when the shell request fails"
+    [ "$(t3_run 'fm_backend_t3code_agent_state thread-live')" = alive ] || fail "$status must remain alive when the shell request fails"
+    t3_run 'fm_backend_t3code_target_exists thread-live' || fail "$status must remain an existing thread when the shell request fails"
+    [ "$(t3_shell_reads)" = 4 ] || fail "each live status read must attempt the failing shell request"
+  done
+  t3_case shell-timeout interrupted
+  t3_world_set 'w.shellFailure = "timeout"'
+  got=$(t3_run 'word=$(fm_backend_t3code_probe thread-live); printf "%s:%s" "$word" "$(fm_backend_t3code_state_row "$word")"')
+  [ "$got" = 'interrupted:idle alive' ] || fail "a timed-out shell request must preserve the live detail verdict, got $got"
+  [ "$(t3_shell_reads)" = 1 ] || fail "the timeout case must attempt the shell request"
+  pass "t3code probe: shell HTTP failures and timeouts preserve readable live thread detail"
+}
+
 test_kill_stops_then_archives_and_tolerates_gone() {
   t3_case kill ready
   t3_run 'fm_backend_t3code_kill thread-live' || fail "kill of a live thread should succeed"
@@ -748,7 +772,7 @@ test_stale_classifier_resolves_t3_thread() {
 # timer. The pipeline fixture binds to a real repository's branch and HEAD,
 # so fm-crew-state.sh performs its ordinary run attribution.
 test_t3_stale_watcher() {  # <session-status> <absorb|surface|dead> [harness] [background-liveness]
-  local session=$1 expected=$2 harness=${3:-codex} background=${4:-} state fb hash out i
+  local session=$1 expected=$2 harness=${3:-codex} background=${4:-} state fb hash out _
   local thread=6a0e1f2b-3c4d-4a5b-8c6d-0123456789ab
   t3_case "watch-$session-$harness-${background:-none}" "$session"
   t3_world "$(t3_thread_json "$thread" "$session" null)"
@@ -789,7 +813,7 @@ SH
     FM_STALE_ESCALATE_SECS=1 FM_WEDGE_DEMAND_INSPECT_COUNT=3 \
     "$ROOT/bin/fm-watch.sh" > "$out" 2>&1 &
   WATCH_PID=$!
-  for i in $(seq 1 600); do
+  for _ in $(seq 1 600); do
     kill -0 "$WATCH_PID" 2>/dev/null || break
     if [ "$expected" = absorb ] && [ "$(cat "$state/.stale-since-$thread" 2>/dev/null)" != 1 ] \
         && [ -s "$state/.stale-since-$thread" ]; then break; fi
@@ -1531,6 +1555,7 @@ test_teardown_refuses_when_t3_is_unreachable() {
   pass "fm-teardown.sh backend=t3code: refuses to return a slot a live thread still points at"
 }
 
+test_probe_preserves_detail_when_shell_unavailable
 test_stale_classifier_resolves_t3_thread
 test_t3_stale_watcher running absorb
 test_t3_stale_watcher running absorb claude
