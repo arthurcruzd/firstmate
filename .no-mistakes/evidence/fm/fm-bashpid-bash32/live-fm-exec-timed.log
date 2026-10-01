@@ -1,0 +1,22 @@
+normal: rc=0 out=[ran-normal]
+PASS: fm_exec_timed runs when BASHPID is set
+unset: rc=0 out=[ran-unset]
+PASS: fm_exec_timed runs under set -u when BASHPID is unset
+old-lib: rc=127 err=[/tmp/fm-timeout-lib-old.sh: line 224: BASHPID: unbound variable]
+PASS: pre-fix fm_exec_timed dies with unbound BASHPID under set -u
+old-expansion: rc=127 err=[bash: line 1: BASHPID: unbound variable]
+PASS: pre-fix bare BASHPID fails unbound under set -u
+main_pair real fallback dollar= 1124425 1124425 1124425
+PASS: sh PPID fallback matches BASHPID in this shell
+sub_pair real fallback parent dollar= 1124428 1124428 1124427 1124427
+PASS: subshell fallback matches subshell BASHPID and differs from parent $$
+passthrough: rc=7 out=[to-out
+to-err]
+PASS: status and output pass through when BASHPID is unset
+empty: rc=0 out=[ran-empty]
+PASS: fm_exec_timed runs when BASHPID is empty
+timeout: rc=124 elapsed=1s out=[]
+PASS: fm_exec_timed still enforces the bound when BASHPID is unset
+gone-owner: rc=137 elapsed=1s out=[started]
+PASS: named gone owner ends the command when BASHPID is unset
+ALL_LIVE_CHECKS_DONE

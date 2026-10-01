@@ -1,0 +1,3 @@
+/tmp/fm-timeout-lib-old.sh: line 224: BASHPID: unbound variable
+old-test: rc=1 out=[]
+not ok - fm_exec_timed died without BASHPID (rc=1: )
