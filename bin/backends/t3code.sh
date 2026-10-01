@@ -23,7 +23,7 @@
 #                     codex=codex by default)
 # FM_T3CODE_ORIGIN overrides the origin read from ~/.t3/userdata/server-runtime.json.
 
-FM_BACKEND_T3CODE_MIN_VERSION=0.0.41-nightly.20260914.1707
+FM_BACKEND_T3CODE_MIN_VERSION=0.0.44
 
 # Sourced only through fm_backend_source in bin/fm-backend.sh, which owns
 # FM_BACKEND_CONFIG_DIR.
@@ -44,7 +44,8 @@ fm_backend_t3code_tool_check() {
 # server; a POST body is read from stdin. Prints the response body. Exit codes:
 # 0 on 2xx, 4 on HTTP 404 (a legitimate "thread gone" answer for probes), 2 on
 # a missing token or HTTP 401 (the message names the mint command with the live
-# server version), 3 when no origin can be resolved, 1 otherwise. Every failure
+# server version), 3 when no origin can be resolved, 5 on uncertain transport
+# failure, 1 otherwise. Every failure
 # prints one line on stderr carrying the server's JSON `reason` when it sent one.
 # shellcheck disable=SC2016  # Single quotes are deliberate: ${...} belongs to the Node snippet.
 FM_BACKEND_T3CODE_API_JS='
@@ -67,7 +68,7 @@ origin = origin.replace(/\/+$/, "");
 const needsAuth = !path.startsWith("/.well-known/");
 async function serverVersion() {
   try {
-    const res = await fetch(origin + "/.well-known/t3/environment");
+    const res = await fetch(origin + "/.well-known/t3/environment", { signal: AbortSignal.timeout(10000) });
     const data = await res.json();
     return data.serverVersion || "<serverVersion>";
   } catch { return "<serverVersion>"; }
@@ -84,12 +85,14 @@ async function mintHint() {
     if (!token) fail(2, `error: backend=t3code has no bearer token at ${tokenFile}; ${await mintHint()}`);
     headers.authorization = `Bearer ${token}`;
   }
-  const init = { method, headers };
+  const init = { method, headers, signal: AbortSignal.timeout(10000) };
   if (method === "POST") init.body = fs.readFileSync(0, "utf8");
   let res;
   try { res = await fetch(origin + path, init); }
-  catch (err) { fail(1, `error: backend=t3code cannot reach the T3 server at ${origin}: ${err.message}; start T3 Code and retry`); }
-  const text = await res.text();
+  catch (err) { fail(5, `error: backend=t3code cannot reach the T3 server at ${origin}: ${err.message}; start T3 Code and retry`); }
+  let text;
+  try { text = await res.text(); }
+  catch (err) { fail(5, `error: backend=t3code could not read the T3 response at ${origin}: ${err.message}; retry`); }
   if (res.ok) { process.stdout.write(text); return; }
   let reason = text;
   try { const data = JSON.parse(text); reason = data.reason || data.message || data.code || text; } catch {}
@@ -126,6 +129,11 @@ process.stdout.write(JSON.stringify(cmd));
 }
 
 fm_backend_t3code_dispatch() {  # <command-json>
+  local rc
+  printf '%s' "$1" | fm_backend_t3code_api POST /api/orchestration/dispatch && return 0
+  rc=$?
+  [ "$rc" -eq 5 ] || return "$rc"
+  # T3 deduplicates commandId. Reuse the exact body after an uncertain transport failure.
   printf '%s' "$1" | fm_backend_t3code_api POST /api/orchestration/dispatch
 }
 
@@ -165,7 +173,8 @@ const compare = (a, b) => {
 const have = parse(version), want = parse(min);
 const ok = have && want && compare(have, want) >= 0;
 if (!ok) { console.error(`error: backend=t3code requires a T3 server >= ${min}; this one reports ${version || "no version"}; upgrade T3 Code`); process.exit(1); }
-if (!(data.capabilities && data.capabilities.threadSettlement === true)) { console.error(`error: backend=t3code requires the threadSettlement capability; T3 ${version} does not report it; upgrade T3 Code`); process.exit(1); }
+if (data.orchestrationProtocolVersion !== undefined && data.orchestrationProtocolVersion !== 1) { console.error(`error: backend=t3code requires orchestration protocol V1; T3 ${version} reports ${data.orchestrationProtocolVersion}; V2 removes HTTP dispatch`); process.exit(1); }
+if (!(data.capabilities && data.capabilities.threadAutoSettleOptOut === true)) { console.error(`error: backend=t3code requires threadAutoSettleOptOut; T3 ${version} does not report it; upgrade T3 Code`); process.exit(1); }
 ' "$FM_BACKEND_T3CODE_MIN_VERSION" || return 1
   fm_backend_t3code_api GET /api/orchestration/shell >/dev/null || return 1
 }
@@ -191,7 +200,7 @@ process.stdout.write(hit ? hit.id : "");
   # project names; matching stays by real path, so the title never binds.
   title="fm-$(basename "$real")"
   cmd=$(fm_backend_t3code_command project.create "projectId=$id" "title=$title" "workspaceRoot=$real" createdAt=@now) || return 1
-  fm_backend_t3code_dispatch "$cmd" >/dev/null || return 1
+  fm_backend_t3code_dispatch "$cmd" >/dev/null || return $?
   printf '%s' "$id"
 }
 
@@ -233,16 +242,17 @@ fm_backend_t3code_model_selection() {  # <harness> <model> <effort> <project-id>
     shell=$(fm_backend_t3code_api GET /api/orchestration/shell) || return 1
     # shellcheck disable=SC2016  # Single quotes are deliberate: ${...} belongs to the Node snippet.
     printf '%s' "$shell" | node -e '
-const [projectId, option] = process.argv.slice(1);
+const [projectId, instanceId, option] = process.argv.slice(1);
 const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
 const project = (data.projects || []).find((p) => p.id === projectId);
 const selection = project && project.defaultModelSelection;
 if (!selection) { console.error(`error: T3 project ${projectId} has no default model; pass --model with a slug from the T3 model catalog`); process.exit(1); }
-const out = { instanceId: selection.instanceId, model: selection.model };
+if (selection.instanceId !== instanceId) { console.error(`error: T3 project ${projectId} defaults to instance ${selection.instanceId}, but config/t3code-instances selects ${instanceId}; pass --model explicitly`); process.exit(1); }
+const out = { instanceId, model: selection.model };
 if (option) { const [id, value] = option.split(" "); out.options = [{ id, value }]; }
 else if (selection.options !== undefined) out.options = selection.options;
 process.stdout.write(JSON.stringify(out));
-' "$project_id" "$option"
+' "$project_id" "$instance" "$option"
     return
   fi
   node -e '
@@ -255,16 +265,16 @@ process.stdout.write(JSON.stringify(out));
 
 # An empty worktree sends worktreePath null, which puts the agent in the
 # project's workspaceRoot (a secondmate home); an empty string is an HTTP 400.
-fm_backend_t3code_thread_create() {  # <project-id> <title> <branch> <worktree> <model-selection-json> -> thread id
-  local project_id=$1 title=$2 branch=$3 worktree=$4 selection=$5 id cmd branch_field worktree_field
-  id=$(fm_backend_t3code_uuid) || return 1
+fm_backend_t3code_thread_create() {  # <project-id> <title> <branch> <worktree> <model-selection-json> <thread-id>
+  local project_id=$1 title=$2 branch=$3 worktree=$4 selection=$5 id=$6 cmd branch_field worktree_field
   if [ -n "$branch" ]; then branch_field="branch=$branch"; else branch_field='branch:=null'; fi
   if [ -n "$worktree" ]; then worktree_field="worktreePath=$worktree"; else worktree_field='worktreePath:=null'; fi
   cmd=$(fm_backend_t3code_command thread.create "threadId=$id" "projectId=$project_id" "title=$title" \
     "modelSelection:=$selection" runtimeMode=full-access interactionMode=default \
     "$branch_field" "$worktree_field" createdAt=@now) || return 1
-  fm_backend_t3code_dispatch "$cmd" >/dev/null || return 1
-  printf '%s' "$id"
+  fm_backend_t3code_dispatch "$cmd" >/dev/null || return $?
+  cmd=$(fm_backend_t3code_command thread.auto-settle.set "threadId=$id" 'enabled:=false') || return 1
+  fm_backend_t3code_dispatch "$cmd" >/dev/null
 }
 
 # fm_backend_t3code_thread_for_home <home>: the live T3 thread running the
@@ -333,7 +343,8 @@ fm_backend_t3code_probe() {  # <thread-id>
   esac
   printf '%s' "$out" | node -e '
 const t = JSON.parse(require("fs").readFileSync(0, "utf8")).thread || {};
-process.stdout.write(t.archivedAt ? "archived" : (t.session && t.session.status) || "idle");
+const status = (t.session && t.session.status) || "idle";
+process.stdout.write(t.archivedAt ? "archived" : (status === "stopped" && t.settledAt ? "settled-stopped" : status));
 ' 2>/dev/null || printf 'http-failure'
 }
 
@@ -341,7 +352,7 @@ process.stdout.write(t.archivedAt ? "archived" : (t.session && t.session.status)
 fm_backend_t3code_state_row() {  # <probe-row>
   case "$1" in
     starting|running) printf 'busy alive' ;;
-    ready|idle|interrupted) printf 'idle alive' ;;
+    ready|idle|interrupted|settled-stopped) printf 'idle alive' ;;
     stopped) printf 'idle dead' ;;
     error) printf 'unknown dead' ;;
     archived|http-404) printf 'unknown missing' ;;
@@ -399,6 +410,7 @@ fm_backend_t3code_send_text_submit() {  # <thread-id> <text> <retries> <enter-sl
 
 fm_backend_t3code_send_key() {  # <thread-id> <key>
   local thread=$1 key=$2 cmd
+  fm_backend_t3code_runtime_check || return 1
   case "$key" in
     Escape|escape|Esc|esc|C-c|ctrl+c|Ctrl-c|Ctrl-C)
       cmd=$(fm_backend_t3code_command thread.turn.interrupt "threadId=$thread" createdAt=@now) || return 1
@@ -420,9 +432,10 @@ fm_backend_t3code_send_key() {  # <thread-id> <key>
 # Idempotent: a thread with no session to stop is already the end state.
 fm_backend_t3code_agent_stop() {  # <thread-id>
   local cmd rc
+  fm_backend_t3code_runtime_check || return 1
   cmd=$(fm_backend_t3code_command thread.session.stop "threadId=$1" createdAt=@now) || return 1
   fm_backend_t3code_dispatch "$cmd" >/dev/null && rc=0 || rc=$?
-  case "$rc" in 0|4) return 0 ;; *) return 1 ;; esac
+  case "$rc" in 0) return 0 ;; *) return 1 ;; esac
 }
 
 # Stop the session, then archive the thread so it can never re-create its
@@ -430,13 +443,14 @@ fm_backend_t3code_agent_stop() {  # <thread-id>
 # Idempotent: an archived or deleted thread is already the end state.
 fm_backend_t3code_kill() {  # <thread-id>
   local thread=$1 cmd rc
+  fm_backend_t3code_runtime_check || return 1
   case "$(fm_backend_t3code_probe "$thread")" in
     archived|http-404) return 0 ;;
   esac
   fm_backend_t3code_agent_stop "$thread" || return 1
   cmd=$(fm_backend_t3code_command thread.archive "threadId=$thread") || return 1
   fm_backend_t3code_dispatch "$cmd" >/dev/null && rc=0 || rc=$?
-  case "$rc" in 0|4) return 0 ;; *) return 1 ;; esac
+  case "$rc" in 0) return 0 ;; *) return 1 ;; esac
 }
 
 # Native shell stream, bounded by the watcher's existing poll budget. Node's

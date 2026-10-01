@@ -15,7 +15,7 @@ const mode = () => fs.readFileSync(root + '/mode', 'utf8').trim();
 const thread = (pending) => ({id:'owned',projectId:'project',session:{status:'running'},hasPendingUserInput:pending,modelSelection:{instanceId:'codex'}});
 const server = http.createServer((req,res) => {
   const send = (code,data) => {res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(data));};
-  if(req.url === '/.well-known/t3/environment') return send(200,{serverVersion:'0.0.41-nightly.20260914.1707',capabilities:{threadSettlement:true}});
+  if(req.url === '/.well-known/t3/environment') return send(200,{serverVersion:'0.0.44',orchestrationProtocolVersion:1,capabilities:{threadAutoSettleOptOut:true}});
   if(req.headers.authorization !== 'Bearer test-token') return send(401,{});
   if(req.url === '/api/orchestration/shell') return send(200,{projects:[],threads:[]});
   if(req.url === '/api/auth/websocket-ticket') return send(mode()==='denied'?403:200,{ticket:'ticket'});
@@ -50,7 +50,10 @@ server.on('upgrade',(req,socket) => {
     const current=mode();
     if(current==='unacknowledged') return;
     if(current==='malformed') return socket.write(frame({_tag:'Chunk',requestId:'1',values:[{kind:'snapshot',snapshot:{}}]}));
-    chunk([{kind:'snapshot',snapshot:{threads:current==='level'?[thread(true)]:[thread(false)]}}]);
+    const snapshotThread = current==='level' ? thread(true) :
+      current==='background' ? {...thread(false),session:{status:'ready'},backgroundLiveness:'working'} :
+      thread(false);
+    chunk([{kind:'snapshot',snapshot:{threads:[snapshotThread]}}]);
     if(current==='drop') return socket.destroy();
     if(current==='edge') setTimeout(()=>chunk([{kind:'thread-upserted',thread:{...thread(true),id:'foreign'}},{kind:'thread-upserted',thread:thread(true)}]),40);
   });
@@ -91,6 +94,11 @@ for mode in drop denied malformed unacknowledged; do
   [ "$rc" -eq 2 ] || fail "$mode must select polling fallback, got $rc"
 done
 pass 'T3 WebSocket subscription, thread filtering, normalization, reconnect, dedupe, and failure fallback'
+printf 'background\n' > "$TMP_ROOT/mode"
+FM_T3CODE_RUNTIME_FILE="$TMP_ROOT/missing-runtime" FM_T3CODE_TOKEN_FILE="$TMP_ROOT/config/t3code-token" \
+  node "$ROOT/bin/backends/t3code-eventwait.cjs" 0.2 owned > "$TMP_ROOT/background-events"
+assert_grep $'owned\tproject\trunning\tfalse\tcodex' "$TMP_ROOT/background-events" 'background work must be reported as running despite a ready session'
+pass 'T3 stream treats background liveness as active work'
 
 # Exercise the real watcher boundary with this HTTP/WebSocket server. Only the
 # final sleep/wake callbacks are replaced so fallback budgets remain observable.
