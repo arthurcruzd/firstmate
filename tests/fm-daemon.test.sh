@@ -3007,8 +3007,14 @@ test_discover_supervisor_t3code_after_env_tmux_and_herdr() {
   (
     t3_discovery_stub
     export FM_FAKE_T3_CALLS="$dir/calls" FM_FAKE_T3_THREAD=thread-captain
-    export FM_HOME="$dir" FM_BACKEND_CONFIG_DIR="$dir/config" FM_T3CODE_ORIGIN=http://127.0.0.1:9
+    export FM_HOME="$dir" FM_BACKEND_CONFIG_DIR="$dir/config" FM_T3CODE_ORIGIN=http://127.0.0.1:9 FM_BACKEND=
     local out
+    if out=$(FM_SUPERVISOR_TARGET='' FM_SUPERVISOR_BACKEND='' TMUX_PANE='' HERDR_ENV='' HERDR_PANE_ID='' discover_supervisor_target); then
+      fail "T3 supervisor discovery must require explicit backend selection"
+    fi
+    [ "$out" = firstmate:0 ] || fail "without explicit T3 selection the tmux fallback must stand"
+    [ ! -s "$dir/calls" ] || fail "without explicit T3 selection the adapter must not be consulted"
+    printf 't3code\n' > "$dir/config/backend"
     out=$(FM_SUPERVISOR_TARGET='' FM_SUPERVISOR_BACKEND='' TMUX_PANE='' HERDR_ENV='' HERDR_PANE_ID='' discover_supervisor_target) \
       || fail "one live T3 thread in the home must resolve the target cleanly"
     [ "$out" = thread-captain ] || fail "the target should be the live thread id, got '$out'"

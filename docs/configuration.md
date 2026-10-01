@@ -433,16 +433,14 @@ New spawns choose the backend in this order:
    A later task cannot inherit that authority by analogy.
 2. `FM_BACKEND`.
 3. The first non-empty line of local, gitignored `config/backend`.
-4. Runtime auto-detection from `$TMUX`, `HERDR_ENV=1`, cmux runtime signals, or a configured T3 shell snapshot matching this home.
+4. Runtime auto-detection from `$TMUX`, `HERDR_ENV=1`, or cmux runtime signals.
 5. Default `tmux`.
 
 If more than one runtime marker is present, detection resolves innermost-first: `$TMUX` is checked before `HERDR_ENV=1`, which is checked before cmux's primary `CMUX_WORKSPACE_ID` marker and its documented fallback signals - tmux or herdr started from inside a cmux terminal is the innermost, currently-executing layer, while cmux itself (a terminal application, not a nestable multiplexer) is checked after those multiplexer markers.
 See [`docs/cmux-backend.md`](cmux-backend.md#runtime-detection) for why cmux can be selected when `CMUX_WORKSPACE_ID` is absent.
 
-Auto-detected Herdr stays silent like tmux, while auto-detected cmux or T3 Code prints a stderr notice naming `config/backend` and `--backend tmux` because both remain experimental.
-T3 Code is checked after all tmux, Herdr, and cmux signals, only when an origin and bearer are configured and exactly one active worktree-less thread belongs to this home by real path.
-An ambiguous, absent, or unreadable T3 match leaves detection unresolved.
-Zellij and Orca are never auto-detected; select them by putting the name in a local `config/backend` file, by exporting `FM_BACKEND=<name>`, or by telling the first mate in chat.
+Auto-detected Herdr stays silent like tmux, while auto-detected cmux prints a stderr notice naming `config/backend` and `--backend tmux` because it remains experimental.
+T3 Code, Zellij, and Orca are never auto-detected; select them by putting the name in a local `config/backend` file, by exporting `FM_BACKEND=<name>`, or by telling the first mate in chat.
 
 ### Accepted backends and secondmate limits
 
@@ -533,8 +531,9 @@ Test cleanup must use the guarded path in [`docs/cmux-backend.md`](cmux-backend.
 The `/afk` sub-supervisor injects escalation digests into firstmate's own endpoint independently of where new task endpoints are spawned.
 It supports `tmux` and `herdr` supervisor panes and `t3code` supervisor threads.
 Set `FM_SUPERVISOR_BACKEND=tmux|herdr|t3code` and `FM_SUPERVISOR_TARGET=<target>` to override both axes explicitly; for herdr the target is `"<session>:<pane-id>"`, and for t3code it is the thread id.
-Without overrides, backend detection uses `$TMUX_PANE` first, then `HERDR_ENV=1` with `HERDR_PANE_ID`, then a cwd match over the T3 shell snapshot for the home's one live worktree-less thread on its project, then falls back to `tmux`.
-T3 discovery requires both an origin (`FM_T3CODE_ORIGIN` or the runtime file described in [`t3code-backend.md`](t3code-backend.md#setup)) and a `config/t3code-token` file under the effective config directory before making an HTTP call.
+Without overrides, backend detection uses `$TMUX_PANE` first, then `HERDR_ENV=1` with `HERDR_PANE_ID`, then a cwd match over the T3 shell snapshot only when T3 Code is explicitly selected, then falls back to `tmux`.
+T3 discovery requires explicit `FM_BACKEND=t3code` or `config/backend=t3code`, an origin (`FM_T3CODE_ORIGIN` or the runtime file described in [`t3code-backend.md`](t3code-backend.md#setup)), and a `config/t3code-token` file under the effective config directory before making an HTTP call.
+
 That keeps a tmux pane nested inside herdr on the tmux transport, matching the runtime backend's innermost-first rule.
 Target detection uses `FM_SUPERVISOR_TARGET`, then `$TMUX_PANE`, then `"${HERDR_SESSION:-default}:${HERDR_PANE_ID}"` under herdr, then the thread id from that T3 cwd match, then the legacy `firstmate:0` tmux fallback with a warning.
 Selecting any other supervisor backend, including `zellij`, `orca`, or `cmux`, refuses at daemon startup instead of trying tmux injection primitives against a non-tmux pane.
@@ -2400,7 +2399,7 @@ FM_SEND_SLEEP=0.4       # seconds between fm-send typed-plane submit checks
 FM_SEND_SETTLE=1        # seconds fm-send waits after a successful typed-plane submit; 0 disables
 FM_PENDING_REPLY_GRACE_SECS=120   # seconds after the request turn completes without a correlated parent report before its one recovery repost is eligible, and after the recovery turn completes before the missed-report escalation is eligible; never counted from delivery
 # sub-supervisor (bin/fm-supervise-daemon.sh); presence-gated via /afk
-FM_SUPERVISOR_BACKEND=             # optional supervisor endpoint backend override; tmux/herdr/t3code, otherwise detects $TMUX_PANE, HERDR_ENV/HERDR_PANE_ID, then the home's live T3 thread before tmux fallback
+FM_SUPERVISOR_BACKEND=             # optional supervisor endpoint backend override; tmux/herdr/t3code, otherwise detects $TMUX_PANE, HERDR_ENV/HERDR_PANE_ID, then an explicitly selected T3 thread before tmux fallback
 FM_SUPERVISOR_TARGET=              # optional supervisor endpoint target override; tmux target, herdr <session>:<pane-id>, or T3 thread id, otherwise auto-detected
 FM_INJECT_SKIP=heartbeat           # |-prefixes force-self-handled bypassing classification; empty disables
 FM_ESCALATE_BATCH_SECS=90          # buffer window for batched escalation digests; 0 = flush immediately

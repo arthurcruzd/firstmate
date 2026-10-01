@@ -35,8 +35,8 @@ FM_SUPERVISOR_BACKEND_DEFAULT="tmux"
 #      fm_backend_detect's innermost-first rule.
 #   4. The live T3 thread running in this home (discover_supervisor_t3code_thread)
 #      - T3 puts nothing into the agent's environment, so this is a cwd match
-#      over the T3 shell snapshot, consulted only when a T3 origin and bearer are
-#      configured.
+#      over the T3 shell snapshot, consulted only when t3code is explicitly
+#      selected and a T3 origin and bearer are configured.
 #   5. FM_SUPERVISOR_TARGET_DEFAULT - legacy tmux fallback (may not resolve if the
 #      session is named differently). Returns 1 so the caller can warn.
 discover_supervisor_target() {
@@ -63,8 +63,9 @@ discover_supervisor_target() {
 
 # discover_supervisor_t3code_thread: the t3code rule both resolvers share.
 # Cheap gate first so a home that never selected t3code makes no HTTP call:
-# a T3 origin (the runtime file or FM_T3CODE_ORIGIN) and a bearer must both be
-# present. Then the adapter's cwd match over this home (bin/backends/t3code.sh
+# explicit t3code selection, a T3 origin (the runtime file or
+# FM_T3CODE_ORIGIN), and a bearer must all be present. Then the adapter's cwd
+# match over this home (bin/backends/t3code.sh
 # fm_backend_t3code_thread_for_home): exactly one live thread prints its id;
 # none or an unreadable server returns 1 silently; more than one returns 2
 # after the adapter has named the ids on stderr. Anything but 0 falls through.
