@@ -348,21 +348,22 @@ process.stdout.write(require(process.argv[1])(t));
 }
 
 # fm_backend_t3code_probe: one word naming the thread's row in the status
-# table. Thread detail omits backgroundLiveness, so unless the thread is gone,
-# unreadable, or already busy, its shell row decides whether background work
-# makes it `running`.
+# table. Thread detail omits backgroundLiveness, which can change only a live,
+# idle session's word, so only those rows read the thread's shell row and
+# apply the shared rule (t3code-thread-status.cjs) to its background work.
 fm_backend_t3code_probe() {  # <thread-id>
   local word shell
   word=$(fm_backend_t3code_detail_word "$1")
   case "$word" in
-    archived|http-404|http-failure|starting|running) printf '%s' "$word"; return 0 ;;
+    ready|idle|interrupted) ;;
+    *) printf '%s' "$word"; return 0 ;;
   esac
   shell=$(fm_backend_t3code_api GET /api/orchestration/shell 2>/dev/null) || { printf 'http-failure'; return 0; }
   printf '%s' "$shell" | node -e '
-const [id, word] = process.argv.slice(1);
+const [rule, id, status] = process.argv.slice(1);
 const row = (JSON.parse(require("fs").readFileSync(0, "utf8")).threads || []).find((t) => t.id === id);
-process.stdout.write(row && row.backgroundLiveness ? "running" : word);
-' "$1" "$word" 2>/dev/null || printf 'http-failure'
+process.stdout.write(require(rule)({ session: { status }, backgroundLiveness: row && row.backgroundLiveness }));
+' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/t3code-thread-status.cjs" "$1" "$word" 2>/dev/null || printf 'http-failure'
 }
 
 # The one status table: "<busy_state> <agent_state>" per probe row.
@@ -443,8 +444,8 @@ fm_backend_t3code_send_key() {  # <thread-id> <key>
 
 # Stop the session and leave the thread where it is: the control plane's
 # `exit`. T3 has no composer to type an exit command into, and a stopped
-# session reads `stopped` (dead) in the status table, which is the proof the
-# control plane waits for. A later turn restarts the same agent with its
+# session reads `stopped` (dead) in the status table even while a background
+# job it started lives on, which is the proof the control plane waits for. A later turn restarts the same agent with its
 # transcript (verified live; docs/verification/runtime-backends.md "T3 Code").
 # Idempotent: a thread with no session to stop is already the end state.
 fm_backend_t3code_agent_stop() {  # <thread-id>

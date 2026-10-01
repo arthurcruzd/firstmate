@@ -123,8 +123,9 @@ Thread persistence alone does not prove a live agent.
 
 While HTTP is unavailable, Firstmate reads `unknown unreadable` and does not treat the outage as proof that a replacement agent is safe.
 After reconnection, `starting` and `running` read busy/alive; `ready`, `idle`, and `interrupted` read idle/alive; `stopped` and `error` read dead; a settled thread whose session was stopped by T3 reads idle/alive; an archived thread or HTTP 404 reads missing.
-A thread whose shell row reports background work, such as a terminal job that outlived its turn, reads busy/alive unless the thread is archived.
-That includes `monitoring`, because T3's own auto-settle treats any background liveness as unsettled, and the watcher's busy-age bound still surfaces a wedge.
+Background work follows T3's own classification.
+A stopped or failed session reads dead whatever background job outlives it.
+On a live session, a shell row reporting `working` background work, such as a terminal job that outlived its turn, reads busy/alive, while `monitoring` leaves the session idle/alive.
 The stream reader and the HTTP probe share that rule in `bin/backends/t3code-thread-status.cjs`, and the status table in `bin/backends/t3code.sh` owns these mappings for the watcher and recovery callers.
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
 A new turn continues the same driver and transcript; `fm-control.sh relaunch` remains refused.
