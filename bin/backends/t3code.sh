@@ -173,7 +173,7 @@ const compare = (a, b) => {
 const have = parse(version), want = parse(min);
 const ok = have && want && compare(have, want) >= 0;
 if (!ok) { console.error(`error: backend=t3code requires a T3 server >= ${min}; this one reports ${version || "no version"}; upgrade T3 Code`); process.exit(1); }
-if (data.orchestrationProtocolVersion !== undefined && data.orchestrationProtocolVersion !== 1) { console.error(`error: backend=t3code requires orchestration protocol V1; T3 ${version} reports ${data.orchestrationProtocolVersion}; V2 removes HTTP dispatch; to release a task already in flight, archive its thread in T3 Code, return its slot with treehouse return --force <worktree> from its project, and remove its state/<id>.* task record files (docs/t3code-backend.md)`); process.exit(1); }
+if (data.orchestrationProtocolVersion !== undefined && data.orchestrationProtocolVersion !== 1) { console.error(`error: backend=t3code requires orchestration protocol V1; T3 ${version} reports ${data.orchestrationProtocolVersion}; V2 removes HTTP dispatch; to release a task already in flight, archive its thread in T3 Code, run bin/fm-t3code-codex-env.sh cleanup <worktree> and remove its CLAUDE.local.md and .claude/settings.local.json, return its slot with treehouse return --force <worktree> from its project, and remove its state/<id>.* task record files (docs/t3code-backend.md)`); process.exit(1); }
 if (!(data.capabilities && data.capabilities.threadAutoSettleOptOut === true)) { console.error(`error: backend=t3code requires threadAutoSettleOptOut; T3 ${version} does not report it; upgrade T3 Code`); process.exit(1); }
 ' "$FM_BACKEND_T3CODE_MIN_VERSION" || return 1
   fm_backend_t3code_api GET /api/orchestration/shell >/dev/null || return 1
@@ -330,29 +330,39 @@ fm_backend_t3code_thread_read() {  # <thread-id> <turn-limit>
   fm_backend_t3code_api GET "/api/orchestration/threads/$1?turnLimit=$2"
 }
 
-# fm_backend_t3code_probe: one word naming the thread's row in the status
-# table: a session status, `archived`, `http-404`, or `http-failure`. A thread
-# with no session yet (just created) reads `idle`. Thread detail omits
-# backgroundLiveness, so the thread's shell row supplies it to the rule the
-# stream reader applies (t3code-thread-status.cjs).
-fm_backend_t3code_probe() {  # <thread-id>
-  local out shell rc
+# fm_backend_t3code_detail_word: the status word from thread detail alone,
+# `http-404`, or `http-failure`; enough for callers that only need to know
+# whether the thread is gone. A thread with no session yet reads `idle`.
+fm_backend_t3code_detail_word() {  # <thread-id>
+  local out rc
   out=$(fm_backend_t3code_thread_read "$1" 1 2>/dev/null) && rc=0 || rc=$?
   case "$rc" in
     0) ;;
     4) printf 'http-404'; return 0 ;;
     *) printf 'http-failure'; return 0 ;;
   esac
-  out=$(printf '%s' "$out" | node -e '
+  printf '%s' "$out" | node -e '
 const t = JSON.parse(require("fs").readFileSync(0, "utf8")).thread || {};
-process.stdout.write(JSON.stringify({ archivedAt: t.archivedAt, settledAt: t.settledAt, session: t.session && { status: t.session.status } }));
-' 2>/dev/null) || { printf 'http-failure'; return 0; }
+process.stdout.write(require(process.argv[1])(t));
+' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/t3code-thread-status.cjs" 2>/dev/null || printf 'http-failure'
+}
+
+# fm_backend_t3code_probe: one word naming the thread's row in the status
+# table. Thread detail omits backgroundLiveness, so for an idle row, the one
+# answer background work can change, the thread's shell row decides it.
+fm_backend_t3code_probe() {  # <thread-id>
+  local word shell
+  word=$(fm_backend_t3code_detail_word "$1")
+  case "$word" in
+    ready|idle|interrupted|settled-stopped) ;;
+    *) printf '%s' "$word"; return 0 ;;
+  esac
   shell=$(fm_backend_t3code_api GET /api/orchestration/shell 2>/dev/null) || { printf 'http-failure'; return 0; }
   printf '%s' "$shell" | node -e '
-const [rule, id, detail] = process.argv.slice(1);
+const [id, word] = process.argv.slice(1);
 const row = (JSON.parse(require("fs").readFileSync(0, "utf8")).threads || []).find((t) => t.id === id);
-process.stdout.write(require(rule)({ ...JSON.parse(detail), backgroundLiveness: row && row.backgroundLiveness }));
-' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/t3code-thread-status.cjs" "$1" "$out" 2>/dev/null || printf 'http-failure'
+process.stdout.write(row && row.backgroundLiveness ? "running" : word);
+' "$1" "$word" 2>/dev/null || printf 'http-failure'
 }
 
 # The one status table: "<busy_state> <agent_state>" per probe row.
@@ -388,7 +398,7 @@ fm_backend_t3code_target_exists() {  # <thread-id>
 
 # T3 has no composer to clear, so a live thread is always ready for a steer.
 fm_backend_t3code_composer_state() {  # <thread-id> [expected-label] -> empty|unknown
-  case "$(fm_backend_t3code_probe "$1")" in
+  case "$(fm_backend_t3code_detail_word "$1")" in
     archived|http-404|http-failure) printf 'unknown' ;;
     *) printf 'empty' ;;
   esac
@@ -450,7 +460,7 @@ fm_backend_t3code_agent_stop() {  # <thread-id>
 fm_backend_t3code_kill() {  # <thread-id>
   local thread=$1 cmd rc
   fm_backend_t3code_runtime_check || return 1
-  case "$(fm_backend_t3code_probe "$thread")" in
+  case "$(fm_backend_t3code_detail_word "$thread")" in
     archived|http-404) return 0 ;;
   esac
   fm_backend_t3code_agent_stop "$thread" || return 1

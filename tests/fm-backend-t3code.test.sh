@@ -486,8 +486,10 @@ test_v2_and_dispatch_404_refuse_control() {
   out=$(run_t3_control "$id" exit); rc=$?
   expect_code 1 "$rc" "V2 control must refuse"$'\n'"$out"
   assert_contains "$out" "V2 removes HTTP dispatch" "V2 control must explain the refusal"
-  assert_contains "$out" "archive its thread in T3 Code, return its slot with treehouse return --force" \
+  assert_contains "$out" "archive its thread in T3 Code, run bin/fm-t3code-codex-env.sh cleanup <worktree>" \
     "V2 refusal must name the manual recovery for a task in flight"
+  assert_contains "$out" "return its slot with treehouse return --force <worktree>" \
+    "V2 refusal must name the slot return after the environment cleanup"
   out=$(t3_run 'fm_backend_t3code_kill "$1"' "$thread" 2>&1) && fail "V2 teardown must refuse"
   [ -z "$(t3_dispatch_types)" ] || fail "V2 must not dispatch any mutation"
   t3_world_set 'w.descriptor.orchestrationProtocolVersion = 1; w.dispatch["thread.session.stop"] = {status:404,body:{reason:"route absent"}}'
@@ -609,9 +611,13 @@ test_status_table() {
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
   [ "$got" = idle:alive ] || fail "a settled and stopped thread must not be reported dead, got $got"
   t3_world "$(t3_thread_json thread-live ready null)"
-  t3_world_set 'w.shell.threads = [{ id: "thread-live", projectId: "proj-1", session: { status: "ready" }, backgroundLiveness: "working" }]'
+  t3_world_set 'w.shell.threads = [{ id: "thread-live", projectId: "proj-1", session: { status: "ready" }, backgroundLiveness: "monitoring" }]'
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
   [ "$got" = busy:alive ] || fail "background work on a ready session must classify busy:alive as the stream does, got $got"
+  t3_world_set 'w.threads["thread-live"].session.status = "running"'
+  : > "$LOG"
+  [ "$(t3_run 'fm_backend_t3code_probe thread-live')" = running ] || fail "a running session must probe running"
+  [ "$(t3_shell_reads)" = 0 ] || fail "a busy detail row must not read the shell snapshot"
   t3_world "$(t3_thread_json thread-live ready '"2026-09-14T00:00:00.000Z"')"
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
   [ "$got" = unknown:missing ] || fail "an archived thread should classify unknown:missing, got $got"
@@ -627,9 +633,14 @@ test_status_table() {
   pass "t3code status table: every session status, background work, archived, 404, and unreachable rows"
 }
 
+t3_shell_reads() {
+  grep -c '"path":"/api/orchestration/shell"' "$LOG"
+}
+
 test_kill_stops_then_archives_and_tolerates_gone() {
-  t3_case kill running
+  t3_case kill ready
   t3_run 'fm_backend_t3code_kill thread-live' || fail "kill of a live thread should succeed"
+  [ "$(t3_shell_reads)" = 1 ] || fail "kill must read the shell only for its runtime check, got $(t3_shell_reads) reads"
   [ "$(t3_dispatch_types)" = "thread.session.stop thread.archive" ] || fail "kill must stop then archive, got '$(t3_dispatch_types)'"
   local stop archive
   stop=$(t3_log_line_of 'r.body && r.body.type === "thread.session.stop"')
