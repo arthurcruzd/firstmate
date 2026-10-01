@@ -443,11 +443,12 @@ fm_backend_t3code_send_key() {  # <thread-id> <key>
 }
 
 # Stop the session and leave the thread where it is: the control plane's
-# `exit`. T3 has no composer to type an exit command into, and a stopped
-# session reads `stopped` (dead) in the status table even while a background
-# job it started lives on, which is the proof the control plane waits for. A later turn restarts the same agent with its
-# transcript (verified live; docs/verification/runtime-backends.md "T3 Code").
-# Idempotent: a thread with no session to stop is already the end state.
+# `exit`. T3 has no composer to type an exit command into, and an unsettled
+# stopped session reads `stopped` (dead) even while a background
+# job it started lives on, which is the proof the control plane waits for.
+# A later turn restarts the same agent with its transcript (verified live;
+# docs/verification/runtime-backends.md "T3 Code"). A failed stop dispatch
+# never counts as proof that the session stopped.
 fm_backend_t3code_agent_stop() {  # <thread-id>
   local cmd rc
   cmd=$(fm_backend_t3code_command thread.session.stop "threadId=$1" createdAt=@now) || return 1

@@ -22,7 +22,7 @@ An explicitly configured T3 home can identify its active supervisor by its home 
 The shared selection rules and precedence are in [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend).
 
 The server origin is read from `~/.t3/userdata/server-runtime.json` (`origin`); `FM_T3CODE_ORIGIN` overrides it.
-Before spawn, control, or teardown mutates T3 state, Firstmate requires the descriptor to report V1 (or omit the protocol version), pass the stable version and capability checks, and authorize a read of `GET /api/orchestration/shell`.
+The [version and protocol gate](#verified-version-and-protocol-gate) applies before spawn, control, or teardown mutations.
 
 ### Bearer token
 
@@ -75,7 +75,7 @@ For a tracked `.codex/config.toml`, Firstmate preserves the project bytes and ap
 Teardown restores the original bytes and prior Git flag before returning the slot; unexpected file or index edits refuse cleanup and retain the journal for recovery.
 The tracked path requires Python 3.11 or newer for TOML parsing; the script uses the first of `python3`, `python3.14`, `python3.13`, `python3.12`, or `python3.11` on `PATH` that imports `tomllib`, and refuses before any mutation when none does.
 Codex's [configuration layers](https://learn.chatgpt.com/docs/config-file/config-basic#configuration-precedence) provide no separate per-directory fragment for a thread launched at the repository root, and T3 cannot select a different CLI override or profile per thread.
-Every kind receives `GOTMPDIR` and `COMPACT_ADVISER_DISABLE=1`, plus `LAVISH_AXI_HOST` when `config/lavish-axi-host` is set; ship and scout workers also receive `FM_TASK_ID`; `TRACEPARENT` rides only when trace context is on, and only once its `traceparent=` line is recorded.
+Every kind receives `GOTMPDIR`, `COMPACT_ADVISER_DISABLE=1`, and `FM_TASK_INBOX`, plus `LAVISH_AXI_HOST` when `config/lavish-axi-host` is set; ship and scout workers also receive `FM_TASK_ID`; `TRACEPARENT` rides only when trace context is on, and only once its `traceparent=` line is recorded.
 A secondmate additionally receives the launch prefix every other backend types (`FM_ROOT_OVERRIDE`, `FM_STATE_OVERRIDE`, `FM_DATA_OVERRIDE`, `FM_PROJECTS_OVERRIDE`, and `FM_CONFIG_OVERRIDE` empty, `FM_PUBLIC_FOLLOWUP_PRIMARY_HOME`, `FM_HOME`, `FM_TRACE_CONTEXT`, `FM_SUPERVISION_MODEL`) plus `FM_SUPERVISOR_BACKEND=t3code` and its own thread id as `FM_SUPERVISOR_TARGET`, so its away daemon resolves its target exactly.
 A `claude` ship or scout worker also receives the task-worker channel statement that a pane launch appends to the system prompt, written as a `CLAUDE.local.md` in its worktree because T3 owns the system prompt; a secondmate does not, as on every backend.
 Without it a Claude worker can refuse the launch brief as prompt injection, which happened live.
@@ -98,7 +98,8 @@ The control plane ([`agent-control.md`](agent-control.md)) reads the same status
 `relaunch` is refused before anything is stopped: a T3 thread is bound to the driver that first ran it, and a turn on a stopped thread continues the same agent, so no replacement agent can be launched into the endpoint.
 
 The watcher and `fm-crew-state.sh` read the server's own session status through one table in the adapter, and both native verdicts are trusted ahead of every harness gate and hook record (source `t3code-native`), so a codex crew settles from T3's status even though codex has no verified hook writer; only an unreadable server falls through to the ordinary contract.
-A thread's capture stays byte-identical through a long tool call, so before the watcher reports an unchanged transcript as a possible wedge it reads the session status once more and resets its stale timer while the server still reports `running`; `wedge_defer_t3code_running` in `bin/fm-watch.sh` owns that consult, and every other session status keeps the ordinary escalation ladder, including its declared-wait and worktree-write deferrals; a `stopped` or `error` session reads dead and is reported once by the watcher's shared dead-record probe, as a dead pane is on tmux or Herdr.
+A thread's capture stays byte-identical through a long tool call, so before reporting a possible wedge the watcher rechecks the [shared thread classification](#restart-and-liveness-behavior) and resets its stale timer only for the `running` word, including live `working` background jobs.
+`wedge_defer_t3code_running` in `bin/fm-watch.sh` owns that consult; all other classified words keep the ordinary escalation ladder, including its declared-wait, worktree-write, and dead-record checks.
 T3 launches Claude with the `user,project,local` setting sources, so the worktree `.claude/settings.local.json` busy hooks fire as on every other backend.
 T3 starts every agent with the T3 server's own environment, not a login shell's.
 Codex runs each command through `/bin/zsh -lc` in that environment, so the Firstmate toolchain must survive the login shell's startup files, and a startup file that rebuilds `PATH` when a marker variable is missing hides it from every Codex worker; Claude's shell tool restores its own login-shell snapshot and is unaffected.
@@ -124,8 +125,9 @@ Thread persistence alone does not prove a live agent.
 While HTTP is unavailable, Firstmate reads `unknown unreadable` and does not treat the outage as proof that a replacement agent is safe.
 After reconnection, `starting` and `running` read busy/alive; `ready`, `idle`, and `interrupted` read idle/alive; `stopped` and `error` read dead; a settled thread whose session was stopped by T3 reads idle/alive; an archived thread or HTTP 404 reads missing.
 Background work follows T3's own classification.
-A stopped or failed session reads dead whatever background job outlives it.
-On a live session, a shell row reporting `working` background work, such as a terminal job that outlived its turn, reads busy/alive, while `monitoring` leaves the session idle/alive.
+Background jobs never revive a stopped or failed session; the settled-stopped exception above still reads idle/alive.
+On a live session, a shell row reporting `working` background work, such as a terminal job that outlived its turn, reads busy/alive.
+`monitoring` adds no activity verdict, so an otherwise idle live session stays idle/alive.
 The stream reader and the HTTP probe share that rule in `bin/backends/t3code-thread-status.cjs`, and the status table in `bin/backends/t3code.sh` owns these mappings for the watcher and recovery callers.
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
 A new turn continues the same driver and transcript; `fm-control.sh relaunch` remains refused.
@@ -153,9 +155,10 @@ The reader runs as a bounded child of the existing watcher.
 ## Away-mode supervisor support
 
 The away daemon can supervise a captain that runs inside a T3 thread.
-T3 puts nothing about the thread into the agent's environment, so after the explicit `FM_SUPERVISOR_TARGET`/`FM_SUPERVISOR_BACKEND` overrides and the tmux and Herdr markers, the daemon asks the server for the one live thread with no worktree of its own on the project whose `workspaceRoot` is this home; that rule runs only when a server origin and a bearer are configured.
+[`configuration.md`](configuration.md#away-mode-supervisor-backend-fm_supervisor_backend--fm_supervisor_target) owns discovery precedence and the explicit-selection, origin, and bearer prerequisites.
+T3 puts nothing about the thread into the agent's environment, so eligible discovery matches this home's real path to a project's `workspaceRoot` and selects its one unarchived thread with `worktreePath` null and a session status of `starting` or `running`.
 Two live threads in one home is an error naming both ids, resolved by setting `FM_SUPERVISOR_TARGET`; none, or an unreachable server, falls through to the ordinary tmux default.
-Busy is the server's session status alone, injection is a `thread.turn.start`, and escalations defer exactly as on every other backend.
+Busy uses the [shared thread classification](#restart-and-liveness-behavior), injection is a `thread.turn.start`, and escalations defer exactly as on every other backend.
 Only `bin/fm-afk-launch.sh start-native` launches the daemon here, as the captain's own tracked background job; `start` refuses because T3 hosts no terminal to create.
 A secondmate spawned on this backend carries its supervisor identity in its environment, so its own daemon needs no discovery.
 
@@ -169,7 +172,7 @@ The branch can be left with `git switch main`.
 
 The verified source pin and minimum server version are stable `v0.0.44`.
 The adapter compares the complete semantic version, including prerelease identifiers; earlier nightlies and malformed versions fail with the installed version and required floor in the error.
-Build metadata does not affect ordering, and the stable `0.0.41` release sorts after its prereleases.
+Build metadata does not affect ordering.
 The descriptor must advertise `threadAutoSettleOptOut` and report `orchestrationProtocolVersion` as absent or `1`, and the configured bearer must authorize a shell read.
 Orchestrator V2 removes the HTTP dispatch path and renames commands, so this adapter refuses it before spawn, control, or teardown mutations.
 There is no override.
@@ -178,8 +181,10 @@ A task still in flight when T3 Code upgrades to V2 cannot be torn down through F
 1. Archive the task's thread in T3 Code.
 2. For a worker, undo the per-worktree environment with `bin/fm-t3code-codex-env.sh cleanup <worktree>`, then remove `CLAUDE.local.md` and `.claude/settings.local.json` from the worktree.
    Skipping this hands the next holder of the slot a hidden `.codex/config.toml` overlay carrying the dead task's environment, and refuses the next T3 Codex spawn there.
+   For a secondmate, release its own tasks in this same order, then run `bin/fm-t3code-codex-env.sh cleanup <home>` and remove its `.claude/settings.local.json` before releasing the home.
 3. For a worker, return its slot with `treehouse return --force <worktree>` from its project.
-   A secondmate has no slot: release its own tasks the same way, then remove its home by hand and its line from `data/secondmates.md`.
+   A secondmate has no separate task worktree, but its home may itself be leased: preserve its durable records and unlanded work, then return a pooled home with `treehouse return --force <home>` from the Firstmate code root, or remove a standalone home by hand.
+   Remove its line from the parent's `data/secondmates.md`.
 4. Remove the task record, `state/<id>.meta`, and its other `state/<id>.*` files.
 
 The live guard below refreshes version and protocol evidence after an upgrade.

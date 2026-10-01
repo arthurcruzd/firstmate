@@ -54,6 +54,7 @@ server.on('upgrade',(req,socket) => {
       current==='background' ? {...thread(false),session:{status:'ready'},backgroundLiveness:'working'} :
       current==='monitoring' ? {...thread(false),session:{status:'ready'},backgroundLiveness:'monitoring'} :
       current==='stopped-background' ? {...thread(false),session:{status:'stopped'},backgroundLiveness:'working'} :
+      current==='error-background' ? {...thread(false),session:{status:'error'},backgroundLiveness:'working'} :
       thread(false);
     chunk([{kind:'snapshot',snapshot:{threads:[snapshotThread]}}]);
     if(current==='drop') return socket.destroy();
@@ -85,10 +86,10 @@ record=$(fm_backend_wait_transition t3code server 2 "$TMP_ROOT/state" owned) || 
 fm_backend_commit_transition t3code "$TMP_ROOT/state" server "$record"
 printf 'level\n' > "$TMP_ROOT/mode"
 rc=0
-fm_backend_wait_transition t3code server 0.2 "$TMP_ROOT/state" owned >/dev/null || rc=$?
+fm_backend_wait_transition t3code server 2 "$TMP_ROOT/state" owned >/dev/null || rc=$?
 [ "$rc" -eq 1 ] || fail 'committed blocked level must dedupe and wait its full budget'
 fm_backend_clear_transition t3code "$TMP_ROOT/state" owned
-fm_backend_wait_transition t3code server 1 "$TMP_ROOT/state" owned >/dev/null || fail 'reconnect must reconcile an already blocked thread'
+fm_backend_wait_transition t3code server 2 "$TMP_ROOT/state" owned >/dev/null || fail 'reconnect must reconcile an already blocked thread'
 for mode in drop denied malformed unacknowledged; do
   printf '%s\n' "$mode" > "$TMP_ROOT/mode"
   rc=0
@@ -97,13 +98,14 @@ for mode in drop denied malformed unacknowledged; do
 done
 pass 'T3 WebSocket subscription, thread filtering, normalization, reconnect, dedupe, and failure fallback'
 printf 'background\n' > "$TMP_ROOT/mode"
+# Allow connection setup for status assertions; the short budgets above test fallback.
 FM_T3CODE_RUNTIME_FILE="$TMP_ROOT/missing-runtime" FM_T3CODE_TOKEN_FILE="$TMP_ROOT/config/t3code-token" \
-  node "$ROOT/bin/backends/t3code-eventwait.cjs" 0.2 owned > "$TMP_ROOT/background-events"
+  node "$ROOT/bin/backends/t3code-eventwait.cjs" 2 owned > "$TMP_ROOT/background-events"
 assert_grep $'owned\tproject\trunning\tfalse\tcodex' "$TMP_ROOT/background-events" 'background work must be reported as running despite a ready session'
-for mode in monitoring:ready stopped-background:stopped; do
+for mode in monitoring:ready stopped-background:stopped error-background:error; do
   printf '%s\n' "${mode%%:*}" > "$TMP_ROOT/mode"
   FM_T3CODE_RUNTIME_FILE="$TMP_ROOT/missing-runtime" FM_T3CODE_TOKEN_FILE="$TMP_ROOT/config/t3code-token" \
-    node "$ROOT/bin/backends/t3code-eventwait.cjs" 0.2 owned > "$TMP_ROOT/background-events"
+    node "$ROOT/bin/backends/t3code-eventwait.cjs" 2 owned > "$TMP_ROOT/background-events"
   assert_grep $'owned\tproject\t'"${mode#*:}"$'\tfalse\tcodex' "$TMP_ROOT/background-events" "${mode%%:*} must keep the session's own status"
 done
 pass 'T3 stream treats working background liveness on a live session as active work, and only that'

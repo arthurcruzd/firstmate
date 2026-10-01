@@ -107,8 +107,8 @@
 #                          agent, for human inspection only - never an automatic
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
-#                          At escalation time a T3 Code session the server still
-#                          reports running resets the timer instead
+#                          At escalation time a T3 Code thread whose shared
+#                          classification still reads running resets the timer
 #                          (wedge_defer_t3code_running).
 #   stale: <window> (unread firstmate instruction: ...)
 #   stale: <window> (steering-inbox ladder bookkeeping unwritable: ...)
@@ -1972,10 +1972,10 @@ wedge_defer_guard() {  # <window> <since-file> <triage-label> <idle-age> <guard-
 # run executes; its crew-state read keeps the same one-per-threshold bound
 # because its deferral restarts the idle timer. A T3 Code window gets one more
 # consult after that (wedge_defer_t3code_running): its transcript can stay
-# byte-identical through a long tool call, so the server's own session status
-# is read before a still-running turn is reported as a wedge. The opt-in
-# operator guard consult (wedge_guard_evidence) runs after all of these, so a
-# dead or missing endpoint is never deferred by a guard, and a home without
+# byte-identical through a long tool call, so the shared thread classification
+# is rechecked before active work is reported as a wedge. The opt-in operator
+# guard consult (wedge_guard_evidence) runs after all of these, so a dead or
+# missing endpoint is never deferred by a guard, and a home without
 # config/wedge-evidence-guards never reaches it.
 wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-file> <task> <pane-hash> [dialog-name]
   local win=$1 since_file=$2 label=$3 escalation_file=$4 task=$5 hash=$6 dialog=${7-} since age n prev reason evidence guard guard_note
@@ -2221,7 +2221,7 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
 # a still-running session is therefore read from the server itself before the
 # quiet transcript is reported. Only `running` defers, which the adapter's
 # shared rule also gives a live session with `working` background work:
-# `starting`, a settled session, `monitoring` background work, a stopped or
+# `starting`, a settled session, idle `monitoring` background work, a stopped or
 # failed session whatever job outlives it, and an unreadable server all keep
 # the unchanged escalation, so a leftover status can never excuse a dead thread.
 # Returns 0 when it has handled the window, 1 to escalate on the unchanged path.

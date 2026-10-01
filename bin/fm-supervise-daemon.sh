@@ -91,13 +91,12 @@
 #                                   by FM_SUPERVISOR_BACKEND (below),
 #                                   independently.
 #          FM_SUPERVISOR_BACKEND    supervisor endpoint BACKEND (tmux|herdr|rex|t3code;
-#                                   override; otherwise auto-discovered the same
-#                                   way bin/fm-backend.sh's fm_backend_detect
-#                                   resolves the runtime firstmate itself is
-#                                   executing inside - $TMUX_PANE selects tmux,
-#                                   $HERDR_ENV=1 selects herdr, TERM_PROGRAM=rex
-#                                   selects rex, and a configured T3 shell match
-#                                   selects t3code - falling back to tmux).
+#                                   override; otherwise resolved by
+#                                   bin/fm-supervisor-target-lib.sh - $TMUX_PANE
+#                                   selects tmux, $HERDR_ENV=1 selects herdr,
+#                                   TERM_PROGRAM=rex selects rex, then T3
+#                                   discovery behind its explicit-selection gate
+#                                   - falling back to tmux).
 #                                   zellij, orca, cmux, and paseo are not yet
 #                                   supported as supervisor backends; the daemon
 #                                   refuses loudly at startup rather than trying
@@ -216,8 +215,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # docs/herdr-backend.md and AGENTS.md section 4's
 # harness-verification discipline. Selecting one refuses loudly at startup
 # instead of silently running tmux primitives against a pane that is not a tmux
-# pane. t3code injects through the adapter's thread.turn.start, with the
-# server's own session status as the busy verdict.
+# pane. t3code injects through the adapter's thread.turn.start, with its
+# shared thread classification as the busy verdict.
 FM_SUPERVISOR_SUPPORTED_BACKENDS="tmux herdr rex t3code"
 INJECT_SKIP_DEFAULT="heartbeat"
 STALE_ESCALATE_SECS_DEFAULT=240
@@ -738,7 +737,7 @@ pane_is_busy() {  # <target> [backend]
   case "$native" in
     busy) return 0 ;;
   esac
-  # t3code's verdict is the T3 server's own session status, trusted for idle
+  # t3code's verdict is its shared thread classification, trusted for idle
   # as well as busy (bin/fm-busy-lib.sh), and its capture is a synthetic
   # transcript rather than a terminal, so the rendered-tail reader never applies.
   [ "$backend" != t3code ] || return 1
