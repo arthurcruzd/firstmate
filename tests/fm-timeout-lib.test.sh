@@ -230,6 +230,21 @@ test_an_owner_that_dies_during_startup_ends_the_command() {
   pass "fm_exec_timed ends the command when its owner dies during watchdog startup"
 }
 
+# Stock macOS Bash 3.2 has no BASHPID, and spawn sources this library under
+# set -u. Unsetting BASHPID on Bash 4+ is the same unbound-variable case.
+test_exec_timed_runs_when_bashpid_is_unset() {
+  local path out rc=0
+  # Keep the perl watchdog, but leave sh on PATH: Bash 3.2's pid fallback is
+  # `exec sh -c`, and a perl-only PATH would hide that failure as success.
+  path="$TMP_ROOT/nobashpid-bin"
+  mkdir -p "$path"
+  ln -s "$(command -v sh)" "$path/sh"
+  out=$(unset BASHPID; . "$ROOT/bin/fm-timeout-lib.sh"; PATH="$PERL_ONLY:$path" fm_exec_timed 5 1 bash -c 'echo ran') || rc=$?
+  [ "$rc" -eq 0 ] || fail "fm_exec_timed died without BASHPID (rc=$rc: $out)"
+  [ "$out" = ran ] || fail "fm_exec_timed without BASHPID printed '$out'"
+  pass "fm_exec_timed runs under set -u when BASHPID is unset"
+}
+
 # perl is preferred whenever it exists, because only its watchdog can reap a
 # leftover descendant after replacing the caller.
 test_perl_is_preferred_over_timeout() {
@@ -337,6 +352,7 @@ test_a_descendant_holding_the_output_cannot_outlast_the_bound
 test_a_signal_to_the_bounding_process_reaches_the_command
 test_a_named_owner_that_is_gone_ends_the_command
 test_an_owner_that_dies_during_startup_ends_the_command
+test_exec_timed_runs_when_bashpid_is_unset
 test_perl_is_preferred_over_timeout
 test_refuses_rather_than_running_unbounded
 test_rejects_malformed_bounds_before_running_anything
