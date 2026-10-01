@@ -525,7 +525,7 @@ test_thread_for_home_zero_one_and_ambiguous() {
   pass "fm_backend_t3code_thread_for_home: zero, one, ambiguous, and unreachable"
 }
 
-test_autodetect_t3_home_and_precedence() {
+test_explicit_t3_selection_and_precedence() {
   local out
   t3_case autodetect
   FM_T3_HOME="$REPO" t3_world_set 'w.shell.threads=[{id:"captain",projectId:"proj-1",worktreePath:null,archivedAt:null,session:{status:"running"}}]'
@@ -552,7 +552,7 @@ test_autodetect_t3_home_and_precedence() {
   : > "$LOG"
   [ "$(detect '')" = tmux ] || fail 'missing bearer must not auto-detect T3'
   [ ! -s "$LOG" ] || fail 'unconfigured T3 discovery must make no HTTP request'
-  pass 'T3 auto-detection: unique cwd match, configured credentials, explicit overrides, and existing marker precedence'
+  pass 'T3 requires explicit selection and does not query the server during runtime detection'
 }
 
 test_capture_renders_messages_and_status() {
@@ -1473,9 +1473,18 @@ test_teardown_refuses_when_t3_is_unreachable() {
     "$ROOT/bin/fm-teardown.sh" "$id" 2>&1 )
   rc=$?
   [ "$rc" -ne 0 ] || fail "teardown must refuse when the T3 server cannot be reached"
-  assert_contains "$out" "could not stop and archive T3 thread $thread" "the refusal must name the thread and the fix"
+  assert_contains "$out" "cannot reach the T3 server" "the early runtime gate must explain the refusal"
   [ "$(t3_log_line_of 'r.tool === "treehouse"')" -eq 0 ] || fail "a refused teardown must not return the slot"
   assert_present "$state/$id.meta" "a refused teardown must preserve metadata"
+  t3_world_set 'w.descriptor.orchestrationProtocolVersion = 2'
+  out=$( PATH="$fb:$PATH" FM_T3_TREEHOUSE_LOG="$LOG" FM_T3_TREEHOUSE_WT="$wt" FM_T3CODE_ORIGIN="$ORIGIN" \
+    FM_ROOT_OVERRIDE="$neutral" FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$ROOT/bin/fm-teardown.sh" "$id" 2>&1 ); rc=$?
+  expect_code 1 "$rc" "V2 teardown must refuse before cleanup"
+  assert_contains "$out" "V2 removes HTTP dispatch" "V2 teardown must name the protocol mismatch"
+  [ -z "$(t3_dispatch_types)" ] || fail "V2 teardown must not dispatch"
+  [ "$(t3_log_line_of 'r.tool === "treehouse"')" -eq 0 ] || fail "V2 teardown must not return the slot"
+  assert_present "$state/$id.meta" "V2 teardown must preserve metadata"
   pass "fm-teardown.sh backend=t3code: refuses to return a slot a live thread still points at"
 }
 
@@ -1496,7 +1505,7 @@ test_thread_create_and_turn_start_payloads
 test_thread_create_retries_same_command
 test_v2_and_dispatch_404_refuse_control
 test_thread_for_home_zero_one_and_ambiguous
-test_autodetect_t3_home_and_precedence
+test_explicit_t3_selection_and_precedence
 test_capture_renders_messages_and_status
 test_send_key_mapping
 test_send_text_submit_verdicts
