@@ -815,6 +815,85 @@ test_stale_classifier_resolves_t3_thread() {
   pass "T3 stale lookup honors paused and captain-held declarations"
 }
 
+test_native_restart_rearms_undelivered_stale_warning() {
+  local session state home marker first out
+  for session in ready error; do
+    t3_case "restart-unknown-$session" "$session"
+    t3_world_set 'w.shellFailure = "http-error"'
+    home="$CASE_DIR/home"; state="$home/state"
+    mkdir -p "$state"
+    marker="$state/.subsuper-stale-worker"
+    fm_write_meta "$state/worker.meta" "window=fm-worker" "backend=t3code" \
+      "t3_thread_id=thread-live" "harness=claude"
+    printf 'working: waiting for results\n' > "$state/worker.status"
+    (
+      export FM_HOME="$home" FM_STATE_OVERRIDE="$state" FM_CONFIG_OVERRIDE="$CONFIG"
+      export FM_TEST_HARNESS=grok FM_T3CODE_ORIGIN="$ORIGIN"
+      export FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5 FM_MAX_DEFER_SECS=0
+      "$ROOT/bin/fm-afk-launch.sh" enter --words 'supervise pending work' >/dev/null \
+        && "$ROOT/bin/fm-afk-launch.sh" start-native || exit 1
+      t3_run '
+        . "$0/bin/fm-supervise-daemon.sh"
+        _now() { printf 1000; }
+        LOG="$1/daemon.log"
+        handle_wake "stale: thread-live" "$1"
+        printf 1 > "$1/.subsuper-stale-worker"
+        housekeeping "$1"
+      ' "$state" || exit 1
+      [ -s "$state/.subsuper-escalations" ] || exit 1
+      # The native daemon has stopped without delivering its buffer.
+      "$ROOT/bin/fm-afk-launch.sh" stop || exit 1
+      [ -s "$state/.subsuper-escalations" ] || exit 1
+      [ -f "$state/.subsuper-reported-stale-worker" ] || exit 1
+      # A warning already delivered for another condition must stay suppressed.
+      printf 900 > "$state/.subsuper-reported-stale-delivered"
+      "$ROOT/bin/fm-afk-launch.sh" enter --words 'supervise pending work' >/dev/null || exit 1
+      first=$(cat "$state/.subsuper-escalations")
+      # Failed startup must restore both the queue and its suppression markers.
+      bash -c '
+        . "$0/bin/fm-afk-launch.sh"
+        fm_afk_launch_record_write() { return 1; }
+        ! fm_afk_launch_main start-native
+      ' "$ROOT" || exit 1
+      [ "$(cat "$state/.subsuper-escalations")" = "$first" ] || exit 1
+      [ -f "$state/.subsuper-reported-stale-worker" ] || exit 1
+      "$ROOT/bin/fm-afk-launch.sh" start-native || exit 1
+      assert_absent "$state/.subsuper-escalations" "fresh startup must discard the old queue"
+      assert_absent "$state/.subsuper-reported-stale-worker" "discarding an undelivered warning must re-arm reporting"
+      assert_present "$state/.subsuper-reported-stale-delivered" "startup must preserve suppression of delivered warnings"
+      [ "$(cat "$marker")" = 1 ] || fail "restart must preserve the stale condition's age"
+      out=$(t3_run 'fm_backend_t3code_busy_state thread-live')
+      [ "$out" = unknown ] || fail "the restarted thread must remain unknown"
+      t3_run '
+        . "$0/bin/fm-supervise-daemon.sh"
+        _now() { printf 1000; }
+        LOG="$1/daemon.log"
+        housekeeping "$1"
+        _now() { printf 1100; }
+        housekeeping "$1"
+        housekeeping "$1"
+      ' "$state" || exit 1
+      [ "$(wc -l < "$state/.subsuper-escalations" | tr -d "[:space:]")" = 1 ] \
+        || fail "persistent uncertainty must queue exactly one replacement warning"
+      assert_contains "$(cat "$state/.subsuper-escalations")" \
+        'stale persisted 999s (possible wedge): thread-live' "restart must report the retained stale condition"
+      # Once that replacement is delivered, uncertainty must not report again.
+      t3_run '
+        . "$0/bin/fm-supervise-daemon.sh"
+        _now() { printf 1200; }
+        LOG="$1/daemon.log"
+        inject_msg() { printf "%s\n" "$1" >> "$2/delivered.log"; }
+        escalate_flush "$1" || exit 1
+        housekeeping "$1"
+        housekeeping "$1"
+      ' "$state" || exit 1
+      [ ! -s "$state/.subsuper-escalations" ] || fail "a delivered warning must stay suppressed"
+      [ "$(wc -l < "$state/delivered.log" | tr -d "[:space:]")" = 1 ] || exit 1
+    ) || fail "$session restart lost or duplicated the stale warning"
+  done
+  pass "native restart re-arms discarded T3 stale warnings exactly once and preserves delivered suppression"
+}
+
 test_housekeeping_preserves_unknown_stale_recheck() {
   local session state marker out first
   for session in ready error; do
@@ -1759,6 +1838,7 @@ if [ -n "${FM_TEST_ONLY:-}" ]; then
   exit
 fi
 
+test_native_restart_rearms_undelivered_stale_warning
 test_housekeeping_preserves_unknown_stale_recheck
 test_t3_stale_watcher error dead codex '' fresh
 test_probe_preserves_liveness_when_shell_unavailable
