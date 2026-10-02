@@ -2030,6 +2030,7 @@ The fake-server suite covers the token and version gates, project matching, crea
 Portable adapter tests use fake T3 and Treehouse boundaries rather than locally installed services.
 The suite also drives the watcher through the T3 wedge and dead-agent paths, including stopped or failed sessions with background work, live working jobs, and idle monitoring jobs.
 The same suite covers unknown busy state under shell-read failures, retained stale alerts and external-wait rechecks, once-per-condition reporting through transient detail failures, and re-arming after confirmed activity, archive, or HTTP 404.
+Its native-restart regression covers an undelivered warning queued before stop, fresh-start queue discard, startup rollback, exactly one replacement under persistent uncertainty, and suppression after delivery.
 `tests/fm-backend-t3code-events.test.sh` covers the shared classification on the stream path, subscription framing, thread filtering, reconnect reconciliation, deduplication, and polling fallback.
 `tests/fm-daemon.test.sh` covers discovery precedence and native busy state.
 

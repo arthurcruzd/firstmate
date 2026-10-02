@@ -164,9 +164,13 @@ Two live threads in one home is an error naming both ids, resolved by setting `F
 Busy uses the [shared thread classification](#restart-and-liveness-behavior), injection is a `thread.turn.start`, and escalations defer exactly as on every other backend.
 An unknown native busy verdict defers new-turn delivery but does not prove that work resumed.
 Away housekeeping keeps an overdue stale alert pending and buffers one possible-wedge report while the verdict remains unknown, including an errored session or a transient thread-detail failure.
+Delivered warnings stay suppressed while the same unknown condition persists.
+If a fresh daemon entry discards a queued, undelivered warning, it clears that warning's reported marker and preserves its stale timer, so the next housekeeping pass queues exactly one replacement.
+Refreshing a live daemon preserves the queue; a failed start restores the previous queue and reported markers.
 Confirmed busy activity or a missing thread (archived or HTTP 404) clears the stale and reported markers, so a later unknown condition can report again.
 Declared external-wait rechecks also survive native uncertainty; the worker's declaration still controls their cadence.
-`stale_window_is_busy` and `housekeeping` in `bin/fm-supervise-daemon.sh` own that lifecycle, and `tests/fm-backend-t3code.test.sh` covers retention, deduplication, and re-arming.
+`stale_window_is_busy` and `housekeeping` in `bin/fm-supervise-daemon.sh` own stale tracking; `fm_afk_clear_stale_artifacts` in `bin/fm-afk-start.sh` and the launcher in `bin/fm-afk-launch.sh` own queue discard and startup rollback.
+`tests/fm-backend-t3code.test.sh` covers retention, deduplication, and re-arming across native restart.
 Only `bin/fm-afk-launch.sh start-native` launches the daemon here, as the captain's own tracked background job; `start` refuses because T3 hosts no terminal to create.
 A secondmate spawned on this backend carries its supervisor identity in its environment, so its own daemon needs no discovery.
 
