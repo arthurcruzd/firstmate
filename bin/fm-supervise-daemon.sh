@@ -520,6 +520,7 @@ unknown_wake_acknowledge_flushed() {  # <state> <buffer>
 
 # --- stale marker + escalation buffer (stateful, but via explicit state dir) -
 # Marker:   state/.subsuper-stale-<key>   contains the epoch first seen idle.
+# Reported: state/.subsuper-reported-stale-<key> records an unknown-state alert.
 # Buffer:   state/.subsuper-escalations    one distilled line per escalation.
 # Seen:     state/.subsuper-seen-status-<task>  last reported file signature and
 #           classified byte offset, so failures and events do not re-fire while
@@ -531,13 +532,16 @@ stale_marker_record() {  # <window> <state>  — create if absent
   local win=$1 state=$2 key marker
   key=$(_stale_key "$(window_to_task "$win" "$state")")
   marker="$state/.subsuper-stale-$key"
-  [ -e "$marker" ] || _now > "$marker"
+  if [ ! -e "$marker" ]; then
+    rm -f "$state/.subsuper-reported-stale-$key"
+    _now > "$marker"
+  fi
 }
 
 stale_marker_remove() {  # <window> <state>
   local win=$1 state=$2 key
   key=$(_stale_key "$(window_to_task "$win" "$state")")
-  rm -f "$state/.subsuper-stale-$key"
+  rm -f "$state/.subsuper-stale-$key" "$state/.subsuper-reported-stale-$key"
 }
 
 # Pause marker: state/.subsuper-paused-<key> holds the epoch a declared wait (a
@@ -566,6 +570,7 @@ clear_pause_tracking() {  # <window> <state>
   key=$(_stale_key "$task")
   watcher_key=$(_stale_key "$win")
   rm -f "$state/.subsuper-paused-$key" "$state/.subsuper-pause-until-due-$key" "$state/.subsuper-stale-$key" \
+    "$state/.subsuper-reported-stale-$key" \
     "$state/.paused-$watcher_key" "$state/.paused-rechecked-$watcher_key" "$state/.paused-resurfaced-$watcher_key" \
     "$state/.stale-$watcher_key" "$state/.stale-since-$watcher_key" "$state/.wedge-escalations-$watcher_key" \
     "$state/.writing-since-$watcher_key" "$state/.writing-resurfaced-$watcher_key" \
@@ -1235,7 +1240,7 @@ housekeeping() {  # <state>
     win=$(window_for_task "$key" "$state" 2>/dev/null || true)
     if [ -z "$win" ]; then
       # Window gone (task torn down): drop the marker, nothing to escalate.
-      rm -f "$marker"; continue
+      rm -f "$marker" "$state/.subsuper-reported-stale-$key"; continue
     fi
     task=$(window_to_task "$win" "$state")
     last=$(status_declared_wait_line "$state/$task.status")
@@ -1247,9 +1252,11 @@ housekeeping() {  # <state>
     [ "$age" -ge "${FM_STALE_ESCALATE_SECS:-$STALE_ESCALATE_SECS_DEFAULT}" ] || continue
     stale_window_is_busy "$win" "$state"
     case "$?" in
-      0) rm -f "$marker" ;;
-      2) rm -f "$marker" ;;
-      3) escalate_add "$state" "stale persisted ${age}s (possible wedge): $win" ;;
+      0|2) stale_marker_remove "$win" "$state" ;;
+      3) if [ ! -e "$state/.subsuper-reported-stale-$key" ] \
+           && escalate_add "$state" "stale persisted ${age}s (possible wedge): $win"; then
+           _now > "$state/.subsuper-reported-stale-$key"
+         fi ;;
       *) if escalate_add "$state" "stale persisted ${age}s (possible wedge): $win"; then
            stale_marker_remove "$win" "$state"
          fi ;;
