@@ -26,7 +26,7 @@
 # IN-BAND OPERATIONAL INPUT. bin/fm-operational-input.sh constructs every
 # current daemon injection as the away-supervisor kind after the stable
 # FM_OPERATIONAL_PREFIX. A human cannot type its leading U+2063 from a normal
-# keyboard at the start of a message, and each supported backend transports it as text.
+# keyboard at the start of a message, and supported backends transport it as text.
 # A primary harness that strips invisible characters from submitted prompts
 # (fm_operational_harness_needs_record, Claude Code) instead receives the
 # owner's record-backed doorbell: the envelope is written to this home's
@@ -1499,10 +1499,9 @@ inject_msg() {  # <message> [state]
       return 1
     fi
   fi
-  # (4) Submit through the shared primitive. Pane backends type the digest once
-  # and retry only Enter; T3 Code starts one native turn. Success means the
-  # backend confirms submission. An unconfirmed endpoint does NOT count as
-  # delivered, so the buffer is preserved rather than cleared.
+  # (4) Submit through the shared primitive. Pane backends type once and retry
+  # only Enter; T3 Code starts one native turn. An unconfirmed endpoint does
+  # not count as delivered, so the buffer is preserved.
   # Dispatches through fm_backend_send_text_submit (bin/fm-backend.sh): for
   # backend=tmux this calls fm_backend_tmux_send_text_submit, a verbatim
   # re-export of fm_tmux_submit_core - byte-identical to calling it directly.

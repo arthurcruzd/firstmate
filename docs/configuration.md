@@ -436,7 +436,7 @@ New spawns choose the backend in this order:
 4. Runtime auto-detection from `$TMUX`, `HERDR_ENV=1`, or cmux runtime signals.
 5. Default `tmux`.
 
-If more than one runtime marker is present, detection resolves innermost-first: `$TMUX` is checked before `HERDR_ENV=1`, which is checked before cmux's primary `CMUX_WORKSPACE_ID` marker and its documented fallback signals - tmux or herdr started from inside a cmux terminal is the innermost, currently-executing layer, while cmux itself (a terminal application, not a nestable multiplexer) is checked after those multiplexer markers.
+If more than one runtime marker is present, detection resolves innermost-first: `$TMUX` is checked before `HERDR_ENV=1`, which is checked before cmux's primary `CMUX_WORKSPACE_ID` marker and its documented fallback signals.
 See [`docs/cmux-backend.md`](cmux-backend.md#runtime-detection) for why cmux can be selected when `CMUX_WORKSPACE_ID` is absent.
 
 Auto-detected Herdr stays silent like tmux, while auto-detected cmux prints a stderr notice naming `config/backend` and `--backend tmux` because it remains experimental.
@@ -445,7 +445,7 @@ T3 Code, Zellij, and Orca are never auto-detected; select them by putting the na
 ### Accepted backends and secondmate limits
 
 Any value other than `tmux`, `herdr`, `zellij`, `orca`, `cmux`, or `t3code` is rejected until another adapter is implemented and verified.
-`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, `cmux`, and `t3code` for ship and scout tasks; `backend=orca` and `backend=cmux` still refuse `--secondmate`, while `backend=t3code` supports secondmates and runs only the `claude` and `codex` harnesses.
+`fm-spawn.sh` accepts all six for ship and scout tasks; `backend=orca` and `backend=cmux` still refuse `--secondmate`, while `backend=t3code` supports secondmates and runs only the `claude` and `codex` harnesses.
 
 `codex-app` is not an accepted runtime backend yet; [`docs/codex-app-backend.md`](codex-app-backend.md) owns the Codex App boundary.
 
@@ -478,7 +478,6 @@ Task meta records `backend=` only for a non-default backend; an absent `backend=
 - An Orca task additionally records `orca_worktree_id=` and `terminal=`, with `window=fm-<id>` kept as the shared firstmate alias.
 
 - A cmux task additionally records `cmux_workspace_id=` and `cmux_surface_id=`.
-
 - A t3code task additionally records `t3_thread_id=` and `t3_project_id=`, with `window=fm-<id>` kept as the shared firstmate alias.
 
 ### Task selectors
@@ -530,18 +529,20 @@ Test cleanup must use the guarded path in [`docs/cmux-backend.md`](cmux-backend.
 
 The `/afk` sub-supervisor injects escalation digests into firstmate's own endpoint independently of where new task endpoints are spawned.
 It supports `tmux` and `herdr` supervisor panes and `t3code` supervisor threads.
+
 Set `FM_SUPERVISOR_BACKEND=tmux|herdr|t3code` and `FM_SUPERVISOR_TARGET=<target>` to override both axes explicitly; for herdr the target is `"<session>:<pane-id>"`, and for t3code it is the thread id.
 Without overrides, backend detection uses `$TMUX_PANE` first, then `HERDR_ENV=1` with `HERDR_PANE_ID`, then a cwd match over the T3 shell snapshot only when T3 Code is explicitly selected, then falls back to `tmux`.
 T3 discovery requires explicit `FM_BACKEND=t3code` or `config/backend=t3code`, an origin (`FM_T3CODE_ORIGIN` or the runtime file described in [`t3code-backend.md`](t3code-backend.md#setup)), and a `config/t3code-token` file under the effective config directory before making an HTTP call.
 
 That keeps a tmux pane nested inside herdr on the tmux transport, matching the runtime backend's innermost-first rule.
-Target detection uses `FM_SUPERVISOR_TARGET`, then `$TMUX_PANE`, then `"${HERDR_SESSION:-default}:${HERDR_PANE_ID}"` under herdr, then the thread id from that T3 cwd match, then the legacy `firstmate:0` tmux fallback with a warning.
-Selecting any other supervisor backend, including `zellij`, `orca`, or `cmux`, refuses at daemon startup instead of trying tmux injection primitives against a non-tmux pane.
+Target detection uses `FM_SUPERVISOR_TARGET`, then `$TMUX_PANE`, then `"${HERDR_SESSION:-default}:${HERDR_PANE_ID}"` under herdr, then the T3 thread id, then the legacy `firstmate:0` tmux fallback with a warning.
+
+Selecting any other supervisor backend, including `zellij`, `orca`, or `cmux`, refuses at daemon startup instead of trying tmux injection primitives against a different backend.
 
 ## Away-mode wedge alarm channels (config/wedge-alarm)
 
 When away-mode injection wedges past `FM_MAX_DEFER_SECS`, the sub-supervisor raises a loud, rate-limited alarm.
-Beyond the durable `state/.subsuper-inject-wedged` marker and the tmux status-line flash, it attempts a configured backend-independent active alert that can reach the captain even when every supervisor endpoint is unreadable.
+Beyond the durable `state/.subsuper-inject-wedged` marker and the tmux status-line flash, it attempts a configured backend-independent active alert that can reach the captain even when every pane and its backend status-line is unreadable.
 
 ### Channels and overrides
 
@@ -585,7 +586,7 @@ The flag is a home-local preference and is not inherited by secondmate homes.
 ## Turn-end pane-churn absorb (config/turnend-churn-absorb)
 
 The optional local, gitignored `config/turnend-churn-absorb` presence flag opts this home into a default-off third form of positive work evidence in watcher triage.
-With it present, every referenced task must independently show positive work evidence, and an eligible bare turn-ended task that lacks authoritative proof may satisfy that requirement when its endpoint capture changed since the previous poll.
+With it present, every referenced task must independently show positive work evidence, and an eligible bare turn-ended task that lacks authoritative proof may satisfy that requirement when its pane content changed since the previous poll.
 
 ### Evidence and time limit
 
@@ -993,14 +994,14 @@ This applies only to agents Firstmate launches; the captain's own primary Firstm
 ### Commit attribution
 
 The optional local, gitignored `config/keep-ai-trailers` presence flag opts this home into keeping AI co-author trailers on its launched workers.
-With the flag absent, every Claude launch's inline `--settings` JSON carries `"attribution":{"commit":"","pr":"","sessionUrl":false}`, every Devin worker config sets `"attribution": false`, and every fleet launch receives a pane-scoped `GIT_CONFIG` `core.hooksPath` pointing at `state/<id>.git-hooks`, where git's `commit-msg` hook strips known AI trailers even when a runtime injects them after the typed message.
+With the flag absent, every Claude command line Firstmate builds carries inline `--settings` JSON with `"attribution":{"commit":"","pr":"","sessionUrl":false}`, every Devin worker config sets `"attribution": false`, and every fleet launch receives a worker-scoped `GIT_CONFIG` `core.hooksPath` pointing at `state/<id>.git-hooks`, where git's `commit-msg` hook strips known AI trailers even when a runtime injects them after the typed message.
+T3 Code owns its provider command and cannot carry Claude's inline setting, but its per-worktree environment overlay selects the same Git hook; [`t3code-backend.md`](t3code-backend.md#active-limits) owns that backend limit.
 When the flag is present, Claude launches omit those attribution-off settings, Devin worker configs keep the user config's `attribution` setting (Devin's default is on), and fleet launches do not install or select the strip hooks, so Git uses the repository's configured hooks directly.
 `bin/fm-git-strip-ai-trailers.sh` owns the identities, the install, and chaining the hooks of whichever repository git is running in, including when `git -c core.hooksPath` supplies the pane's hook override, so a project hook such as husky still runs when stripping is enabled.
 A repository whose config sets `core.hooksPath` to the empty string runs no project hook, as in plain git; if the wrapper otherwise cannot resolve that repository's hooks directory, the git operation fails rather than silently skipping a project hook such as a pre-push guard.
 When stripping is enabled, the hooks directory is read-only, so a hook manager run inside a fleet pane (lefthook's npm postinstall, `pre-commit install`) fails instead of displacing the strip; install a project's hooks from outside the pane, where the wrappers chain them.
 The flag is a home-wide attribution choice, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract and a secondmate's own workers keep AI trailers too.
 Per-machine Cursor `cli-config.json` attribution-off is not this contract: it does not travel with Firstmate, defaults back to on when unset, and only feeds the CLI's request to the server, so it suppresses the trailer rather than preventing it.
-T3 Code owns its provider command and cannot carry this inline policy; [`t3code-backend.md`](t3code-backend.md#active-limits) owns that backend limit.
 
 ## Crew dispatch profiles (config/crew-dispatch.json)
 
@@ -1271,7 +1272,7 @@ Backend tool availability uses the adapter's own executable resolver, so bootstr
 An unknown resolved backend emits `BACKEND_INVALID` and blocks dispatch instead of silently dropping its dependency delta or falling back to tmux.
 
 Orca provides both the task worktree and terminal endpoint (see "Runtime backend" above), so `backend=orca` requires only `orca` on top of the universal toolchain and skips both `treehouse` and every other backend's session CLI.
-A herdr, zellij, or cmux home is therefore never told `tmux` is missing, and the `treehouse` durable-lease upgrade check runs only for the backends that actually use treehouse.
+A herdr, zellij, cmux, or t3code home is therefore never told `tmux` is missing, and the `treehouse` durable-lease upgrade check runs only for the backends that actually use treehouse.
 
 **Feature-specific requirements**
 

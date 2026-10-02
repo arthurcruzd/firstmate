@@ -22,7 +22,7 @@
 # runs the supervision host (fm_supervision_host_enabled: by default on
 # Claude, by config/supervision-host elsewhere), where the host runs the away
 # session; `enter` there adds one line when the host has no
-# engine, because every away wake then reaches main. Every other supported harness and backend combination still
+# engine, because every away wake then reaches main. Every other harness still
 # runs the daemon for now, so `start` and `start-native` require the record
 # `enter` wrote before they launch the daemon.
 # QUIET MODE on a home that runs the supervision host needs nothing
@@ -46,6 +46,8 @@
 # until `/quiet off`. A quiet `start` or `start-native` that fails while no
 # daemon runs ends quiet mode as `stop` does, so no quiet record outlives its
 # daemon to park a present captain's main.
+# On backend=t3code there is no terminal for `start` to create, so only a
+# harness with a tracked native background job can run `start-native` there.
 # `stop` (the return, driven by bin/fm-afk-return.sh) shuts the daemon down,
 # clears state/.afk last, and archives the record under state/afk-contracts/.
 #

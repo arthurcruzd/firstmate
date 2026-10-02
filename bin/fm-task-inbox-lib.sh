@@ -75,8 +75,8 @@
 # acknowledged record drops its mark. The remote steer leg has no watcher
 # ladder and owes no retry.
 #
-# Inbox paths containing bytes outside printable ASCII are unsupported. The
-# doorbell refuses them before any backend transport receives the text.
+# Inbox names containing bytes outside printable ASCII are unsupported. The
+# doorbell refuses them rather than sending terminal control bytes to a pane.
 #
 # fm_task_inbox_ring requires bin/fm-backend.sh's dispatch (sourced below); the
 # other helpers are dependency-light. Sourced by bin/fm-send.sh, bin/fm-watch.sh,

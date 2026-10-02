@@ -52,7 +52,7 @@
 # ordinary record by the worker's acknowledgement move into handled/. The
 # watcher re-rings an unacknowledged message while its endpoint remains
 # available, escalates after the bounded ladder, and instead routes a positively
-# dead or missing endpoint directly to recovery without ringing. An explicit
+# dead or missing endpoint directly to recovery without typing. An explicit
 # fire-and-forget record is excluded from that ladder; when config/wait-no-turns
 # is present and its ring here was skipped or failed, the watcher rings it
 # exactly once more.
