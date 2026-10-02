@@ -458,8 +458,7 @@ hash_pane() {
 }
 
 # window_is_busy: 0 when the semantic busy-state contract (bin/fm-busy-lib.sh)
-# reports busy or T3 native uncertainty, so delivery waits for idle proof.
-# Idle, other unknown sources, and dead return 1, so a converted
+# reports busy. Idle, unknown, and dead return 1, so a converted
 # adapter whose semantic state is missing, malformed, stale, or unverified is
 # treated as not-provably-working and surfaces rather than being absorbed.
 # <tail40> is the same bounded capture already read for hashing and is passed
@@ -477,7 +476,7 @@ window_is_busy() {  # <window> <tail40>
       "${task:-unknown}" "$STATE" "$tail40")
   fi
   case "$verdict" in
-    busy\ *|unknown\ t3code-native) return 0 ;;
+    busy\ *) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -590,7 +589,8 @@ inbox_steer_check() {  # <window> <task>
   esac
   watcher_capture "$backend" "$w" 40 "$(window_label "$w")" || WATCHER_CAPTURE=
   tail40=$WATCHER_CAPTURE
-  if window_is_busy "$w" "$tail40"; then
+  # Delivery still waits on T3 uncertainty; stale tracking requires busy proof.
+  if fm_busy_is_busy "$backend" "$w" "$(window_harness "$w")" "$task" "$STATE" "$tail40"; then
     [ "$verb" != retry ] || return 0
     if ! count=$(fm_task_inbox_record_busy "$STATE" "$task" "$rec"); then
       [ -f "$rec" ] || return 0

@@ -681,13 +681,13 @@ test_probe_preserves_liveness_when_shell_unavailable() {
       printf "%s:%s:%s" "$rc" "$INJECT_SUBMIT_ATTEMPTED" "$INJECT_LAST_FAILURE"
     ' "$state")
     [ "$got" = '1:0:deferred: supervisor pane busy (agent mid-turn)' ] || fail "$status must defer away-mode injection before submitting, got $got"
-    t3_run '. "$0/bin/fm-supervise-daemon.sh"; stale_window_is_busy thread-live "$1"' "$state" \
-      || fail "$status must defer the stale-task busy guard"
+    got=$(t3_run '. "$0/bin/fm-supervise-daemon.sh"; stale_window_is_busy thread-live "$1"; printf "%s" "$?"' "$state")
+    [ "$got" = 3 ] || fail "$status stale recheck must preserve uncertainty, got $got"
     t3_run '
       FM_STATE_OVERRIDE=$1; export FM_STATE_OVERRIDE
       . "$0/bin/fm-watch.sh"
       fm_busy_is_busy t3code thread-live claude worker "$STATE" || exit 1
-      window_is_busy thread-live "" || exit 1
+      if window_is_busy thread-live ""; then exit 1; fi
       rec=$(fm_task_inbox_write "$STATE" worker "please continue") || exit 1
       touch -t 200001010000 "$rec"
       FM_TASK_INBOX_GRACE_SECS=1
@@ -810,13 +810,56 @@ test_stale_classifier_resolves_t3_thread() {
   pass "T3 stale lookup honors paused and captain-held declarations"
 }
 
+test_housekeeping_preserves_unknown_stale_recheck() {
+  local session state marker out
+  for session in ready error; do
+    t3_case "housekeeping-unknown-$session" "$session"
+    [ "$session" != ready ] || t3_world_set 'w.shellFailure = "http-error"'
+    state="$CASE_DIR/state"; mkdir -p "$state"
+    marker="$state/.subsuper-stale-worker"
+    fm_write_meta "$state/worker.meta" "window=fm-worker" "backend=t3code" \
+      "t3_thread_id=thread-live" "harness=claude"
+    printf 'working: waiting for results\n' > "$state/worker.status"
+    out=$(t3_run 'fm_backend_t3code_busy_state thread-live')
+    [ "$out" = unknown ] || fail "$session fixture must have unknown busy state, got $out"
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      afk_enter "$1"
+      handle_wake "stale: thread-live" "$1"
+      printf 1 > "$1/.subsuper-stale-worker"
+      housekeeping "$1"
+    ' "$state" || fail "$session housekeeping failed"
+    assert_present "$marker" "$session uncertainty must preserve the pending stale recheck"
+    [ "$(cat "$marker")" = 1 ] || fail "$session uncertainty must not reset stale aging"
+    assert_contains "$(cat "$state/.subsuper-escalations")" \
+      'stale persisted 999s (possible wedge): thread-live' \
+      "$session uncertainty must report the overdue possible wedge"
+
+    # Only positive resumed-work proof can clear the retained marker.
+    t3_world_set 'w.shellFailure = null; w.threads["thread-live"].session.status = "running"'
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+    ' "$state" || fail "resumed $session housekeeping failed"
+    assert_absent "$marker" "a confirmed running session must clear stale tracking"
+  done
+  pass "away housekeeping preserves unknown stale rechecks and reports possible wedges until work resumes"
+}
+
 # Drive the real watcher with an unchanged transcript and an expired wedge
 # timer. The pipeline fixture binds to a real repository's branch and HEAD,
 # so fm-crew-state.sh performs its ordinary run attribution.
-test_t3_stale_watcher() {  # <session-status> <absorb|surface|dead> [harness] [background-liveness]
+test_t3_stale_watcher() {  # <session-status> <absorb|surface|dead> [harness] [background-liveness] [fresh]
   local session=$1 expected=$2 harness=${3:-codex} background=${4:-} state fb hash out _
+  local fresh=${5:-} busy_bound=1
   local thread=6a0e1f2b-3c4d-4a5b-8c6d-0123456789ab
-  t3_case "watch-$session-$harness-${background:-none}" "$session"
+  t3_case "watch-$session-$harness-${background:-none}-$fresh" "$session"
   t3_world "$(t3_thread_json "$thread" "$session" null)"
   if [ -n "$background" ]; then
     FM_T3_BG="$background" FM_T3_THREAD="$thread" \
@@ -831,7 +874,11 @@ test_t3_stale_watcher() {  # <session-status> <absorb|surface|dead> [harness] [b
   git -C "$REPO" checkout -qb fm/worker
   fm_write_meta "$state/worker.meta" "window=fm-worker" "backend=t3code" \
     "t3_thread_id=$thread" "worktree=$REPO" "project=$REPO" "harness=$harness" "kind=ship"
-  touch -t 200001010000 "$state/worker.meta"
+  if [ "$fresh" = fresh ]; then
+    busy_bound=999999
+  else
+    touch -t 200001010000 "$state/worker.meta"
+  fi
   # No validation run is attributed: the deferral reads the T3 session alone.
   : > "$CASE_DIR/run.toon"
   cat > "$fb/no-mistakes" <<'SH'
@@ -851,12 +898,15 @@ SH
   printf '3\n' > "$state/.wedge-escalations-$thread"
   PATH="$fb:$PATH" FM_T3_TEST_RUN="$CASE_DIR/run.toon" FM_T3CODE_ORIGIN="$ORIGIN" \
     FM_CONFIG_OVERRIDE="$CONFIG" FM_HOME="$CASE_DIR" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$CASE_DIR/data" \
-    FM_POLL=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_BUSY_TURN_MAX_SECS=1 \
+    FM_POLL=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_BUSY_TURN_MAX_SECS="$busy_bound" \
     FM_STALE_ESCALATE_SECS=1 FM_WEDGE_DEMAND_INSPECT_COUNT=3 \
     "$ROOT/bin/fm-watch.sh" > "$out" 2>&1 &
   WATCH_PID=$!
   for _ in $(seq 1 600); do
     kill -0 "$WATCH_PID" 2>/dev/null || break
+    if [ "$fresh" = fresh ] && [ ! -e "$state/.stale-since-$thread" ]; then
+      fail "an unknown busy verdict erased the errored thread's pending recheck"
+    fi
     if [ "$expected" = absorb ] && [ "$(cat "$state/.stale-since-$thread" 2>/dev/null)" != 1 ] \
         && [ -s "$state/.stale-since-$thread" ]; then break; fi
     sleep 0.1
@@ -1597,6 +1647,8 @@ test_teardown_refuses_when_t3_is_unreachable() {
   pass "fm-teardown.sh backend=t3code: refuses to return a slot a live thread still points at"
 }
 
+test_housekeeping_preserves_unknown_stale_recheck
+test_t3_stale_watcher error dead codex '' fresh
 test_probe_preserves_liveness_when_shell_unavailable
 test_stale_classifier_resolves_t3_thread
 test_t3_stale_watcher running absorb

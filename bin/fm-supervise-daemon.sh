@@ -767,9 +767,8 @@ task_window_harness() {  # <window> <state>
 }
 
 # stale_window_is_busy: 0 when the semantic busy-state contract
-# (bin/fm-busy-lib.sh) reports busy or T3 native uncertainty, 2 when capture
-# fails, and 1 otherwise. Other unknown sources surface rather than reading
-# silently idle; T3 native uncertainty defers until busy state is readable.
+# (bin/fm-busy-lib.sh) reports busy, 2 when capture fails, 3 for T3 native
+# uncertainty, and 1 otherwise. Uncertainty cannot prove work resumed.
 stale_window_is_busy() {  # <window> <state>
   local win=$1 state=$2 backend harness label task tail40 verdict
   backend=$(task_window_backend "$win" "$state")
@@ -779,7 +778,8 @@ stale_window_is_busy() {  # <window> <state>
   tail40=$(fm_backend_capture "$backend" "$win" 40 "$label" 2>/dev/null) || return 2
   verdict=$(fm_busy_classify "$backend" "$win" "$harness" "$task" "$state" "$tail40")
   case "$verdict" in
-    busy\ *|unknown\ t3code-native) return 0 ;;
+    busy\ *) return 0 ;;
+    unknown\ t3code-native) return 3 ;;
     *) return 1 ;;
   esac
 }
@@ -1258,7 +1258,8 @@ _oldest_line_age() {  # <buf> -> seconds since the oldest buffered item first ar
 #     attempt one normal delivery; if it cannot confirm, raise the wedge alarm.
 #     Never silently defer forever.
 #  2) stale recheck: for each pending stale marker past STALE_ESCALATE_SECS,
-#     re-peek the pane; still idle -> escalate (wedge); resumed -> clear marker.
+#     re-peek the pane; still idle -> escalate (wedge); resumed -> clear marker;
+#     T3 unknown -> escalate while retaining the pending recheck.
 #  2b) pause re-surface: for each declared-wait marker past PAUSE_RESURFACE_SECS,
 #     re-peek; gone -> clear; still declaring the wait, on an idle OR a busy pane
 #     -> escalate a recheck digest naming which human the wait is on, and reset
@@ -1323,6 +1324,7 @@ housekeeping() {  # <state>
     case "$?" in
       0) rm -f "$marker" "$state/.subsuper-dialog-$key" ;;
       2) rm -f "$marker" "$state/.subsuper-dialog-$key" ;;
+      3) escalate_add "$state" "stale persisted ${age}s (possible wedge): $win" ;;
       *)
         dialog_name=$(cat "$state/.subsuper-dialog-$key" 2>/dev/null || true)
         if [ -n "$dialog_name" ]; then
