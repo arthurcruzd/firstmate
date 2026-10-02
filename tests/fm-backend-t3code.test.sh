@@ -1341,9 +1341,13 @@ test_spawn_leases_slot_creates_thread_and_starts_launch_turn() {
     || fail "the env merge must keep the busy hooks, got hooks '$(t3_json_field "$settings" 'Object.keys(d.hooks || {})')'"
   [ "$(t3_json_field "$settings" 'd.env.GOTMPDIR')" = "/tmp/fm-$id/gotmp" ] || fail "settings env must carry GOTMPDIR, got '$(t3_json_field "$settings" 'd.env')'"
   [ "$(t3_json_field "$settings" 'd.env.FM_TASK_ID')" = "$id" ] || fail "a ship worker's settings env must carry FM_TASK_ID"
+  [ "$(t3_json_field "$settings" 'd.env.FM_TASK_INBOX')" = "$state/$id.inbox" ] || fail "a ship worker's settings env must carry its steering inbox"
+  [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_VALUE_0')" = "$state/$id.git-hooks" ] || fail "T3 workers must select the installed Git hook"
+  [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_KEY_0')" = core.hooksPath ] || fail "T3 workers must select core.hooksPath"
+  [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_COUNT')" = 1 ] || fail "T3 workers must select one Git config override"
   [ "$(t3_json_field "$settings" 'd.env.TRACEPARENT')" = undefined ] || fail "TRACEPARENT must be absent when trace context is off"
   [ "$(t3_json_field "$settings" 'd.env.COMPACT_ADVISER_DISABLE')" = 1 ] || fail "settings env must carry the compact-adviser kill switch every launch carries"
-  [ "$(t3_json_field "$settings" 'Object.keys(d.env).sort().join(" ")')" = "COMPACT_ADVISER_DISABLE FM_TASK_ID GOTMPDIR" ] || fail "a worker env block carries exactly GOTMPDIR, COMPACT_ADVISER_DISABLE, and FM_TASK_ID"
+  [ "$(t3_json_field "$settings" 'Object.keys(d.env).sort().join(" ")')" = "COMPACT_ADVISER_DISABLE FM_TASK_ID FM_TASK_INBOX GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GOTMPDIR" ] || fail "a worker env block carries the task inbox and Git hook with the launch environment"
   t3_excluded "$wt" .claude/settings.local.json || fail "the settings file must be git-excluded"
   assert_present "$wt/CLAUDE.local.md" "a claude worker gets the task-worker channel statement as CLAUDE.local.md"
   assert_grep "task worker launched by Firstmate" "$wt/CLAUDE.local.md" "CLAUDE.local.md must carry the channel statement"
@@ -1382,6 +1386,8 @@ test_spawn_codex_scout_writes_toml_env_with_traceparent() {
   assert_present "$toml" "a codex worker gets .codex/config.toml in its worktree"
   [ "$(t3_toml_env "$toml" GOTMPDIR)" = "/tmp/fm-$id/gotmp" ] || fail "config.toml must set GOTMPDIR, got '$(cat "$toml")'"
   [ "$(t3_toml_env "$toml" FM_TASK_ID)" = "$id" ] || fail "a scout's config.toml must set FM_TASK_ID"
+  [ "$(t3_toml_env "$toml" FM_TASK_INBOX)" = "$state/$id.inbox" ] || fail "a scout's config.toml must set FM_TASK_INBOX"
+  [ "$(t3_toml_env "$toml" GIT_CONFIG_VALUE_0)" = "$state/$id.git-hooks" ] || fail "a scout's config.toml must select the installed Git hook"
   [ "$(t3_toml_env "$toml" COMPACT_ADVISER_DISABLE)" = 1 ] || fail "config.toml must set the compact-adviser kill switch"
   tp=$(t3_toml_env "$toml" TRACEPARENT)
   case "$tp" in 00-????????????????????????????????-????????????????-??) ;; *) fail "config.toml must set a W3C TRACEPARENT when trace context is on, got '$(cat "$toml")'" ;; esac
@@ -1420,11 +1426,10 @@ spawn_t3_secondmate() {
     "$ROOT/bin/fm-spawn.sh" "$id" "$home" "$harness" --model "$model" --backend t3code --secondmate 2>&1
 }
 
-# The twelve variables a t3code secondmate must find in its environment: the
-# nine of the pane launch prefix, value for value, the compact-adviser kill
-# switch, plus its supervisor identity.
-assert_t3_secondmate_env() {  # <reader "<file>"> <label> <home> <thread> <supervision-model>
-  local read=$1 label=$2 home=$3 thread=$4 model=$5 name expect
+# A t3code secondmate receives the pane launch facts plus its supervisor,
+# steering inbox, and Git hook identity through the per-directory environment.
+assert_t3_secondmate_env() {  # <reader "<file>"> <label> <home> <thread> <supervision-model> <id>
+  local read=$1 label=$2 home=$3 thread=$4 model=$5 id=$6 name expect
   while IFS='=' read -r name expect; do
     [ "$($read "$name")" = "$expect" ] || fail "$label: $name should be '$expect', got '$($read "$name")'"
   done <<EOF
@@ -1440,6 +1445,10 @@ FM_TRACE_CONTEXT=off
 FM_SUPERVISION_MODEL=$model
 FM_SUPERVISOR_BACKEND=t3code
 FM_SUPERVISOR_TARGET=$thread
+FM_TASK_INBOX=$CASE_DIR/home/state/$id.inbox
+GIT_CONFIG_COUNT=1
+GIT_CONFIG_KEY_0=core.hooksPath
+GIT_CONFIG_VALUE_0=$CASE_DIR/home/state/$id.git-hooks
 EOF
   [ "$($read FM_TASK_ID)" = undefined ] || fail "$label: a secondmate is not a task worker and must not carry FM_TASK_ID"
   [ "$($read TRACEPARENT)" = undefined ] || fail "$label: TRACEPARENT must be absent when trace context is off"
@@ -1479,10 +1488,10 @@ test_spawn_secondmate_runs_thread_in_home_with_env() {
   settings="$home/.claude/settings.local.json"
   assert_present "$settings" "a claude secondmate home gets .claude/settings.local.json"
   [ "$(t3_json_field "$settings" 'd.hooks')" = undefined ] || fail "a secondmate home carries no busy hooks"
-  [ "$(t3_json_field "$settings" 'Object.keys(d.env).length')" = 13 ] || fail "the env block should carry GOTMPDIR plus the twelve secondmate variables, got $(t3_json_field "$settings" 'Object.keys(d.env)')"
+  [ "$(t3_json_field "$settings" 'Object.keys(d.env).length')" = 17 ] || fail "the env block should carry GOTMPDIR plus the secondmate environment, got $(t3_json_field "$settings" 'Object.keys(d.env)')"
   [ "$(t3_json_field "$settings" 'd.env.GOTMPDIR')" = "/tmp/fm-$id/gotmp" ] || fail "settings env must carry GOTMPDIR"
   read_settings() { t3_json_field "$settings" "d.env[\"$1\"]"; }
-  assert_t3_secondmate_env read_settings "claude secondmate settings env" "$home" "$thread" autoarm
+  assert_t3_secondmate_env read_settings "claude secondmate settings env" "$home" "$thread" autoarm "$id"
   t3_excluded "$home" .claude/settings.local.json || fail "the settings file must be git-excluded in the home"
   assert_absent "$home/.codex/config.toml" "a claude secondmate writes no codex config"
   [ -L "$home/config/t3code-token" ] || fail "the secondmate home must link the primary's bearer, not copy it"
@@ -1508,7 +1517,7 @@ test_spawn_codex_secondmate_writes_toml_env() {
   assert_present "$toml" "a codex secondmate home gets .codex/config.toml"
   [ "$(t3_toml_env "$toml" GOTMPDIR)" = "/tmp/fm-$id/gotmp" ] || fail "config.toml must set GOTMPDIR, got '$(cat "$toml")'"
   read_toml() { t3_toml_env "$toml" "$1"; }
-  assert_t3_secondmate_env read_toml "codex secondmate config.toml" "$home" "$thread" persistent
+  assert_t3_secondmate_env read_toml "codex secondmate config.toml" "$home" "$thread" persistent "$id"
   t3_excluded "$home" .codex/config.toml || fail "config.toml must be git-excluded in the home"
   assert_absent "$home/.claude/settings.local.json" "a codex secondmate writes no Claude settings"
   rm -rf "/tmp/fm-$id"

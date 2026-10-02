@@ -775,6 +775,9 @@ fm_backend_source() {  # <name>
     rex)
       set -- fm-backend-hometag-lib.sh fm-composer-lib.sh fm-agent-process-lib.sh fm-session-lock-lib.sh fm-gemini-lib.sh
       ;;
+    t3code)
+      set -- fm-transition-lib.sh
+      ;;
     *)
       return 1
       ;;
