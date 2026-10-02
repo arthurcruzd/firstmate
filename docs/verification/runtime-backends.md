@@ -305,7 +305,7 @@ Herdr's Claude idle-native submit confirmation is pinned by `tests/fm-backend-he
 
 ### Cleanup endpoint identity
 
-The cleanup identity boundary was validated on 2026-07-28 with tmux 3.6a and metadata fixtures for every supported backend.
+The cleanup identity boundary was validated on 2026-07-28 with tmux 3.6a and metadata fixtures for every backend supported at that time.
 
 ```sh
 tests/fm-teardown-endpoint-safety.test.sh
@@ -328,7 +328,7 @@ ok - fm-teardown: dedicated-socket invalid cleanup preserves target/control and 
 
 The dedicated tmux cell removed ambient tmux variables, required a socket-bound wrapper, kept one target and one independent control window, and proved the wrapper was not called for invalid metadata or a direct empty target.
 Valid cleanup removed only the exact task-bound target and left the control window live.
-The metadata-only validation covers tmux, Herdr, Zellij, Orca, and cmux before backend dispatch.
+`fm_backend_validate_task_endpoint` in `bin/fm-backend.sh` owns the current metadata-only validation before backend dispatch; `tests/fm-backend-t3code.test.sh` covers T3 thread bindings.
 Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, and Muse share that backend cleanup boundary; their harness-specific hook files, tokens, transcript bindings, and session-log sidecars are cleaned only after it, so no harness needs a separate endpoint parser.
 
 ### Endpoint close
@@ -1992,7 +1992,8 @@ environmentHttp.ts:533: /api/orchestration/dispatch
 ### Live lifecycle guard
 
 The earlier live lifecycle guard ran on 2026-09-15 against T3 Code `0.0.41-nightly.20260914.1722`, before the stable v0.0.44 pin.
-The token-free guard checks the descriptor and strict version floor, project registration, thread creation and read, native state, capture, stop, and deletion of its own thread and project.
+Those runs do not validate the current version floor or auto-settle opt-out.
+The current token-free guard checks the descriptor and strict version floor, project registration, thread creation with auto-settle disabled, thread read, native state, capture, stop, and deletion of its own thread and project.
 It also opens the real `/ws` shell subscription with a short-lived ticket, requires its synchronized snapshot to contain the owned thread, and checks the reader completes its budget successfully.
 It uses only a fresh temporary project and never starts a model turn unless `FM_T3CODE_PROMPT_LIVE=1` or `FM_LIVE=1` is set.
 Refresh with the configured Firstmate home:
@@ -2026,7 +2027,9 @@ tests/fm-daemon.test.sh
 ```
 
 The fake-server suite covers the token and version gates, project matching, create and turn-start payloads, effort option ids, capture, keys, native status, stop-then-archive cleanup, per-directory environment, worker and secondmate spawn, the secondmate bearer link, launch-setting refusals, abort cleanup lease retention, tracked Codex configuration preservation, teardown ordering, native exit, relaunch refusal, and away-target lookup.
-It also drives the watcher through the T3 wedge and dead-agent paths, including stopped or failed sessions with background work, live working jobs, and idle monitoring jobs.
+Portable adapter tests use fake T3 and Treehouse boundaries rather than locally installed services.
+The suite also drives the watcher through the T3 wedge and dead-agent paths, including stopped or failed sessions with background work, live working jobs, and idle monitoring jobs.
+The same suite covers unknown busy state under shell-read failures, retained stale alerts and external-wait rechecks, once-per-condition reporting through transient detail failures, and re-arming after confirmed activity, archive, or HTTP 404.
 `tests/fm-backend-t3code-events.test.sh` covers the shared classification on the stream path, subscription framing, thread filtering, reconnect reconciliation, deduplication, and polling fallback.
 `tests/fm-daemon.test.sh` covers discovery precedence and native busy state.
 

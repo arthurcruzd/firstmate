@@ -1319,9 +1319,9 @@ housekeeping() {  # <state>
     else
       [ "$age" -ge "$pause_secs" ] || continue
     fi
-    # Endpoint-readability probe only: exit code 2 means the capture failed, so the
-    # endpoint is gone and there is nothing left to re-surface. The busy/idle verdict
-    # is deliberately discarded here. Do NOT reinstate a `0)` arm dropping the marker
+    # Removal probe only: stale_window_is_busy owns when exit code 2 means gone.
+    # T3 native uncertainty keeps the recheck pending. The busy/idle verdict is
+    # deliberately discarded here. Do NOT reinstate a `0)` arm dropping the marker
     # on busy: migrate_watcher_pause_markers recreates it with a fresh timestamp on
     # the very next tick while the declaration still stands, so the window would
     # restart forever and the wait would never mature into its one recheck.
