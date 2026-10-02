@@ -56,6 +56,7 @@ const server = http.createServer((req, res) => {
       return send(200, world.shell);
     }
     const thread = url.pathname.match(/^\/api\/orchestration\/threads\/([^/]+)$/);
+    if (thread && world.detailFailure === "http-error") return send(503, { reason: "detail unavailable" });
     if (thread) {
       const hit = (world.threads || {})[thread[1]];
       if (!hit) return send(404, { _tag: "EnvironmentThreadNotFound", code: "thread_not_found", reason: "no such thread" });
@@ -864,6 +865,29 @@ test_housekeeping_preserves_unknown_stale_recheck() {
       || fail "$session uncertainty must not repeat the alert after the buffer is delivered"
     assert_present "$marker" "$session recheck must remain pending after reporting"
 
+    # A transient detail failure is uncertainty, not thread removal.
+    t3_world_set 'w.detailFailure = "http-error"'
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+      handle_wake "stale: thread-live" "$1"
+    ' "$state" || fail "detail-failure $session housekeeping failed"
+    t3_world_set 'w.detailFailure = null'
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+    ' "$state" || fail "post-detail-failure $session housekeeping failed"
+    assert_present "$marker" "a transient $session detail failure must keep the stale recheck pending"
+    assert_present "$state/.subsuper-reported-stale-worker" "a transient $session detail failure must keep the report marker"
+    [ ! -s "$state/.subsuper-escalations" ] \
+      || fail "a transient $session detail failure must not report the same wedge again"
+
     # Only positive resumed-work proof can clear the retained marker.
     t3_world_set 'w.shellFailure = null; w.threads["thread-live"].session.status = "running"'
     t3_run '
@@ -896,6 +920,19 @@ test_housekeeping_preserves_unknown_stale_recheck() {
       housekeeping "$1"
     ' "$state" || fail "gone $session housekeeping failed"
     assert_absent "$marker" "a gone thread must clear stale tracking"
+    assert_absent "$state/.subsuper-reported-stale-worker" "a gone thread must re-arm reporting"
+    t3_world "$(t3_thread_json thread-live "$session" '"2026-09-14T00:00:00.000Z"')"
+    printf 1 > "$marker"
+    : > "$state/.subsuper-escalations"
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+    ' "$state" || fail "archived $session housekeeping failed"
+    assert_absent "$marker" "an archived thread must clear stale tracking"
+    [ ! -s "$state/.subsuper-escalations" ] || fail "an archived $session thread must not report a possible wedge"
     t3_world "$(t3_thread_json thread-live "$session" null)"
     t3_world_set 'w.shellFailure = "http-error"'
     printf 1 > "$marker"
