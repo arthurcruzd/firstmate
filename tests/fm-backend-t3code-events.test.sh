@@ -4,6 +4,10 @@ set -eu
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 TMP_ROOT=$(fm_test_tmproot fm-t3-events)
+FAKEBIN=$(fm_fakebin "$TMP_ROOT")
+# The fixture never leases a worktree; do not depend on an installed Treehouse.
+fm_fake_exit0 "$FAKEBIN" treehouse
+export PATH="$FAKEBIN:$PATH"
 mkdir -p "$TMP_ROOT/config" "$TMP_ROOT/state"
 printf 'test-token\n' > "$TMP_ROOT/config/t3code-token"
 cat > "$TMP_ROOT/server.cjs" <<'JS'
@@ -116,8 +120,11 @@ set +e  # The watcher handles nonzero classification verdicts explicitly.
 export FM_STATE_OVERRIDE="$TMP_ROOT/state" FM_ROOT_OVERRIDE="$ROOT"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-watch.sh"
+# shellcheck disable=SC2034 # Read by the sourced watcher's fallback loop.
 POLL=1
+# shellcheck disable=SC2034 # Read by the sourced watcher's capability budget.
 EVENT_CAP_FAIL_MAX=2
+# shellcheck disable=SC2153 # Initialized by the sourced watcher above.
 fm_write_meta "$STATE/owned.meta" 'window=fm-owned' 't3_thread_id=owned' 'backend=t3code' 'kind=ship'
 fm_write_meta "$STATE/second.meta" 'window=fm-second' 't3_thread_id=second' 'backend=t3code' 'kind=secondmate'
 printf 'edge\n' > "$TMP_ROOT/mode"

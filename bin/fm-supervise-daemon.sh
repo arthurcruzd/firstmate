@@ -528,6 +528,7 @@ unknown_wake_acknowledge_flushed() {  # <state> <buffer>
 
 # --- stale marker + escalation buffer (stateful, but via explicit state dir) -
 # Marker:   state/.subsuper-stale-<key>   contains the epoch first seen idle.
+# Reported: state/.subsuper-reported-stale-<key> records an unknown-state alert.
 # Dialog:   state/.subsuper-dialog-<key>   the blocking-dialog name copied off a
 #           self-handled stale wake, so the persistence line can still say it.
 #           A terminal status still clears the stale marker, and this file goes
@@ -544,13 +545,17 @@ stale_marker_record() {  # <window> <state>  — create if absent
   local win=$1 state=$2 key marker
   key=$(_stale_key "$(window_to_task "$win" "$state")")
   marker="$state/.subsuper-stale-$key"
-  [ -e "$marker" ] || _now > "$marker"
+  if [ ! -e "$marker" ]; then
+    rm -f "$state/.subsuper-reported-stale-$key"
+    _now > "$marker"
+  fi
 }
 
 stale_marker_remove() {  # <window> <state>
   local win=$1 state=$2 key
   key=$(_stale_key "$(window_to_task "$win" "$state")")
-  rm -f "$state/.subsuper-stale-$key" "$state/.subsuper-dialog-$key"
+  rm -f "$state/.subsuper-stale-$key" "$state/.subsuper-dialog-$key" \
+    "$state/.subsuper-reported-stale-$key"
 }
 
 # The name a stale detail carried after "blocked-on-prompt: ". The trailing
@@ -600,6 +605,7 @@ clear_pause_tracking() {  # <window> <state>
   # the whole horizon.
   rm -f "$state/.subsuper-paused-$key" "$state/.subsuper-pause-until-due-$key" "$state/.subsuper-stale-$key" \
     "$state/.subsuper-dialog-$key" \
+    "$state/.subsuper-reported-stale-$key" \
     "$state/.paused-$watcher_key" "$state/.paused-rechecked-$watcher_key" "$state/.paused-resurfaced-$watcher_key" \
     "$state/.stale-$watcher_key" "$state/.stale-since-$watcher_key" "$state/.wedge-escalations-$watcher_key" \
     "$state/.wedge-permanent-$watcher_key" \
@@ -1310,7 +1316,7 @@ housekeeping() {  # <state>
     win=$(window_for_task "$key" "$state" 2>/dev/null || true)
     if [ -z "$win" ]; then
       # Window gone (task torn down): drop the marker, nothing to escalate.
-      rm -f "$marker" "$state/.subsuper-dialog-$key"; continue
+      rm -f "$marker" "$state/.subsuper-dialog-$key" "$state/.subsuper-reported-stale-$key"; continue
     fi
     task=$(window_to_task "$win" "$state")
     last=$(status_declared_wait_line "$state/$task.status")
@@ -1322,9 +1328,11 @@ housekeeping() {  # <state>
     [ "$age" -ge "${FM_STALE_ESCALATE_SECS:-$STALE_ESCALATE_SECS_DEFAULT}" ] || continue
     stale_window_is_busy "$win" "$state"
     case "$?" in
-      0) rm -f "$marker" "$state/.subsuper-dialog-$key" ;;
-      2) rm -f "$marker" "$state/.subsuper-dialog-$key" ;;
-      3) escalate_add "$state" "stale persisted ${age}s (possible wedge): $win" ;;
+      0|2) stale_marker_remove "$win" "$state" ;;
+      3) if [ ! -e "$state/.subsuper-reported-stale-$key" ] \
+           && escalate_add "$state" "stale persisted ${age}s (possible wedge): $win"; then
+           _now > "$state/.subsuper-reported-stale-$key"
+         fi ;;
       *)
         dialog_name=$(cat "$state/.subsuper-dialog-$key" 2>/dev/null || true)
         if [ -n "$dialog_name" ]; then

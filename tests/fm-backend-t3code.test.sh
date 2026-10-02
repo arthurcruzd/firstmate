@@ -11,6 +11,10 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-backend-t3code-tests)
+FAKEBIN=$(fm_fakebin "$TMP_ROOT")
+# Lifecycle cases install their own recording stub before this dependency stub.
+fm_fake_exit0 "$FAKEBIN" treehouse
+export PATH="$FAKEBIN:$PATH"
 SERVER_DIR="$TMP_ROOT/server"
 mkdir -p "$SERVER_DIR"
 cat > "$SERVER_DIR/t3-fake.js" <<'JS'
@@ -811,7 +815,7 @@ test_stale_classifier_resolves_t3_thread() {
 }
 
 test_housekeeping_preserves_unknown_stale_recheck() {
-  local session state marker out
+  local session state marker out first
   for session in ready error; do
     t3_case "housekeeping-unknown-$session" "$session"
     [ "$session" != ready ] || t3_world_set 'w.shellFailure = "http-error"'
@@ -837,6 +841,28 @@ test_housekeeping_preserves_unknown_stale_recheck() {
     assert_contains "$(cat "$state/.subsuper-escalations")" \
       'stale persisted 999s (possible wedge): thread-live' \
       "$session uncertainty must report the overdue possible wedge"
+    first=$(cat "$state/.subsuper-escalations")
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+      housekeeping "$1"
+    ' "$state" || fail "repeated $session housekeeping failed"
+    [ "$(cat "$state/.subsuper-escalations")" = "$first" ] \
+      || fail "$session uncertainty must not grow the escalation buffer on repeated passes"
+    : > "$state/.subsuper-escalations"
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+    ' "$state" || fail "post-delivery $session housekeeping failed"
+    [ ! -s "$state/.subsuper-escalations" ] \
+      || fail "$session uncertainty must not repeat the alert after the buffer is delivered"
+    assert_present "$marker" "$session recheck must remain pending after reporting"
 
     # Only positive resumed-work proof can clear the retained marker.
     t3_world_set 'w.shellFailure = null; w.threads["thread-live"].session.status = "running"'
@@ -848,6 +874,41 @@ test_housekeeping_preserves_unknown_stale_recheck() {
       housekeeping "$1"
     ' "$state" || fail "resumed $session housekeeping failed"
     assert_absent "$marker" "a confirmed running session must clear stale tracking"
+    # A subsequent unknown condition must report again after resumed work.
+    t3_world_set "w.threads[\"thread-live\"].session.status = \"$session\"; w.shellFailure = \"http-error\""
+    printf 1 > "$marker"
+    : > "$state/.subsuper-escalations"
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+    ' "$state" || fail "rearmed $session housekeeping failed"
+    assert_contains "$(cat "$state/.subsuper-escalations")" 'possible wedge' \
+      "$session uncertainty after resumed work must re-arm reporting"
+    t3_world_set 'delete w.threads["thread-live"]'
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+    ' "$state" || fail "gone $session housekeeping failed"
+    assert_absent "$marker" "a gone thread must clear stale tracking"
+    t3_world "$(t3_thread_json thread-live "$session" null)"
+    t3_world_set 'w.shellFailure = "http-error"'
+    printf 1 > "$marker"
+    : > "$state/.subsuper-escalations"
+    t3_run '
+      . "$0/bin/fm-supervise-daemon.sh"
+      _now() { printf 1000; }
+      LOG="$1/daemon.log"
+      FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+      housekeeping "$1"
+    ' "$state" || fail "recreated $session housekeeping failed"
+    assert_contains "$(cat "$state/.subsuper-escalations")" 'possible wedge' \
+      "$session uncertainty after a dead thread must re-arm reporting"
   done
   pass "away housekeeping preserves unknown stale rechecks and reports possible wedges until work resumes"
 }
@@ -1646,6 +1707,11 @@ test_teardown_refuses_when_t3_is_unreachable() {
   assert_present "$state/$id.meta" "V2 teardown must preserve metadata"
   pass "fm-teardown.sh backend=t3code: refuses to return a slot a live thread still points at"
 }
+
+if [ -n "${FM_TEST_ONLY:-}" ]; then
+  "$FM_TEST_ONLY"
+  exit
+fi
 
 test_housekeeping_preserves_unknown_stale_recheck
 test_t3_stale_watcher error dead codex '' fresh
