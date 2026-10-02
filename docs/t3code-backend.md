@@ -43,7 +43,8 @@ A secondmate spawned on this backend gets `config/t3code-token` as a symlink to 
 The file is part of the primary's inherited local material, so every secondmate home receives the primary's mapping and its own T3 workers launch on the same provider instances; a home without the file falls back to those bare defaults, which need not name a configured account.
 A task's `--model` must be a slug in T3's model catalog; an unknown slug leaves the session in `error`.
 `--model default` uses the T3 project's default model only when its instance matches `config/t3code-instances`; otherwise it refuses and asks for an explicit `--model`.
-`--effort` rides as a provider option, `effort` for claude (`low|medium|high|xhigh|max`) and `reasoningEffort` for codex (`low|medium|high|xhigh`); `default` sends no option, and a value outside a harness's set is refused.
+`--effort` rides as a provider option, `effort` for claude (`low|medium|high|xhigh|max`) and `reasoningEffort` for codex (`low|medium|high|xhigh`); a value outside a harness's set is refused.
+With `--effort default`, `--model default` preserves the project's default options, while an explicit model sends no options.
 
 ## Task shape and metadata
 
@@ -97,7 +98,8 @@ The control plane ([`agent-control.md`](agent-control.md)) reads the same status
 `exit` is a `thread.session.stop`, since a thread has no composer to type an exit command into, proven by the session reading `stopped`; the thread and its transcript stay, and a later turn restarts the same agent with that transcript.
 `relaunch` is refused before anything is stopped: a T3 thread is bound to the driver that first ran it, and a turn on a stopped thread continues the same agent, so no replacement agent can be launched into the endpoint.
 
-The watcher and `fm-crew-state.sh` read the server's own session status through one table in the adapter, and both native verdicts are trusted ahead of every harness gate and hook record (source `t3code-native`), so a codex crew settles from T3's status even though codex has no verified hook writer; only an unreadable server falls through to the ordinary contract.
+The watcher and `fm-crew-state.sh` use the adapter's [shared thread classification](#restart-and-liveness-behavior) ahead of harness gates and hook records (source `t3code-native`), so a codex crew settles from T3's status even though codex has no verified hook writer.
+Native uncertainty stays unknown instead of falling through to a hook record or rendered fallback.
 A thread's capture stays byte-identical through a long tool call, so before reporting a possible wedge the watcher rechecks the [shared thread classification](#restart-and-liveness-behavior) and resets its stale timer only for the `running` word, including live `working` background jobs.
 `wedge_defer_t3code_running` in `bin/fm-watch.sh` owns that consult; all other classified words keep the ordinary escalation ladder, including its declared-wait, worktree-write, and dead-record checks.
 T3 launches Claude with the `user,project,local` setting sources, so the worktree `.claude/settings.local.json` busy hooks fire as on every other backend.
@@ -160,6 +162,11 @@ The away daemon can supervise a captain that runs inside a T3 thread.
 T3 puts nothing about the thread into the agent's environment, so eligible discovery matches this home's real path to a project's `workspaceRoot` and selects its one unarchived thread with `worktreePath` null and a session status of `starting` or `running`.
 Two live threads in one home is an error naming both ids, resolved by setting `FM_SUPERVISOR_TARGET`; none, or an unreachable server, falls through to the ordinary tmux default.
 Busy uses the [shared thread classification](#restart-and-liveness-behavior), injection is a `thread.turn.start`, and escalations defer exactly as on every other backend.
+An unknown native busy verdict defers new-turn delivery but does not prove that work resumed.
+Away housekeeping keeps an overdue stale alert pending and buffers one possible-wedge report while the verdict remains unknown, including an errored session or a transient thread-detail failure.
+Confirmed busy activity or a missing thread (archived or HTTP 404) clears the stale and reported markers, so a later unknown condition can report again.
+Declared external-wait rechecks also survive native uncertainty; the worker's declaration still controls their cadence.
+`stale_window_is_busy` and `housekeeping` in `bin/fm-supervise-daemon.sh` own that lifecycle, and `tests/fm-backend-t3code.test.sh` covers retention, deduplication, and re-arming.
 Only `bin/fm-afk-launch.sh start-native` launches the daemon here, as the captain's own tracked background job; `start` refuses because T3 hosts no terminal to create.
 A secondmate spawned on this backend carries its supervisor identity in its environment, so its own daemon needs no discovery.
 
@@ -167,7 +174,6 @@ A secondmate spawned on this backend carries its supervisor identity in its envi
 
 Write `herdr` to `config/backend` and every new spawn uses the Herdr backend again.
 In-flight tasks keep the backend recorded in their own `state/<id>.meta`, so they are supervised and torn down through T3 Code until they finish.
-The branch can be left with `git switch main`.
 
 ## Verified version and protocol gate
 

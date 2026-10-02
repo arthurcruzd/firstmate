@@ -226,6 +226,7 @@ The fold remains the sole owner of open/closed semantics, including same-key reo
 The always-on watcher also uses that library's absorb classification on no-verb signals and first-sighting stale panes before status-log terminality is trusted, while the daemon maintains distinct wedge and declared-wait recheck cadences.
 The daemon's stale-routing precedence, declared-wait aging, and steering-inbox exception are owned by [Classification policy](../.agents/skills/afk/SKILL.md#classification-policy).
 In away mode, seen-status dedupe does not clear possible-wedge aging for nonterminal progress, so housekeeping still re-escalates an unchanged idle pane at the configured bound.
+For T3 native uncertainty, [`t3code-backend.md`](t3code-backend.md#away-mode) owns stale-alert retention and re-arming.
 Away-mode housekeeping has no worktree-write or validating-run deferral of its own, so while `state/.afk` exists a quiet crew that is writing its own worktree or waiting on its own running validation still escalates as a possible wedge at that bound.
 The daemon batches the escalations selected by that policy into a single-line digest using the canonical `away-supervisor` kind from `bin/fm-operational-input.sh`; a Claude Code primary receives that owner's record-backed doorbell instead of the stripped invisible marker, so firstmate can distinguish the escalation from ordinary captain messages.
 Captain-held transfers remain silent until return while the away record exists.
@@ -271,7 +272,7 @@ A record any real hook event has advanced is never reclassified this way however
 The per-harness signature table lives in `bin/fm-busy-lib.sh`'s header, and [runtime backend verification](verification/runtime-backends.md#launch-prompt-backstop-signatures) owns the live evidence.
 
 Missing, malformed, stale, untrusted, or unverified semantic state is unknown, never idle, and unknown is never promoted to busy either.
-Ordinary task-state consumers act only on an exact busy verdict, so an unreadable worker surfaces for a closer look instead of being absorbed as still-working or written off as finished.
+Consumers deciding whether work resumed act only on an exact busy verdict, so an unreadable worker surfaces for a closer look instead of being absorbed as still-working or written off as finished.
 Endpoint death is the only process-level override and yields dead; child processes, CPU, process sleep state, and marker modification times are not state signals.
 `state/<id>.turn-ended` files remain wake notifications, not current state.
 
@@ -292,7 +293,7 @@ For compatibility, default tmux tasks do not write `backend=tmux`; every reader 
 Herdr's native `agent.get` verdict still participates, but only as evidence of activity: a native `busy` is accepted when the task has no record of its own, while a native `idle` is not, because `agent.get` reports generation state and reads idle while a worker blocks on its own long-running foreground tool call.
 Rex's OSC 7501 program status participates the same way, as positive activity evidence only, and only while the process that reported it is still in the block's foreground chain.
 tmux, zellij, orca, cmux, and Paseo expose no native busy primitive at all, so a task on those backends is classified purely from its adapter's own lifecycle record.
-t3code accepts native `busy` and `idle` ahead of harness records; [`t3code-backend.md`](t3code-backend.md#restart-and-liveness-behavior) owns its session and background-work classification.
+[`t3code-backend.md`](t3code-backend.md#restart-and-liveness-behavior) owns T3's native classification and its precedence over harness records.
 That poll loop is still the default event source for backends with no native push events, so this stays an extraction of the abstraction rather than a watcher rewrite.
 For capable Herdr, Rex, and T3 Code sessions, the same watcher replaces its terminal sleep with a bounded native event wait that immediately surfaces `blocked`; [Herdr's push events](herdr-backend.md#push-events-and-polling-fallback), [Rex's push events](rex-backend.md#push-events), and [T3 Code's push events](t3code-backend.md#push-events-and-polling-fallback) own the current mechanisms and capability gates, while [runtime backend verification](verification/runtime-backends.md#native-blocked-event) and its [Rex](verification/runtime-backends.md#rex) and [T3 Code](verification/runtime-backends.md#t3-code) sections own the active evidence.
 The deeper agent-process liveness probe is separate from that busy-state poll and is shared by the session-start sweep and the watcher's liveness tick through `bin/fm-secondmate-liveness-lib.sh`: tmux, Herdr, and Rex have verified classifiers and T3 Code has a native session classifier for secondmate recovery, Zellij remains unverified, and Orca, cmux, and Paseo do not support secondmate spawns.
