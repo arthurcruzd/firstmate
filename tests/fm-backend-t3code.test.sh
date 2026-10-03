@@ -1720,6 +1720,21 @@ test_lost_auto_settle_responses_return_archived_lease() {
   pass "lost auto-settle responses leave a known thread, so the abort archives it and returns the lease"
 }
 
+test_uncertain_launch_turn_keeps_git_hooks() {
+  local id=t3uncertainturn out rc
+  t3_case spawn-uncertain-turn ready
+  t3_world_set 'w.dropResponses = { "thread.turn.start": 2 }'
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "two lost launch-turn responses must abort spawn"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = "thread.create thread.auto-settle.set thread.turn.start thread.turn.start" ] \
+    || fail "the launch turn must reach the server, got '$(t3_dispatch_types)'"
+  assert_absent "$CASE_DIR/state/$id.meta" "an aborted launch must roll back its metadata"
+  [ -d "$CASE_DIR/state/$id.git-hooks" ] || fail "an uncertain accepted launch must keep the Git hook directory its thread uses"$'\n'"$out"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-spawn.sh --backend t3code: an accepted launch turn whose response is lost keeps its Git hook directory"
+}
+
 test_scout_teardown_stops_and_archives_before_slot_return() {
   local proj wt data state id out rc neutral fb thread=2c8f0d4e-7b1a-4f3c-9e2d-abcdef012345
   id="t3teardownz1"
@@ -1895,4 +1910,5 @@ test_spawn_refuses_launch_settings_t3_cannot_honor launch-env-allowlist HOME "co
 test_spawn_abort_returns_lease_only_after_archive 200
 test_spawn_abort_returns_lease_only_after_archive 500
 test_uncertain_thread_creation_keeps_lease
+test_uncertain_launch_turn_keeps_git_hooks
 test_lost_auto_settle_responses_return_archived_lease
