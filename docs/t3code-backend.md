@@ -12,7 +12,7 @@ T3 Code runs only the `claude` and `codex` harnesses; every other harness is ref
 
 Prerequisites:
 
-- A running T3 Code server at stable v0.0.44 or a later V1 build, whose `GET /.well-known/t3/environment` descriptor reports `threadAutoSettleOptOut`.
+- A running T3 Code server that passes the [version, protocol, and capability gate](#verified-version-and-protocol-gate).
 - `node`, which the adapter uses to speak HTTP, and `treehouse`.
 - The universal harness and toolchain requirements in [`configuration.md`](configuration.md#toolchain).
 
@@ -52,17 +52,7 @@ Each ship or scout task has one Treehouse worktree, leased durably with `treehou
 A secondmate's T3 project is its home and its thread has no worktree of its own (`worktreePath` null), so the agent runs in the home on whatever branch the home is on.
 The normal isolation and unlanded-work refusal rules still apply.
 
-```text
-backend=t3code
-window=fm-<id>
-t3_thread_id=<uuid>
-t3_project_id=<uuid>
-worktree=<absolute Treehouse slot path>
-```
-
-`window=` remains the caller-facing Firstmate alias.
-`t3_thread_id=` is the backend authority used by every operation and cleanup path.
-A secondmate record carries the ordinary `home=` and `projects=` lines as on every backend.
+[`configuration.md`](configuration.md#task-metadata) owns the task metadata fields, and its [task-selector contract](configuration.md#task-selectors) owns routing to the recorded thread.
 
 ## Per-directory harness environment
 
@@ -160,7 +150,8 @@ The reader runs as a bounded child of the existing watcher.
 The away daemon can supervise a captain that runs inside a T3 thread.
 [`configuration.md`](configuration.md#away-mode-supervisor-backend-fm_supervisor_backend--fm_supervisor_target) owns discovery precedence and the explicit-selection, origin, and bearer prerequisites.
 T3 puts nothing about the thread into the agent's environment, so eligible discovery matches this home's real path to a project's `workspaceRoot` and selects its one unarchived thread with `worktreePath` null and a session status of `starting` or `running`.
-Two live threads in one home is an error naming both ids, resolved by setting `FM_SUPERVISOR_TARGET`; none, or an unreachable server, falls through to the ordinary tmux default.
+Multiple matching threads print an ambiguity diagnostic naming their ids and fall through to the legacy tmux fallback, as do no matches or an unreachable server.
+Resolve ambiguity by explicitly setting both `FM_SUPERVISOR_BACKEND=t3code` and `FM_SUPERVISOR_TARGET` to the intended thread id.
 Busy uses the [shared thread classification](#restart-and-liveness-behavior), injection is a `thread.turn.start`, and escalations defer exactly as on every other backend.
 An unknown native busy verdict defers new-turn delivery but does not prove that work resumed.
 Away housekeeping keeps an overdue stale alert pending and buffers one possible-wedge report while the verdict remains unknown, including an errored session or a transient thread-detail failure.
@@ -182,7 +173,8 @@ In-flight tasks keep the backend recorded in their own `state/<id>.meta`, so the
 ## Verified version and protocol gate
 
 The verified source pin and minimum server version are stable `v0.0.44`.
-The adapter compares the complete semantic version, including prerelease identifiers; earlier nightlies and malformed versions fail with the installed version and required floor in the error.
+The adapter compares the complete semantic version, including prerelease identifiers; versions below the stable floor and malformed versions fail with the installed version and required floor in the error.
+For example, `0.0.44-nightly.1` is below the floor, while `0.0.45-nightly.1` passes the version check and must still satisfy the protocol and capability checks.
 Build metadata does not affect ordering.
 The descriptor must advertise `threadAutoSettleOptOut` and report `orchestrationProtocolVersion` as absent or `1`, and the configured bearer must authorize a shell read.
 Orchestrator V2 removes the HTTP dispatch path and renames commands, so this adapter refuses it before spawn, control, or teardown mutations.
