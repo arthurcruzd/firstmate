@@ -5603,11 +5603,11 @@ if [ "$BACKEND" = t3code ]; then
   # LAUNCH template embeds, with MODEL/EFFORT as the thread's model selection
   # instead of CLI flags, so nothing is staged for a shell to source.
   T3CODE_BRIEF_TEXT=$("$FM_ROOT/bin/fm-operational-input.sh" encode launch-brief < "$BRIEF") || exit 1
+  SPAWN_LAUNCH_SENT=1
   fm_backend_t3code_turn_start "$T" "$T3CODE_BRIEF_TEXT" "$T3CODE_MODEL_SELECTION" || {
     echo "error: T3 refused the launch turn for $ID on thread $T; inspect the thread in T3 Code" >&2
     exit 1
   }
-  SPAWN_LAUNCH_SENT=1
 else
   LAUNCH_HOME_TOKEN=$(spawn_launch_home_token "$FM_HOME") || LAUNCH_HOME_TOKEN=
   if [ -z "$LAUNCH_HOME_TOKEN" ]; then
@@ -5639,9 +5639,9 @@ else
     exit 1
   fi
   sleep 0.3
+  SPAWN_LAUNCH_SENT=1
   spawn_send_literal "$T" ". $(shell_quote "$LAUNCH_FILE")"
   sleep 0.3
-  SPAWN_LAUNCH_SENT=1
   if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
     HERDR_PROJECTION_ABORT_CLEANUP=0
     spawn_herdr_presentation_order_lock_release
