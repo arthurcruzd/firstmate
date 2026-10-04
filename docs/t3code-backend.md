@@ -90,6 +90,7 @@ The control plane ([`agent-control.md`](agent-control.md)) reads the same status
 
 The watcher and `fm-crew-state.sh` use the adapter's [shared thread classification](#restart-and-liveness-behavior) ahead of harness gates and hook records (source `t3code-native`), so a codex crew settles from T3's status even though codex has no verified hook writer.
 Native uncertainty stays unknown instead of falling through to a hook record or rendered fallback.
+Steering-inbox delivery treats that uncertainty like busy, so a doorbell waits and spends the same busy-deferral budget [`bin/fm-task-inbox-lib.sh`](../bin/fm-task-inbox-lib.sh) owns before a stuck-busy escalation.
 A thread's capture stays byte-identical through a long tool call, so before reporting a possible wedge the watcher rechecks the [shared thread classification](#restart-and-liveness-behavior) and resets its stale timer only for the `running` word, including live `working` background jobs.
 `wedge_defer_t3code_running` in `bin/fm-watch.sh` owns that consult; all other classified words keep the ordinary escalation ladder, including its declared-wait, worktree-write, and dead-record checks.
 T3 launches Claude with the `user,project,local` setting sources, so the worktree `.claude/settings.local.json` busy hooks fire as on every other backend.
