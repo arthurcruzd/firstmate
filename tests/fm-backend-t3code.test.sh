@@ -691,6 +691,7 @@ test_probe_preserves_liveness_when_shell_unavailable() {
     t3_run '
       FM_STATE_OVERRIDE=$1; export FM_STATE_OVERRIDE
       . "$0/bin/fm-watch.sh"
+      wake() { :; }
       fm_busy_is_busy t3code thread-live claude worker "$STATE" || exit 1
       if window_is_busy thread-live ""; then exit 1; fi
       rec=$(fm_task_inbox_write "$STATE" worker "please continue") || exit 1
@@ -698,8 +699,11 @@ test_probe_preserves_liveness_when_shell_unavailable() {
       FM_TASK_INBOX_GRACE_SECS=1
       case "$(fm_task_inbox_due_action "$STATE" worker)" in ring\ *) ;; *) exit 1 ;; esac
       inbox_steer_check thread-live worker
-      [ -f "$rec" ] && [ ! -e "$STATE/worker.inbox/.ring-state" ] && [ ! -e "$STATE/.wake-queue" ]
-    ' "$state" || fail "$status must defer the watcher doorbell and preserve its durable instruction"
+      [ -f "$rec" ] && [ ! -e "$STATE/worker.inbox/.ring-state" ] && [ ! -e "$STATE/.wake-queue" ] || exit 1
+      # Uncertainty spends the busy-deferral budget, so it cannot defer forever.
+      inbox_steer_check thread-live worker
+      [ -f "$rec" ] && [ ! -e "$STATE/worker.inbox/.ring-state" ] && grep -q "stuck-busy after 2 consecutive" "$STATE/.wake-queue"
+    ' "$state" || fail "$status must defer the watcher doorbell, preserve its durable instruction, and escalate once the busy budget is spent"
     [ -z "$(t3_dispatch_types)" ] || fail "$status with unknown background work must not start a turn"
   done
   t3_case shell-timeout interrupted
@@ -711,7 +715,7 @@ test_probe_preserves_liveness_when_shell_unavailable() {
   t3_world_set 'w.shellFailure = "malformed"'
   got=$(t3_run 'fm_backend_t3code_state_row "$(fm_backend_t3code_probe thread-live)"')
   [ "$got" = 'unknown alive' ] || fail "an invalid shell response must preserve liveness with unknown busy state, got $got"
-  pass "t3code probe: shell failures preserve liveness, report unknown busy state, and defer away-mode injection"
+  pass "t3code probe: shell failures preserve liveness, report unknown busy state, defer away-mode injection, and bound inbox deferral"
 }
 
 test_kill_stops_then_archives_and_tolerates_gone() {
