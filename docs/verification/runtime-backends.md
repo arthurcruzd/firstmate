@@ -2030,7 +2030,8 @@ tests/fm-daemon.test.sh
 The fake-server suite covers the token and version gates, project matching, create and turn-start payloads, effort option ids, capture, keys, native status, stop-then-archive cleanup, per-directory environment, worker and secondmate spawn, the secondmate bearer link, launch-setting refusals, abort cleanup lease retention, tracked Codex configuration preservation, teardown ordering, native exit, relaunch refusal, and away-target lookup.
 Portable adapter tests use fake T3 and Treehouse boundaries rather than locally installed services.
 `test_uncertain_launch_turn_keeps_git_hooks` in `tests/fm-backend-t3code.test.sh` covers a server-accepted launch whose two responses are lost, asserting that the task's Git hook directory survives metadata rollback.
-The suite also drives the watcher through the T3 wedge and dead-agent paths, including stopped or failed sessions with background work, live working jobs, and idle monitoring jobs.
+The suite also drives the watcher through the T3 wedge and dead-agent paths, including stopped or failed sessions with background work, fresh live working jobs, and idle monitoring jobs.
+It verifies bounded alerts for hung turns and background jobs that outlive the turn-age limit.
 The same suite covers unknown busy state under shell-read failures, retained stale alerts and external-wait rechecks, once-per-condition reporting through transient detail failures, and re-arming after confirmed activity, archive, or HTTP 404.
 Its native-restart regression covers an undelivered warning queued before stop, fresh-start queue discard, startup rollback, exactly one replacement under persistent uncertainty, and suppression after delivery.
 `tests/fm-backend-t3code-events.test.sh` covers the shared classification on the stream path, subscription framing, thread filtering, reconnect reconciliation, deduplication, and polling fallback.
