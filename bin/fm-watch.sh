@@ -553,6 +553,19 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
   wake "$reason"
 }
 
+# inbox_steer_busy: the steering-inbox delivery guard. Every backend keeps the
+# recorded task's busy verdict (window_is_busy). T3 Code alone also treats its
+# native uncertainty as busy (fm_busy_is_busy), so a doorbell waits for proven
+# idle; pane staleness elsewhere still needs busy proof.
+inbox_steer_busy() {  # <window> <backend> <task> <tail40>
+  local w=$1 backend=$2 task=$3 tail40=$4
+  if [ "$backend" = t3code ]; then
+    fm_busy_is_busy t3code "$w" "$(window_harness "$w")" "$task" "$STATE" "$tail40"
+  else
+    window_is_busy "$w" "$tail40"
+  fi
+}
+
 # Steering-inbox loss detection, one cheap check per recorded window per poll.
 # bin/fm-task-inbox-lib.sh owns delivery, busy-deferral, retry, and escalation policy.
 # Endpoint and busy checks precede delivery so recovery never types into a busy,
@@ -590,8 +603,7 @@ inbox_steer_check() {  # <window> <task>
   esac
   watcher_capture "$backend" "$w" 40 "$(window_label "$w")" || WATCHER_CAPTURE=
   tail40=$WATCHER_CAPTURE
-  # Delivery still waits on T3 uncertainty; stale tracking requires busy proof.
-  if fm_busy_is_busy "$backend" "$w" "$(window_harness "$w")" "$task" "$STATE" "$tail40"; then
+  if inbox_steer_busy "$w" "$backend" "$task" "$tail40"; then
     [ "$verb" != retry ] || return 0
     if ! count=$(fm_task_inbox_record_busy "$STATE" "$task" "$rec"); then
       [ -f "$rec" ] || return 0
