@@ -78,7 +78,8 @@
 #                          tool process.
 #                          At escalation time a T3 Code thread whose shared
 #                          classification still reads running resets the timer
-#                          (wedge_defer_t3code_running).
+#                          while its latest turn boundary is under
+#                          BUSY_TURN_MAX_SECS old (wedge_defer_t3code_running).
 #   stale: <window> (unread firstmate instruction: ...)
 #   stale: <window> (steering-inbox ladder bookkeeping unwritable: ...)
 #   stale: <window> (steering-inbox busy bookkeeping unwritable: ...)
@@ -1576,15 +1577,21 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
 # `starting`, a settled session, idle `monitoring` background work, a stopped or
 # failed session whatever job outlives it, and an unreadable server all keep
 # the unchanged escalation, so a leftover status can never excuse a dead thread.
+# The deferral is itself bounded by BUSY_TURN_MAX_SECS, measured from the latest
+# turn boundary T3 records: a turn that has run, or background work that has
+# outlived its turn, for that long without a newer boundary escalates like any
+# busy pane past the bound, and a missing turn timestamp never defers.
 # Returns 0 when it has handled the window, 1 to escalate on the unchanged path.
 wedge_defer_t3code_running() {  # <window> <since-file> <triage-label> <idle-age>
-  local win=$1 since_file=$2 label=$3 age=$4
+  local win=$1 since_file=$2 label=$3 age=$4 turn_age
   [ "$(window_backend "$win")" = t3code ] || return 1
   fm_backend_source t3code || return 1
   [ "$(fm_backend_t3code_probe "$win")" = running ] || return 1
+  turn_age=$(fm_backend_t3code_turn_age "$win") || return 1
+  [ "$turn_age" -lt "$BUSY_TURN_MAX_SECS" ] || return 1
   clear_write_tracking "$(window_key "$win")"
   date +%s > "$since_file"
-  triage_log "absorbed $label (T3 session still running, idle ${age}s), timer reset: $win"
+  triage_log "absorbed $label (T3 session still running, turn ${turn_age}s, idle ${age}s), timer reset: $win"
   return 0
 }
 

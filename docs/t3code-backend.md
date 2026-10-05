@@ -94,6 +94,7 @@ Native uncertainty stays unknown instead of falling through to a hook record or 
 Watcher re-rings for ordinary records treat that uncertainty like busy, so a due doorbell waits and spends the same busy-deferral budget [`bin/fm-task-inbox-lib.sh`](../bin/fm-task-inbox-lib.sh) owns before a stuck-busy escalation.
 The initial `fm-send.sh` doorbell follows that library's best-effort ring contract instead.
 A thread's capture stays byte-identical through a long tool call, so before reporting a possible wedge the watcher rechecks the [shared thread classification](#restart-and-liveness-behavior) and resets its stale timer only for the `running` word, including live `working` background jobs.
+That deferral is itself bounded by `FM_BUSY_TURN_MAX_SECS`, measured from the latest turn boundary T3 records (completion, or start while the turn still runs), so a hung turn or outlived background job still reaches the possible-wedge alert, and a missing turn timestamp never defers.
 `wedge_defer_t3code_running` in `bin/fm-watch.sh` owns that consult; all other classified words keep the ordinary escalation ladder, including its declared-wait, worktree-write, and dead-record checks.
 T3 launches Claude with the `user,project,local` setting sources, so the worktree `.claude/settings.local.json` busy hooks fire as on every other backend.
 T3 starts every agent with the T3 server's own environment, not a login shell's.

@@ -368,6 +368,21 @@ process.stdout.write(require(rule)({ session: { status }, backgroundLiveness: ro
 ' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/t3code-thread-status.cjs" "$1" "$word" 2>/dev/null || printf 'alive-unknown'
 }
 
+# fm_backend_t3code_turn_age: whole seconds since the thread's latest turn
+# boundary - its completion, or its start while it still runs. Fails when the
+# thread is unreadable or carries no parseable turn timestamp, so a caller that
+# bounds a deferral by this age never defers on missing evidence.
+fm_backend_t3code_turn_age() {  # <thread-id>
+  local out
+  out=$(fm_backend_t3code_thread_read "$1" 1 2>/dev/null) || return 1
+  printf '%s' "$out" | node -e '
+const turn = (JSON.parse(require("fs").readFileSync(0, "utf8")).thread || {}).latestTurn || {};
+const at = Date.parse(turn.completedAt || turn.startedAt || turn.requestedAt || "");
+if (!Number.isFinite(at)) process.exit(1);
+process.stdout.write(String(Math.max(0, Math.floor((Date.now() - at) / 1000))));
+' 2>/dev/null
+}
+
 # The one status table: "<busy_state> <agent_state>" per probe row.
 fm_backend_t3code_state_row() {  # <probe-row>
   case "$1" in
