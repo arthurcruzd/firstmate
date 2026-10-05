@@ -1036,18 +1036,24 @@ test_housekeeping_preserves_unknown_stale_recheck() {
 # Drive the real watcher with an unchanged transcript and an expired wedge
 # timer. The pipeline fixture binds to a real repository's branch and HEAD,
 # so fm-crew-state.sh performs its ordinary run attribution.
-test_t3_stale_watcher() {  # <session-status> <absorb|surface|dead> [harness] [background-liveness] [fresh]
+# [turn] is `hung` to age the latest turn boundary past the busy-turn bound.
+test_t3_stale_watcher() {  # <session-status> <absorb|surface|dead> [harness] [background-liveness] [fresh] [turn]
   local session=$1 expected=$2 harness=${3:-codex} background=${4:-} state fb hash out _
-  local fresh=${5:-} busy_bound=1
+  local fresh=${5:-} turn=${6:-} busy_bound=3600 turn_at
   local thread=6a0e1f2b-3c4d-4a5b-8c6d-0123456789ab
-  t3_case "watch-$session-$harness-${background:-none}-$fresh" "$session"
+  t3_case "watch-$session-$harness-${background:-none}-$fresh-$turn" "$session"
   t3_world "$(t3_thread_json "$thread" "$session" null)"
+  # The spawn record below is aged past the bound, so only T3's own turn
+  # boundary can keep a running thread under it.
+  turn_at=$(node -e 'process.stdout.write(new Date().toISOString())')
+  [ "$turn" != hung ] || turn_at=2000-01-01T00:00:00.000Z
+  FM_T3_TURN_AT="$turn_at" t3_world_set 'Object.values(w.threads)[0].latestTurn.startedAt = Object.values(w.threads)[0].latestTurn.completedAt = process.env.FM_T3_TURN_AT'
   if [ -n "$background" ]; then
     FM_T3_BG="$background" FM_T3_THREAD="$thread" \
       t3_world_set 'w.shell.threads = [{ id: process.env.FM_T3_THREAD, projectId: "proj-1", backgroundLiveness: process.env.FM_T3_BG }]'
   fi
   if [ "$session" = running ]; then
-    t3_world_set 'Object.values(w.threads)[0].latestTurn.state = "running"'
+    t3_world_set 'Object.values(w.threads)[0].latestTurn.state = "running"; Object.values(w.threads)[0].latestTurn.completedAt = null'
   fi
   state="$CASE_DIR/state"; fb="$CASE_DIR/fakebin"; out="$CASE_DIR/watch.out"
   mkdir -p "$state" "$fb" "$CASE_DIR/data"
@@ -1108,7 +1114,7 @@ SH
   fi
   wait "$WATCH_PID" 2>/dev/null || true
   WATCH_PID=
-  pass "T3 stale watcher: harness=$harness session=$session background=${background:-none} -> $expected"
+  pass "T3 stale watcher: harness=$harness session=$session background=${background:-none} turn=${turn:-fresh} -> $expected"
 }
 
 test_control_lib_tables() {
@@ -1870,6 +1876,8 @@ test_t3_stale_watcher stopped dead
 test_t3_stale_watcher error dead
 test_t3_stale_watcher ready absorb codex working
 test_t3_stale_watcher ready surface codex monitoring
+test_t3_stale_watcher running surface codex '' '' hung
+test_t3_stale_watcher ready surface codex working '' hung
 test_t3_stale_watcher stopped dead codex working
 test_t3_stale_watcher error dead codex working
 test_missing_token_names_mint_command
