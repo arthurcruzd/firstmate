@@ -20,9 +20,9 @@
 # to every worker so a worker never starts a second server on another interface.
 # The primary passes its frozen home-session decision into a newly launched
 # Secondmate; see docs/trace-context.md.
-# Primary config/claude-permission-mode is a captain-wide safety preference
-# (bypass or auto for every claude launch), so it flows down too and a
-# secondmate's own claude crewmates launch on the same permission posture.
+# Primary config/claude-permission-mode is a captain-wide safety preference,
+# so it flows down too. docs/configuration.md's "Claude permission mode"
+# section owns accepted values and backend limits.
 # Primary config/t3code-instances selects the T3 provider account for each
 # harness, so secondmates inherit it rather than falling back to a default.
 # Primary config/keep-ai-trailers is a home-wide commit-attribution choice, so

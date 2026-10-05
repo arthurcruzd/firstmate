@@ -336,9 +336,8 @@
 #   restart, and it is inherited into secondmate homes (bin/fm-config-inherit-lib.sh).
 #   T3 Code always uses full-access and refuses `auto` before mutation.
 # Worker account pin (config/claude-account, config/pi-account):
-#   Opt-in. With no file, a Claude or Pi launch is unchanged: Claude still
-#   receives this process's own CLAUDE_CONFIG_DIR when it is set, and Pi the
-#   destination pane's ambient account. A present file pins every supported launch of
+#   Opt-in. docs/configuration.md's "Worker account pin" section owns unpinned
+#   account selection. A present file pins every supported launch of
 #   that runner from this home - ship, scout, local secondmate, raw Claude
 #   command, and relaunch - to the declared account root, and the spawn
 #   refuses before any endpoint, worktree, or record exists when the file is
