@@ -75,7 +75,8 @@ A `claude` task checks the leased worktree and refuses a tracked, existing, or s
 
 ## Current lifecycle and safety
 
-Spawn matches the project (the home, for a secondmate) by real path against the T3 projects' `workspaceRoot`, creating one titled `fm-<directory name>` with `project.create` when absent, leases the worktree for a worker, creates the thread with `thread.create` (branch, worktree path or null, `full-access` runtime mode, the model selection), disables automatic settlement for that thread with `thread.auto-settle.set`, installs the harness hooks and the per-directory environment, records metadata, and then starts the launch turn with `thread.turn.start` carrying the encoded brief (the charter, for a secondmate).
+Spawn matches the project (the home, for a secondmate) by real path against the T3 projects' `workspaceRoot`, creating one titled `fm-<directory name>` with `project.create` when absent, leases the worktree for a worker, creates the thread with `thread.create` (branch, worktree path or null, `full-access` runtime mode, the model selection), and disables automatic settlement for that thread with `thread.auto-settle.set`.
+It then installs the harness hooks, records metadata, installs the [per-directory harness environment](#per-directory-harness-environment), and starts the launch turn with `thread.turn.start` carrying the encoded brief (the charter, for a secondmate).
 Exact command payloads are owned by `bin/backends/t3code.sh`.
 
 `fm-peek.sh` renders `[role] text` for the recent messages followed by a `t3code: session=<status> turn=<state>` line.

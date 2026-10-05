@@ -218,8 +218,7 @@ Endpoint existence, busy checks, composer checks, capture, and verified submit r
 The retries-exhausted queued-Enter decision is owned by `fm_composer_queued_enter_verdict` in `bin/fm-composer-lib.sh`; tmux and herdr provide only their backend-specific busy signals.
 Composer classification has one shared owner, `bin/fm-composer-lib.sh`: tmux, herdr, Zellij, Orca, and cmux contribute only a screen capture plus declarative styled, cursor, identity, and row capabilities, while the shared classifier owns every shape and the `empty`/`pending`/`pending-unproven`/`unknown` verdict.
 `fm-spawn.sh` also routes Kimi launch readiness through that classifier instead of carrying another shape copy.
-The daemon injects only into an affirmatively `empty` composer, so every other or future verdict defers; positive container proof is required, and a blank unidentified row or bare dead-shell prompt cannot receive an escalation.
-The current operator boundary is in [Composer and injection safety](herdr-backend.md#composer-and-injection-safety).
+The daemon's pane input guard is owned by [Busy-guard and composer guard](../.agents/skills/afk/SKILL.md#busy-guard-and-composer-guard), with backend details in [Composer and injection safety](herdr-backend.md#composer-and-injection-safety).
 Unsupported supervisor backends refuse at daemon startup.
 Stalled escalation delivery writes `state/.subsuper-inject-wedged` and attempts a configured backend-independent active alert after `FM_MAX_DEFER_SECS` instead of silently deferring forever.
 On an unmarked return, `bin/fm-afk-return.sh` owns ordered shutdown, the record archive, durable catch-up evidence, the return brief, and the fail-closed gate that keeps ordinary work behind every live firstmate-actionable blocker the away session could not fix.
@@ -252,7 +251,7 @@ Endpoint death is the only process-level override and yields dead; child process
 
 Each record is bound to an incarnation token minted when the task's wiring is armed, so an event from a superseded incarnation is rejected rather than applied, and a record left behind by one classifies unknown.
 Delivery checks deliberately remain outside this contract: pane-backed submit acknowledgement and the away-mode supervisor busy guard consume the shared delivery-footer matcher owned by `bin/fm-composer-lib.sh`, T3 Code uses adapter-native status and turn results, and `bin/fm-pending-reply-lib.sh` owns the secondmate delivery-confirmation observation.
-All are harness-scoped rather than a global pattern union, and none is a recorded worker state source.
+Rendered delivery guards are harness-scoped rather than a global pattern union, and none is a recorded worker state source.
 
 ## Runtime session backends
 
