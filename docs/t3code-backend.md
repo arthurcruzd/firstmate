@@ -80,6 +80,7 @@ Exact command payloads are owned by `bin/backends/t3code.sh`.
 
 `fm-peek.sh` renders `[role] text` for the recent messages followed by a `t3code: session=<status> turn=<state>` line.
 An ordinary metadata-routed `fm-send.sh` text steer becomes a durable steering-inbox record, and its doorbell is a `thread.turn.start` on the thread.
+The submit primitive reports `empty` when T3 accepts the turn-start command, so the daemon can clear its delivery buffer; task completion remains a separate worker status event.
 Sent while a turn runs, both Claude and Codex answer it inside the live turn.
 Escape and Ctrl-C are both a `thread.turn.interrupt`; Enter is a no-op and Ctrl-U is unsupported.
 
