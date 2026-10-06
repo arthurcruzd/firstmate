@@ -26,6 +26,12 @@
 
 FM_BACKEND_T3CODE_MIN_VERSION=0.0.44
 
+# T3 has no composer, but the shared submit dispatcher in bin/fm-backend.sh
+# prepares and reads the composer dialog sink around every adapter, so this
+# adapter loads the same library every other backend does.
+# shellcheck source=bin/fm-composer-lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/../fm-composer-lib.sh"
+
 # Sourced only through fm_backend_source in bin/fm-backend.sh, which owns
 # FM_BACKEND_CONFIG_DIR.
 fm_backend_t3code_config_dir() {
