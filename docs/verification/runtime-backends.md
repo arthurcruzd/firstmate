@@ -305,7 +305,7 @@ Herdr's Claude idle-native submit confirmation is pinned by `tests/fm-backend-he
 
 ### Cleanup endpoint identity
 
-The cleanup identity boundary was validated on 2026-07-28 with tmux 3.6a and metadata fixtures for every supported backend.
+The cleanup identity boundary was validated on 2026-07-28 with tmux 3.6a and metadata fixtures for every backend supported at that time.
 
 ```sh
 tests/fm-teardown-endpoint-safety.test.sh
@@ -328,7 +328,7 @@ ok - fm-teardown: dedicated-socket invalid cleanup preserves target/control and 
 
 The dedicated tmux cell removed ambient tmux variables, required a socket-bound wrapper, kept one target and one independent control window, and proved the wrapper was not called for invalid metadata or a direct empty target.
 Valid cleanup removed only the exact task-bound target and left the control window live.
-The metadata-only validation covers tmux, Herdr, Zellij, Orca, and cmux before backend dispatch.
+`fm_backend_validate_task_endpoint` in `bin/fm-backend.sh` owns the current metadata-only validation before backend dispatch; `tests/fm-backend-t3code.test.sh` covers T3 thread bindings.
 Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, and Muse share that backend cleanup boundary; their harness-specific hook files, tokens, transcript bindings, and session-log sidecars are cleaned only after it, so no harness needs a separate endpoint parser.
 
 ### Endpoint close
@@ -352,7 +352,7 @@ ok - fm-teardown: an already-exited endpoint, and a server that is already gone,
 ok - fm_backend_orca_kill: a close its missing CLI never attempted reports the failure instead of a success
 ```
 
-An endpoint that is already legitimately gone returns 0 silently on every arm, so ordinary cleanup of an already-exited session is unchanged: real tmux returns 0 for a live window, for a re-close of that same gone window, and for a close into a session whose whole server has exited.
+An endpoint that is already legitimately gone returns 0 silently on every arm covered by this entry, so ordinary cleanup of an already-exited session is unchanged: real tmux returns 0 for a live window, for a re-close of that same gone window, and for a close into a session whose whole server has exited.
 The refusal is reached only through a close that could not do its job, and each arm reports only what it can prove:
 
 | Backend | already gone | a close that failed |
@@ -371,10 +371,11 @@ Any other read failure - a momentarily unresponsive server, or a teardown PATH w
 
 Two bounds of the refusal are known and deliberately not closed here.
 
-`--force` overrides it at exactly one site, the generic non-Herdr/non-Orca close.
+`--force` overrides it at exactly one site, the generic close for backends other than Herdr, Orca, and T3 Code.
 That is the only close where continuing is actually reachable: the worktree is already returned by then and nothing after it needs the backend that could not close, so `--force` - the operator's existing authority to discard a task's records - can mean something there.
 A forced run still prints the full diagnosis naming the backend, the target, and that the close failed, so what may survive is never silent.
 It states what `--force` authorizes rather than what will have happened, because a later refusal in the same run - the Herdr confirmed-gone gate, or the inactive-reconcile delivery gate - can still stop it with every record retained.
+T3 Code uses the [native cleanup path](../t3code-backend.md#current-lifecycle-and-safety) instead.
 
 The Orca close refuses under `--force` too.
 The step immediately after it removes the Orca worktree through the same CLI whose absence is the only thing that arm ever reports, so a forced continue would die there having removed nothing while claiming the records were already gone.
@@ -1981,6 +1982,95 @@ FM_CMUX_CLAUDE_COMPOSER_LIVE=1 bin/fm-test-run.sh tests/fm-cmux-claude-composer-
 
 That guard still addresses the worker by task selector, so it no longer reaches the typed submit path and is not a current refresh entry point for this guarantee.
 The portable classifier regression is `tests/fm-backend-cmux.test.sh`.
+
+## T3 Code
+
+### Orchestrator V2 transport
+
+The `/mcp` transport was verified live on 2026-10-08 against `t3 v0.0.46-nightly.20261008.2833` (npm launcher plus native `@t3code/t3-darwin-arm64`), run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295, codex-cli 0.160.1, node 26.8.2, and treehouse 2.3.0 on macOS arm64.
+That run drove `bin/fm-t3-mcp.mjs` through an earlier standalone wiring of the same helper in a scratch Firstmate home, scratch project, and private Treehouse pool root; this backend's adapter calls the same tools with the same arguments, but its own wiring has fake-server coverage only and no live run yet.
+T3 stable 0.0.45 lacks the `t3_thread_*` tools, and 0.0.46 nightly answers 404 for the pre-V2 `POST /api/orchestration/dispatch` route.
+
+```sh
+bin/fm-t3-mcp.mjs login --url http://127.0.0.1:<port> --access full-access --t3 <t3> --base-dir <t3-base-dir>
+bin/fm-t3-mcp.mjs status
+t3 auth session revoke <id> --base-dir <t3-base-dir>
+```
+
+```text
+{"ok":true,...,"environmentId":"<id>","serverVersion":"0.0.46-nightly.20261008.2833",...,"telemetry":"off"}
+{"ok":true,...,"exists":true,"archived":true,"status":"interrupted","activeRunId":null,...}
+{"ok":false,"error":{"code":"unauthorized",...}}
+```
+
+Measured on that run:
+
+| Step | Result |
+| --- | --- |
+| Spawn, including the Treehouse lease and idle-thread launch | 18.3 s |
+| Spawn return to a Claude scout's `done` line, report, and captain-hold gate | 20.7 s |
+| Inbox steer send to the worker's `handled/` acknowledgement | 8.2 s |
+| Interrupt of a running `python3` tool call, confirmed by `t3_thread_wait` | 3.2 s; the child was gone 2 s later |
+| Teardown, including the archive read-back and slot return | 12.5 s; the slot read `available` afterwards |
+| A Codex `gpt-5.6-luna` scout from spawn to `done` | 43 s; teardown completed |
+
+Live facts the backend relies on:
+
+- `t3_thread_launch` without a message creates an idle thread whose `worktreePath`, `providerInstanceId`, and `runtimeMode` read back exactly as requested, under a T3-assigned `mcp:<uuid>` id.
+- A launch on a path that is not one of the project's git worktrees is refused with `invalid_request`, and no thread is created.
+- `t3_thread_send` with a repeated `clientRequestId` returns the same run instead of a second turn.
+- `t3_thread_interrupt` on an idle thread returns `no_active_run`; on a running turn, `t3_thread_wait` then reports `interrupted`.
+- `t3_thread_organize archive` reads back `archived:true` with `activeRunId:null`, and a later send is refused with `thread_not_sendable`.
+- T3's Claude reads the worktree's `.claude/settings.local.json`: Firstmate's busy and turn-end hooks fired, and a lab commit carried no agent co-author trailer.
+- The listening server's process environment showed `T3CODE_TELEMETRY_ENABLED=false`, so status reported `telemetry: off`.
+- After `t3 auth session revoke`, `t3 auth session list` reported no active sessions and the next helper call was refused as unauthorized.
+- The 0.0.46 nightly binary's schemas offer the `root`, `existing_worktree`, and `worktree` launch workspace strategies, `t3_thread_list` filtered by status per project, and no session-stop tool, which is why a secondmate launches at `root` and `fm-control.sh exit` refuses.
+
+### Live transport guard
+
+The token-free guard checks the gate, the project catalog, a typed missing-thread read, and the supervisor lookup against the server the configured credential names, and changes nothing there.
+
+```sh
+FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
+```
+
+```text
+ok - t3 live transport: T3 0.0.46-nightly.20261008.2833 environment <id> passes the gate (telemetry=off)
+```
+
+That result is from the standalone guard of the 2026-10-08 run, which made the same gate and missing-thread checks; refresh it with the command above after signing in.
+
+### Portable regression coverage
+
+```sh
+tests/fm-t3-mcp.test.sh
+tests/fm-backend-t3code.test.sh
+tests/fm-backend.test.sh
+tests/fm-daemon.test.sh
+```
+
+`tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, launch binding and its uncertain and refused outcomes, send idempotency, capture, interrupt claims, the proven archive, and the supervisor lookup.
+`tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort and uncertain-launch lease retention, tracked Codex configuration preservation, the exit and relaunch refusals, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
+`tests/fm-daemon.test.sh` covers discovery precedence and native busy state.
+
+The tracked Codex configuration guard is independent of the transport and passed on 2026-09-15 with `codex-cli 0.154.0` and Python 3.14.7.
+It proves the project model survives, `FM_TASK_ID` reaches `command/exec`, ordinary staging and commits retain the original configuration blob, and teardown restores the original CRLF bytes and Git flag.
+It capability-skips when Codex is absent and fails on absence when explicitly requested:
+
+```sh
+FM_T3_CODEX_CONFIG_LIVE=1 bin/fm-test-run.sh tests/fm-backend-t3code.test.sh
+```
+
+```text
+ok - codex-cli 0.154.0: project config retained; shell FM_TASK_ID=t3codextrk2
+```
+
+### Per-directory environment evidence
+
+Adapter smokes on 2026-09-15, through the pre-V2 transport, established the transport-independent facts this backend still relies on.
+Claude and Codex both received per-directory environment through their native project configuration.
+Claude required the task-worker statement in the worktree's git-excluded `CLAUDE.local.md` to accept the encoded launch brief.
+A Codex mid-turn steer joined the running turn.
 
 ## Codex App host tools
 
