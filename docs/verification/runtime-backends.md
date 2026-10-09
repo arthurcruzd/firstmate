@@ -2077,6 +2077,36 @@ fm-t3-host relay: delivered fm-t3-relay-<pid>-<arm>-<n> to mcp:<uuid> (started)
 The account's own remote-job worker kept the same process through every step.
 The Herdr-to-T3 move itself was not run against a live Herdr endpoint; `tests/fm-remote-secondmate-move.test.sh` covers it.
 
+### Quiet mode on a T3-hosted primary
+
+Quiet mode under the wake relay service was verified live on 2026-10-09 against `t3 v0.0.46-nightly.20261008.2849` on Linux 7.0 x86_64 (a user service bound to the host's tailnet address), with Claude Code 2.1.296, node 26.9.0, and bash 5.3.9.
+A scratch home and scratch code root ran a `claude-sonnet-5-5` primary thread through `bin/fm-t3-host.sh launch`, its relay through `bin/fm-t3-host.sh install`, and one scratch task whose status lines were appended by hand against an idle `claude-haiku-5-5` thread.
+
+```sh
+bin/fm-t3-host.sh launch --model claude-sonnet-5-5 --effort medium --title <title>
+bin/fm-t3-host.sh install --name <unit>
+/quiet                       # typed into the primary thread
+/quiet off                   # typed into the primary thread
+```
+
+```text
+fm-afk-launch: the T3 wake relay's service runs the daemon for this home within seconds; do not start bin/fm-afk-start.sh in this session
+fm-t3-host relay: running the quiet-mode daemon for <home>, aimed at mcp:<uuid>
+self-handle: check: rearm-resurface -> watcher recovery: queued wakes re-presented by this drain
+fm-t3-host relay: the away daemon exited (rc=0)
+```
+
+| Step | Result |
+| --- | --- |
+| Attended baseline | The relay posted a worker-started signal and an idle-worker stale wake into the thread within 75 s |
+| `/quiet` | The primary ran the quiet skill; `start-native` recorded `none - relay` and started nothing in the session; the relay ended its open watcher cycle and ran the daemon as its child |
+| Routine events | A `working:` update, a `paused:` declaration, heartbeats, two relay restarts, and the watcher's recovery wakes self-handled with no thread message |
+| Captain-relevant event | A `needs-decision:` line reached the thread as one record-backed doorbell about 2.5 minutes later, and the primary put the choice to the captain |
+| Idle unload | T3 released the idle primary's Claude process 30 minutes after its last turn; the relay, daemon, and watcher kept running, and a routine update while unloaded did not reopen it |
+| Reopen | A `blocked:` line reopened the unloaded session; the escalation carried the session-start hint, and the primary ran session start before relaying the login need |
+| `/quiet off` | The return stopped the hosted daemon and archived the record; the relay delivered the next routine wake as before |
+| Daemon T3 reads | About 52 thread reads a minute before the target check moved to the housekeeping cadence, 11 after |
+
 ### Portable regression coverage
 
 ```sh
