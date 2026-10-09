@@ -114,11 +114,12 @@
 #   - An unverified harness, or a harness whose control mechanics are unknown,
 #     is refused rather than guessed at.
 #   - A backend that cannot deliver the harness's interrupt key is refused
-#     (Orca's terminal API has no Escape).
+#     (Orca's terminal API has no Escape). T3 interrupts the turn natively
+#     instead, and its own wait on the run reports the cancellation claim.
 #   - `exit` and `relaunch` require a backend with a recovery-grade agent-state
 #     classifier (tmux, herdr), because without one the "the agent stopped"
-#     postcondition cannot be proven. zellij, orca, and cmux are refused rather
-#     than reported as successful blind.
+#     postcondition cannot be proven. zellij, orca, cmux, and t3 are refused
+#     rather than reported as successful blind.
 #   - An ambiguous or unreadable endpoint state refuses; only a positively
 #     classified state acts.
 #   - A composer that visibly holds pending text refuses before an exit command
@@ -526,7 +527,15 @@ interrupt_cancel_claim() {
 # adapter's first press rendered no running turn, so nothing was cancelled; a
 # dismissed revert picker is reported beside the claim.
 deliver_interrupt() {
-  local cancel devin_gen=
+  local cancel devin_gen='' rc=0
+  # A backend that interrupts the turn itself (T3) needs no key mechanics and
+  # reports its own cancellation claim.
+  cancel=$(fm_backend_native_interrupt "$BACKEND" "$T") || rc=$?
+  case "$rc" in
+    0) printf '%s' "$cancel"; return 0 ;;
+    2) ;;
+    *) die "task $ID's $BACKEND endpoint did not accept the interrupt" ;;
+  esac
   # Devin does not emit Stop for cancellation. Capture this incarnation before
   # keys, then invalidate its state conservatively rather than claiming idle.
   if [ "$HARNESS" = devin ]; then

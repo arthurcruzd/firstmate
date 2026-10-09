@@ -110,10 +110,17 @@
 #   the task worktree and terminal, so ship/scout Orca spawns do not run
 #   treehouse get; cmux is a session provider only, exactly like herdr/zellij,
 #   so it does. Auto-detected herdr stays silent like tmux; auto-detected cmux
-#   prints a loud stderr notice; zellij and orca are never auto-detected.
+#   prints a loud stderr notice; zellij, orca, and t3 are never auto-detected.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
 #   blocked backend contract. Default tmux spawns do not write backend= to meta;
-#   absent backend= means tmux. cmux does not support --secondmate spawns yet.
+#   absent backend= means tmux. cmux and t3 do not support --secondmate spawns.
+#   t3 (experimental, docs/t3-backend.md) has no terminal: the spawn durably
+#   leases a Treehouse slot, creates an idle T3 thread bound to it through
+#   bin/backends/t3.sh, publishes the record, and sends the launch brief as the
+#   thread's first message. It runs claude and codex ship and scout workers at
+#   full access only, and refuses a raw launch, a worker account pin, a
+#   non-bypass config/claude-permission-mode, and config/launch-env-allowlist,
+#   none of which a T3-started agent can honor.
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
@@ -1251,6 +1258,9 @@ BACKEND=
 ORCA_ABORT_CLEANUP=0
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
+T3_ABORT_CLEANUP=0
+T3_LEASED=0
+T3_THREAD_ID=
 HERDR_PROJECTION_ABORT_CLEANUP=0
 HERDR_PROJECTION_ABORT_SESSION=
 HERDR_PROJECTION_ABORT_TASK_PANE=
@@ -1393,6 +1403,24 @@ spawn_abort_cleanup() {
         fi
       fi
     fi
+  fi
+  # Until T3 accepts the launch brief, nothing has run in the leased slot, so
+  # an abort archives the thread and hands the lease back. A thread that cannot
+  # be proven archived keeps its slot leased: returning it would hand a path a
+  # live thread still points at to the next task.
+  if [ "$T3_ABORT_CLEANUP" = 1 ]; then
+    T3_ABORT_CLEANUP=0
+    if fm_backend_kill t3 "$T" 2>/dev/null; then
+      SPAWN_ENDPOINT_CLOSED=1
+    else
+      T3_LEASED=0
+      echo "warning: could not prove T3 thread $T3_THREAD_ID for $ID archived, so its leased worktree $WT stays leased; archive the thread in T3 Code, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
+    fi
+  fi
+  if [ "$T3_LEASED" = 1 ] && [ -n "${WT:-}" ]; then
+    T3_LEASED=0
+    (cd "$PROJ_ABS" && treehouse return --force --if-lease-holder "$ID" "$WT") >/dev/null 2>&1 \
+      || echo "warning: could not return the leased worktree $WT for $ID; run 'treehouse return --force $WT' from $PROJ_ABS" >&2
   fi
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
     SPAWN_TASK_LOCK_HELD=0
@@ -1753,8 +1781,15 @@ if [ "$RELAUNCH" -eq 0 ]; then
     echo "error: backend=cmux does not support --secondmate spawns yet" >&2
     exit 1
   fi
+  if [ "$BACKEND" = t3 ] && [ "$KIND" = secondmate ]; then
+    echo "error: backend=t3 does not support --secondmate spawns; it runs ship and scout workers only (docs/t3-backend.md)" >&2
+    exit 1
+  fi
   if [ "$BACKEND" = orca ]; then
     fm_backend_orca_runtime_check || exit 1
+  fi
+  if [ "$BACKEND" = t3 ]; then
+    fm_backend_t3_runtime_check || exit 1
   fi
 fi
 SPAWN_TASK_LOCK="$STATE/.spawn-$ID.lock"
@@ -2505,6 +2540,34 @@ WORKER_ACCOUNT_DECLARED=${WORKER_ACCOUNT%%$'\t'*}
 WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT#*$'\t'}
 WORKER_ACCOUNT_PROVIDER=${WORKER_ACCOUNT_ROOT#*$'\t'}
 WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT_ROOT%%$'\t'*}
+# T3 starts the agent itself, at full access, with its provider instance's own
+# account and environment, so every launch setting that only a Firstmate-built
+# command line can apply refuses here, before any endpoint, worktree, or record.
+if [ "$BACKEND" = t3 ]; then
+  if [ "$RAW_LAUNCH" -eq 1 ]; then
+    echo "error: backend=t3 cannot run a raw launch command; T3 starts the agent from its own provider instance, so pass the claude or codex harness instead" >&2
+    exit 1
+  fi
+  case "$HARNESS" in
+  claude | codex) ;;
+  *)
+    echo "error: backend=t3 runs only claude and codex workers, not '$HARNESS' (docs/t3-backend.md)" >&2
+    exit 1
+    ;;
+  esac
+  if [ -n "$WORKER_ACCOUNT" ]; then
+    echo "error: backend=t3 cannot apply this home's $HARNESS worker account pin, because T3's provider instance owns the account; remove the pin or choose another backend" >&2
+    exit 1
+  fi
+  if [ "$HARNESS" = claude ] && [ "$CLAUDE_PERMISSION_MODE" != bypass ]; then
+    echo "error: backend=t3 runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=$CLAUDE_PERMISSION_MODE; remove that file or choose another backend" >&2
+    exit 1
+  fi
+  if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
+    echo "error: backend=t3 cannot apply config/launch-env-allowlist, because T3 starts the agent with its own server environment; remove that file or choose another backend" >&2
+    exit 1
+  fi
+fi
 if [ -n "$WORKER_ACCOUNT" ] && [ "$HARNESS" = claude ]; then
   if [ -n "$WORKER_ACCOUNT_ROOT" ]; then
     export CLAUDE_CONFIG_DIR=$WORKER_ACCOUNT_ROOT
@@ -4006,6 +4069,40 @@ EOF
     fi
     T="$ORCA_TERMINAL"
     ;;
+  t3)
+    # No pane can run the interactive `treehouse get`, so the slot is leased
+    # durably (bin/fm-home-seed.sh's pattern) under the project lock taken
+    # above, then claimed exactly like a pane-acquired slot.
+    WT=$(cd "$PROJ_ABS" && treehouse get --lease --lease-holder "$ID") || {
+      echo "error: treehouse get --lease failed to lease a worktree for $ID from $PROJ_ABS" >&2
+      exit 1
+    }
+    [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
+    T3_LEASED=1
+    validate_spawn_worktree "treehouse get --lease" "$W"
+    if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
+      if ! fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME"; then
+        echo "error: could not claim Treehouse pool slot $WT for task $ID; refusing to launch a worker whose slot cannot later be proved to be its own" >&2
+        exit 1
+      fi
+      SPAWN_SLOT_CLAIMED=1
+    fi
+    T3_PROJECT_ID=$(fm_backend_t3_project_ensure "$PROJ_ABS") || {
+      echo "error: could not find or register $PROJ_ABS as a T3 project for $ID" >&2
+      exit 1
+    }
+    # The thread is created idle, so the record names it before any agent
+    # runs; the launch brief is its first message, sent after publication.
+    T3_THREAD_RAW=$(fm_backend_t3_thread_create "$T3_PROJECT_ID" "$W" "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$WT") || {
+      echo "error: T3 did not create a thread for $ID on $WT; after a lost response, archive any $W thread in T3 Code before retrying" >&2
+      exit 1
+    }
+    IFS=$'\t' read -r T3_THREAD_ID T3_ENVIRONMENT_ID T3_ORIGIN T3_INSTANCE T3_MODEL <<EOF
+$T3_THREAD_RAW
+EOF
+    T="$T3_THREAD_ID@$T3_ENVIRONMENT_ID"
+    T3_ABORT_CLEANUP=1
+    ;;
   esac
 fi
 if [ "$KIND" = secondmate ]; then
@@ -4062,6 +4159,9 @@ spawn_send_key() { # <target> <key>
 # launch boundary and makes a dropped or ignored cwd change a refusal.
 spawn_enter_recorded_worktree() {
   [ "$KIND" = secondmate ] && return 0
+  # T3 bound the thread to this exact worktree when it created it, and the
+  # adapter read that binding back; there is no shell to cd.
+  [ "$BACKEND" = t3 ] && return 0
   spawn_send_text_line "$WT_TARGET" "cd -- $(shell_quote "$WT")" || {
     echo "error: task $ID's endpoint could not be moved into its recorded worktree '$WT'; refusing to launch outside the copy holding its work" >&2
     exit 1
@@ -4074,7 +4174,7 @@ spawn_enter_recorded_worktree() {
 spawn_assert_agent_worktree() {
   local expected seen i
   [ "$KIND" = secondmate ] && return 0
-  [ "$BACKEND" = orca ] && return 0
+  case "$BACKEND" in orca|t3) return 0 ;; esac
   expected=$(real_path_or_raw "$WT")
   for i in $(seq 1 20); do
     seen=$(spawn_current_path "$WT_TARGET" || true)
@@ -4416,7 +4516,7 @@ elif [ "$RELAUNCH" -eq 1 ]; then
     fi
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
-elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
+elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] && [ "$BACKEND" != t3 ]; then
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
 
   # Wait for the treehouse subshell: the pane's cwd moves from the project to the worktree.
@@ -4672,8 +4772,14 @@ if [ "$KIND" != secondmate ]; then
     j_stop=$(json_escape "touch $(shell_quote "$TURNEND"); $busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
     j_stopfail=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
     j_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
+    # A T3-started Claude cannot receive the launch's inline --settings, so
+    # its no-agent-trailer attribution policy rides this file instead.
+    j_attribution=
+    if [ "$BACKEND" = t3 ] && [ "$KEEP_AI_TRAILERS" = 0 ]; then
+      j_attribution=',"attribution":{"commit":"","pr":"","sessionUrl":false}'
+    fi
     cat >"$WT/.claude/settings.local.json" <<EOF
-{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
+{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}$j_attribution}
 EOF
     exclude_path '.claude/settings.local.json'
     ;;
@@ -5060,6 +5166,7 @@ fi
 
 META_WINDOW=$T
 [ "$BACKEND" = orca ] && META_WINDOW=$W
+[ "$BACKEND" = t3 ] && META_WINDOW=$W
 SPAWN_GEN="s$(date +%s).${BASHPID:-$$}.$RANDOM"
 SPAWN_META_PATH="$STATE/$ID.meta"
 if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
@@ -5126,6 +5233,14 @@ preserve_relaunch_meta() {
   if [ "$BACKEND" = cmux ]; then
     echo "cmux_workspace_id=$CMUX_WORKSPACE_ID"
     echo "cmux_surface_id=$CMUX_SURFACE_ID"
+  fi
+  if [ "$BACKEND" = t3 ]; then
+    echo "t3_origin=$T3_ORIGIN"
+    echo "t3_environment_id=$T3_ENVIRONMENT_ID"
+    echo "t3_project_id=$T3_PROJECT_ID"
+    echo "t3_thread_id=$T3_THREAD_ID"
+    echo "t3_provider_instance=$T3_INSTANCE"
+    echo "t3_model=$T3_MODEL"
   fi
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
@@ -5432,131 +5547,156 @@ spawn_record_traceparent() {
   return "$status"
 }
 
-# Export GOTMPDIR into the crewmate's pane shell so the agent and every child
-# process (go build, go test, ...) inherit it. Sent before the launch command so
-# the env is set when the agent starts; the brief sleep lets the export land.
-spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
-# Export the compact-adviser kill switch into the pane shell through the same
-# pre-launch channel, so later commands in that shell inherit it too. The launch
-# command independently establishes the value for the agent process itself.
-spawn_send_text_line "$T" "export COMPACT_ADVISER_DISABLE=1"
-if [ "$LAVISH_AXI_HOST_CONFIG_PRESENT" = 1 ]; then
-  spawn_send_text_line "$T" "export LAVISH_AXI_HOST=$(shell_quote "$LAVISH_AXI_HOST")"
-fi
-# Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
-# suite in the repository's primary checkout. Ship and scout workers are the
-# ones assigned an isolated worktree; a secondmate runs its own home instead.
-# The id reached a validated bare-slug charset above, so it carries no shell
-# syntax of its own.
-if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
-  spawn_send_text_line "$T" "export FM_TASK_ID=$ID"
-fi
-# Send through the exact channel that already ships GOTMPDIR, so every backend
-# and harness - ship, scout, and secondmate - gets it before launch. Skipped
-# entirely when trace context is off.
-if [ -n "$SPAWN_TRACEPARENT" ]; then
-  if spawn_send_text_line "$T" "export TRACEPARENT=$SPAWN_TRACEPARENT"; then
-    if ! spawn_record_traceparent; then
+if [ "$BACKEND" = t3 ]; then
+  # T3 starts the agent with its own server environment, so the pane exports
+  # below have no channel here (docs/t3-backend.md names them as follow-up
+  # work); the doorbell names the inbox by its absolute path instead. The
+  # launch brief is the thread's first message: the record-backed doorbell a
+  # claude pane receives, or the encoded envelope a codex launch carries. The
+  # request id makes a retried delivery the same message.
+  if [ -n "${brief_doorbell:-}" ]; then
+    T3_LAUNCH_MESSAGE=$brief_doorbell
+  else
+    T3_LAUNCH_MESSAGE=$("$FM_ROOT/bin/fm-operational-input.sh" encode launch-brief <"$BRIEF") || {
+      echo "error: could not encode the launch brief for $ID" >&2
+      exit 1
+    }
+  fi
+  SPAWN_LAUNCH_SENT=1
+  fm_backend_t3_send_message "$T" "$T3_LAUNCH_MESSAGE" "fm-launch-$ID-$SPAWN_GEN" || {
+    echo "error: T3 did not accept the launch brief for $ID on thread $T3_THREAD_ID" >&2
+    exit 1
+  }
+  # The record now owns the thread and its leased slot.
+  T3_ABORT_CLEANUP=0
+  T3_LEASED=0
+else
+  # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
+  # process (go build, go test, ...) inherit it. Sent before the launch command so
+  # the env is set when the agent starts; the brief sleep lets the export land.
+  spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
+  # Export the compact-adviser kill switch into the pane shell through the same
+  # pre-launch channel, so later commands in that shell inherit it too. The launch
+  # command independently establishes the value for the agent process itself.
+  spawn_send_text_line "$T" "export COMPACT_ADVISER_DISABLE=1"
+  if [ "$LAVISH_AXI_HOST_CONFIG_PRESENT" = 1 ]; then
+    spawn_send_text_line "$T" "export LAVISH_AXI_HOST=$(shell_quote "$LAVISH_AXI_HOST")"
+  fi
+  # Mark the pane as a task worker so bin/fm-test-run.sh can refuse to run the
+  # suite in the repository's primary checkout. Ship and scout workers are the
+  # ones assigned an isolated worktree; a secondmate runs its own home instead.
+  # The id reached a validated bare-slug charset above, so it carries no shell
+  # syntax of its own.
+  if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
+    spawn_send_text_line "$T" "export FM_TASK_ID=$ID"
+  fi
+  # Send through the exact channel that already ships GOTMPDIR, so every backend
+  # and harness - ship, scout, and secondmate - gets it before launch. Skipped
+  # entirely when trace context is off.
+  if [ -n "$SPAWN_TRACEPARENT" ]; then
+    if spawn_send_text_line "$T" "export TRACEPARENT=$SPAWN_TRACEPARENT"; then
+      if ! spawn_record_traceparent; then
+        LAUNCH="unset TRACEPARENT; $LAUNCH"
+      fi
+    else
+      TRACE_SEND_STATUS=$?
+      if [ "$TRACE_SEND_STATUS" -eq 2 ]; then
+        echo "error: trace-context input could not be cleared for $W; refusing to append the launch command" >&2
+        exit 1
+      fi
       LAUNCH="unset TRACEPARENT; $LAUNCH"
     fi
-  else
-    TRACE_SEND_STATUS=$?
-    if [ "$TRACE_SEND_STATUS" -eq 2 ]; then
-      echo "error: trace-context input could not be cleared for $W; refusing to append the launch command" >&2
-      exit 1
+  fi
+  if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
+    LAUNCH_ENV_PREFIX='/usr/bin/env -i'
+    # COMPACT_ADVISER_DISABLE is the intentional declarative floor-membership
+    # entry; the explicit COMPACT_ADVISER_DISABLE=1 assignment below is the
+    # authoritative setter.
+    for env_name in HOME PATH USER LOGNAME SHELL TERM COLORTERM LANG LC_ALL LC_CTYPE \
+      TMPDIR TMP TEMP GOTMPDIR TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH \
+      HERDR_PANE_ID CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_TAB_ID CMUX_PANEL_ID \
+      CMUX_SOCKET_PATH ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID FM_ZELLIJ_SESSION \
+      FM_TASK_ID COMPACT_ADVISER_DISABLE LAVISH_AXI_HOST \
+      $LAUNCH_ENV_NAMES; do
+      # Only validated names enter shell syntax. Values expand once, quoted, in
+      # the pane shell and never become source text or spawn-process snapshots.
+      # shellcheck disable=SC2016
+      printf -v env_arg '${%s+"%s=$%s"}' "$env_name" "$env_name" "$env_name"
+      LAUNCH_ENV_PREFIX="$LAUNCH_ENV_PREFIX $env_arg"
+    done
+    # COMPACT_ADVISER_DISABLE is retained by the floor loop above, which forwards
+    # whatever the pane export set, and then pinned here to the one value Firstmate
+    # launches on. The literal assignment comes last deliberately: `env` applies
+    # assignments left to right, so this one wins over a forwarded pane value, and
+    # it still delivers the switch on a pane whose export never landed. Unlike the
+    # trace carrier below it carries no gate, so it is appended unconditionally.
+    # Setting it here rather than relying on the assignment already carried by
+    # $LAUNCH is what gives the wrapping `/bin/sh` itself the switch, not only the
+    # agent command it runs.
+    LAUNCH_ENV_PREFIX="$LAUNCH_ENV_PREFIX COMPACT_ADVISER_DISABLE=1"
+    if [ -n "$SPAWN_TRACEPARENT" ]; then
+      # shellcheck disable=SC2016
+      LAUNCH_ENV_PREFIX="$LAUNCH_ENV_PREFIX "'${TRACEPARENT+"TRACEPARENT=$TRACEPARENT"}'
     fi
-    LAUNCH="unset TRACEPARENT; $LAUNCH"
+    LAUNCH="$LAUNCH_ENV_PREFIX /bin/sh -c $(shell_quote "$LAUNCH")"
   fi
-fi
-if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
-  LAUNCH_ENV_PREFIX='/usr/bin/env -i'
-  # COMPACT_ADVISER_DISABLE is the intentional declarative floor-membership
-  # entry; the explicit COMPACT_ADVISER_DISABLE=1 assignment below is the
-  # authoritative setter.
-  for env_name in HOME PATH USER LOGNAME SHELL TERM COLORTERM LANG LC_ALL LC_CTYPE \
-    TMPDIR TMP TEMP GOTMPDIR TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH \
-    HERDR_PANE_ID CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_TAB_ID CMUX_PANEL_ID \
-    CMUX_SOCKET_PATH ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID FM_ZELLIJ_SESSION \
-    FM_TASK_ID COMPACT_ADVISER_DISABLE LAVISH_AXI_HOST \
-    $LAUNCH_ENV_NAMES; do
-    # Only validated names enter shell syntax. Values expand once, quoted, in
-    # the pane shell and never become source text or spawn-process snapshots.
-    # shellcheck disable=SC2016
-    printf -v env_arg '${%s+"%s=$%s"}' "$env_name" "$env_name" "$env_name"
-    LAUNCH_ENV_PREFIX="$LAUNCH_ENV_PREFIX $env_arg"
-  done
-  # COMPACT_ADVISER_DISABLE is retained by the floor loop above, which forwards
-  # whatever the pane export set, and then pinned here to the one value Firstmate
-  # launches on. The literal assignment comes last deliberately: `env` applies
-  # assignments left to right, so this one wins over a forwarded pane value, and
-  # it still delivers the switch on a pane whose export never landed. Unlike the
-  # trace carrier below it carries no gate, so it is appended unconditionally.
-  # Setting it here rather than relying on the assignment already carried by
-  # $LAUNCH is what gives the wrapping `/bin/sh` itself the switch, not only the
-  # agent command it runs.
-  LAUNCH_ENV_PREFIX="$LAUNCH_ENV_PREFIX COMPACT_ADVISER_DISABLE=1"
-  if [ -n "$SPAWN_TRACEPARENT" ]; then
-    # shellcheck disable=SC2016
-    LAUNCH_ENV_PREFIX="$LAUNCH_ENV_PREFIX "'${TRACEPARENT+"TRACEPARENT=$TRACEPARENT"}'
-  fi
-  LAUNCH="$LAUNCH_ENV_PREFIX /bin/sh -c $(shell_quote "$LAUNCH")"
-fi
-# Implement the launch-delivery contract in this script's header. The full
-# home-identity hash isolates equal task ids across homes, and the spawn token in
-# the final filename keeps a buffered source line bound to this incarnation.
-spawn_launch_home_token() {
-  local home=$1 root hash
-  root=$(cd "$home" 2>/dev/null && pwd -P) || root=$home
-  if command -v shasum >/dev/null 2>&1; then
-    hash=$(printf '%s' "$root" | shasum -a 256 | awk '{print $1}')
-  elif command -v sha256sum >/dev/null 2>&1; then
-    hash=$(printf '%s' "$root" | sha256sum | awk '{print $1}')
-  else
-    return 1
-  fi
-  case "$hash" in
-    *[!0-9a-fA-F]*|'') return 1 ;;
-  esac
-  printf '%s' "$hash"
-}
-LAUNCH_HOME_TOKEN=$(spawn_launch_home_token "$FM_HOME") || LAUNCH_HOME_TOKEN=
-if [ -z "$LAUNCH_HOME_TOKEN" ]; then
-  echo "error: could not derive a home identity for the staged launch file" >&2
-  exit 1
-fi
-case "$SPAWN_GEN" in
-  *[!A-Za-z0-9.]*|'') echo "error: spawn incarnation token is not a usable launch-file nonce" >&2; exit 1 ;;
-esac
-LAUNCH_DIR="/tmp/fm-$ID+$LAUNCH_HOME_TOKEN"
-if ! (umask 077 && mkdir "$LAUNCH_DIR") 2>/dev/null; then
-  if [ -L "$LAUNCH_DIR" ] || [ ! -d "$LAUNCH_DIR" ] || [ ! -O "$LAUNCH_DIR" ] ||
-    [ -n "$(find "$LAUNCH_DIR" -prune \( -perm -g=w -o -perm -o=w \) -print 2>/dev/null)" ] ||
-    ! chmod 700 "$LAUNCH_DIR"; then
-    echo "error: task launch directory $LAUNCH_DIR already exists and is not a private directory owned by this user; refusing to stage the launch command there; inspect and remove it, then retry" >&2
+  # Implement the launch-delivery contract in this script's header. The full
+  # home-identity hash isolates equal task ids across homes, and the spawn token in
+  # the final filename keeps a buffered source line bound to this incarnation.
+  spawn_launch_home_token() {
+    local home=$1 root hash
+    root=$(cd "$home" 2>/dev/null && pwd -P) || root=$home
+    if command -v shasum >/dev/null 2>&1; then
+      hash=$(printf '%s' "$root" | shasum -a 256 | awk '{print $1}')
+    elif command -v sha256sum >/dev/null 2>&1; then
+      hash=$(printf '%s' "$root" | sha256sum | awk '{print $1}')
+    else
+      return 1
+    fi
+    case "$hash" in
+      *[!0-9a-fA-F]*|'') return 1 ;;
+    esac
+    printf '%s' "$hash"
+  }
+  LAUNCH_HOME_TOKEN=$(spawn_launch_home_token "$FM_HOME") || LAUNCH_HOME_TOKEN=
+  if [ -z "$LAUNCH_HOME_TOKEN" ]; then
+    echo "error: could not derive a home identity for the staged launch file" >&2
     exit 1
   fi
+  case "$SPAWN_GEN" in
+    *[!A-Za-z0-9.]*|'') echo "error: spawn incarnation token is not a usable launch-file nonce" >&2; exit 1 ;;
+  esac
+  LAUNCH_DIR="/tmp/fm-$ID+$LAUNCH_HOME_TOKEN"
+  if ! (umask 077 && mkdir "$LAUNCH_DIR") 2>/dev/null; then
+    if [ -L "$LAUNCH_DIR" ] || [ ! -d "$LAUNCH_DIR" ] || [ ! -O "$LAUNCH_DIR" ] ||
+      [ -n "$(find "$LAUNCH_DIR" -prune \( -perm -g=w -o -perm -o=w \) -print 2>/dev/null)" ] ||
+      ! chmod 700 "$LAUNCH_DIR"; then
+      echo "error: task launch directory $LAUNCH_DIR already exists and is not a private directory owned by this user; refusing to stage the launch command there; inspect and remove it, then retry" >&2
+      exit 1
+    fi
+  fi
+  LAUNCH_FILE="$LAUNCH_DIR/launch.$SPAWN_GEN.sh"
+  LAUNCH_STAGE="$LAUNCH_DIR/.launch.$SPAWN_GEN.tmp"
+  if [ -e "$LAUNCH_FILE" ] || [ -L "$LAUNCH_FILE" ]; then
+    echo "error: task launch file $LAUNCH_FILE already exists; refusing to replace it" >&2
+    exit 1
+  fi
+  if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
+    chmod 0600 "$LAUNCH_STAGE" && mv -f "$LAUNCH_STAGE" "$LAUNCH_FILE"); then
+    rm -f "$LAUNCH_STAGE"
+    echo "error: could not stage the launch command at $LAUNCH_FILE" >&2
+    exit 1
+  fi
+  sleep 0.3
+  SPAWN_LAUNCH_SENT=1
+  spawn_send_literal "$T" ". $(shell_quote "$LAUNCH_FILE")"
+  sleep 0.3
+  if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
+    HERDR_PROJECTION_ABORT_CLEANUP=0
+    spawn_herdr_presentation_order_lock_release
+  fi
+  spawn_send_key "$T" Enter
 fi
-LAUNCH_FILE="$LAUNCH_DIR/launch.$SPAWN_GEN.sh"
-LAUNCH_STAGE="$LAUNCH_DIR/.launch.$SPAWN_GEN.tmp"
-if [ -e "$LAUNCH_FILE" ] || [ -L "$LAUNCH_FILE" ]; then
-  echo "error: task launch file $LAUNCH_FILE already exists; refusing to replace it" >&2
-  exit 1
-fi
-if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
-  chmod 0600 "$LAUNCH_STAGE" && mv -f "$LAUNCH_STAGE" "$LAUNCH_FILE"); then
-  rm -f "$LAUNCH_STAGE"
-  echo "error: could not stage the launch command at $LAUNCH_FILE" >&2
-  exit 1
-fi
-sleep 0.3
-SPAWN_LAUNCH_SENT=1
-spawn_send_literal "$T" ". $(shell_quote "$LAUNCH_FILE")"
-sleep 0.3
-if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
-  HERDR_PROJECTION_ABORT_CLEANUP=0
-  spawn_herdr_presentation_order_lock_release
-fi
-spawn_send_key "$T" Enter
 if [ "$HARNESS" = kimi ]; then
   if ! kimi_wait_for_ready; then
     kimi_spawn_fail "$KIMI_READY_FAILURE_DETAIL"

@@ -668,7 +668,7 @@ inbox_steer_check() {  # <window> <task>
 # it never runs on the ordinary per-wake path.
 signal_turnend_panes_churned() {  # <file> ...
   [ -e "$CONFIG/turnend-churn-absorb" ] || return 1
-  local f base task meta kind w key backend label terminal prev now since now_s absorb_secs marker age
+  local f base task meta kind w key backend label prev now since now_s absorb_secs marker age
   local rec_task task_index i j count hash_file hash_bytes created
   local max_absorb_secs=9223372036854775807
   local -a signal_tasks=() signal_statuses=() snapshot_tasks=() snapshot_kinds=()
@@ -700,12 +700,7 @@ signal_turnend_panes_churned() {  # <file> ...
     rec_task=${rec_task%.meta}
     kind=$(fm_meta_get "$meta" kind)
     backend=$(fm_backend_of_meta "$meta")
-    if [ "$backend" = orca ]; then
-      terminal=$(fm_meta_get "$meta" terminal)
-      w=${terminal:-$(fm_meta_get "$meta" window)}
-    else
-      w=$(fm_meta_get "$meta" window)
-    fi
+    w=$(fm_backend_target_of_meta "$meta")
     key=
     [ -n "$w" ] && key=$(window_key "$w")
     label="fm-$rec_task"

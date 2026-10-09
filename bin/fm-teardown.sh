@@ -1131,6 +1131,16 @@ fi
 # be readable before the first destructive step. --force does not override
 # this. A forced descendant is proved in validate_firstmate_home_children_removal.
 teardown_require_backend_prerequisites "$BACKEND" "$ID" || exit 1
+# A T3 thread can be archived, and its close proven, only through a reachable,
+# signed-in T3 that passes the capability gate. Check that before the first
+# mutation; --force does not override it, because the slot must not return
+# while the thread may still be live.
+if [ "$BACKEND" = t3 ]; then
+  fm_backend_t3_runtime_check || {
+    echo "error: teardown refused: T3 is needed to archive thread $T for $ID; start it or sign in again, then rerun. Nothing was changed." >&2
+    exit 1
+  }
+fi
 if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
   "$FM_ROOT/bin/fm-guard.sh" || true
 fi
@@ -3160,7 +3170,7 @@ preflight_firstmate_home_herdr_children() {  # <home>
 # about its own close is bin/fm-backend.sh's fm_backend_kill contract.
 #
 # Returns 0 when the caller must continue anyway and 1 when it must stop.
-# <honors-force> is 1 at exactly one site, the generic non-Herdr/non-Orca
+# <honors-force> is 1 at exactly one site, the generic non-Herdr/non-Orca/non-T3
 # close, where --force is the operator's existing authority to discard this
 # task's records deliberately AND continuing is actually reachable: the
 # worktree is already returned by then and nothing after it needs the backend
@@ -3169,6 +3179,8 @@ preflight_firstmate_home_herdr_children() {  # <home>
 # the step immediately after it removes the Orca worktree through the same CLI
 # whose absence is the only thing that arm ever reports, so a forced continue
 # would die there having removed nothing while this message claimed otherwise.
+# The T3 site refuses under --force because its close must be proven before
+# the worktree it is bound to returns to the pool.
 # The two forced secondmate child sites refuse because that path is only ever
 # reached under --force, so honoring force would delete the refusal rather
 # than override it, and would contradict the adjacent Herdr child gate that
@@ -3543,6 +3555,16 @@ else
   fi
 fi
 
+# A T3 thread is archived, with T3's read-back of archived:true and no active
+# run, as soon as every landed-work refusal has passed: T3 then stops its own
+# provider process before the reap below could kill it under T3, and a thread
+# whose close is not proven keeps its slot and every record (no --force path),
+# because a live thread whose worktree returns to the pool would act on
+# whatever task leases that slot next.
+if [ "$BACKEND" = t3 ]; then
+  fm_backend_kill t3 "$T" || { endpoint_close_refusal "$ID" t3 "$T" 0; exit 1; }
+fi
+
 # Every landed/discard-work refusal above has now passed (or --force skipped
 # them). Fix 1 and Fix 2 (see script header) run here, unconditionally on
 # --force, and before ANY destructive step below - a still-parked run or a
@@ -3679,7 +3701,7 @@ elif [ "$BACKEND" = herdr ]; then
   else
     echo "warning: herdr session presentation lock path is unavailable; skipping the pane close rather than closing unlocked" >&2
   fi
-elif [ "$BACKEND" != orca ] && [ "$TEARDOWN_WINDOWLESS" != 1 ]; then
+elif [ "$BACKEND" != orca ] && [ "$BACKEND" != t3 ] && [ "$TEARDOWN_WINDOWLESS" != 1 ]; then
   fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" \
     || endpoint_close_refusal "$ID" "$BACKEND" "$T" 1 || exit 1
 fi

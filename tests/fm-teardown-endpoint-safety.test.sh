@@ -326,6 +326,26 @@ test_orca_composite_worktree_id_validates() {
   pass "cleanup identity: an Orca record's real composite worktree id validates while a separatorless or newline-carrying id refuses"
 }
 
+test_t3_endpoint_record_validates() {
+  local dir id rc
+  dir=$(make_case t3-endpoint)
+  # shellcheck source=/dev/null
+  . "$ROOT/bin/fm-backend.sh"
+  id=t3-task
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=fm-$id" "endpoint_task_id=$id" "worktree=$dir/worktree" "project=$dir/project" \
+    "backend=t3" "t3_thread_id=mcp:5c0ffee0-1" "t3_environment_id=env-4"
+  fm_backend_validate_task_endpoint "$dir/home/state/$id.meta" "$id" || fail "valid T3 endpoint refused"
+  [ "$FM_BACKEND_VALIDATED_TARGET" = "mcp:5c0ffee0-1@env-4" ] \
+    || fail "T3 validation did not compose its thread@environment target"
+  set +e
+  fm_backend_kill t3 "" >/dev/null 2>&1
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "t3 generic kill accepted an empty target"
+  pass "cleanup identity: a T3 record validates to its thread@environment target while an empty T3 target refuses"
+}
+
 test_tmux_empty_target_refuses_without_invocation() {
   local dir rc
   dir=$(make_case direct-empty)
@@ -1426,6 +1446,7 @@ test_non_pool_teardown_ignores_task_set_lock
 test_metadata_lock_serializes_destructive_cleanup
 test_supported_backend_endpoint_records_validate
 test_orca_composite_worktree_id_validates
+test_t3_endpoint_record_validates
 test_tmux_empty_target_refuses_without_invocation
 test_recorded_process_identity_cleanup_is_exact
 test_isolated_tmux_invalid_and_valid_cleanup

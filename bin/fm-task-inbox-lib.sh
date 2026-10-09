@@ -322,15 +322,24 @@ fm_task_inbox_body() {  # <record-path>
 # bare shell) runs nothing; see the dead-pane note in the header. A
 # non-printable inbox name fails without output so terminal controls never
 # reach the pane's line discipline.
-fm_task_inbox_doorbell_line() {  # <record-path>
+# The `absolute` form names the inbox by its absolute path instead, for a
+# backend whose launch cannot export FM_TASK_INBOX and that has no composer
+# whose wrapping could hide a long line (T3, bin/backends/t3.sh).
+fm_task_inbox_doorbell_line() {  # <record-path> [absolute]
   local dir=${1%/*} abs name quoted LC_ALL=C
   abs=$(cd "$dir" 2>/dev/null && pwd) || abs=$dir
   abs=${abs%/handled}
   name=${abs##*/}
+  [ "${2:-}" != absolute ] || name=$abs
   case "$name" in
     ''|*[![:print:]]*) return 1 ;;
   esac
   quoted=$(printf '%s' "$name" | sed "s/'/'\\\\''/g")
+  if [ "${2:-}" = absolute ]; then
+    printf ": Firstmate instruction waiting: list '%s'/*.msg, your steering inbox, read and act on each in numeric order, then mv each into its handled/." \
+      "$quoted"
+    return 0
+  fi
   printf ": Firstmate instruction waiting: list \"\$FM_TASK_INBOX\"/*.msg in your '%s' steering inbox, read and act on each in numeric order, then mv each into its handled/." \
     "$quoted"
 }
@@ -358,7 +367,9 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
-  if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
+  if [ "$backend" = t3 ]; then
+    line=$(fm_task_inbox_doorbell_line "$rec" absolute) || return 2
+  elif ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
   fi
   cstate=$(fm_backend_composer_state "$backend" "$target" "$label" 2>/dev/null) || cstate=unknown
