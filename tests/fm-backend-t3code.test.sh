@@ -1769,7 +1769,13 @@ test_remote_host_release_removes_t3_env() {
   [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env')" = undefined ] || fail "release must strip the T3 launch environment from the home"
   [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.permissions.allow[0]')" = 'Bash(ls)' ] || fail "release must keep the home's other local settings"
   assert_absent "$home/state/.t3-host" "release must drop the home's T3 host record"
-  assert_grep "disable --now fm-t3-relay-sm-home-release.service" "$svc" "release must remove the home's relay service"
+  # The relay service is a systemd user unit on Linux and an Aqua launch agent
+  # on macOS (bin/fm-t3-host.sh uninstall).
+  if [ "$(uname -s)" = Darwin ]; then
+    assert_grep "bootout gui/$(id -u)/dev.firstmate.t3-relay.sm-home-release" "$svc" "release must remove the home's relay service"
+  else
+    assert_grep "disable --now fm-t3-relay-sm-home-release.service" "$svc" "release must remove the home's relay service"
+  fi
   rm -rf "/tmp/fm-$id"
   pass "fm-remote-secondmate-control.sh release: archives the T3 mate, removes its relay, and strips its launch environment from the home"
 }
