@@ -980,7 +980,19 @@ async function main(argv) {
   else process.stdout.write(text);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node resolves the main module through symlinks, so compare real paths: run
+// through a symlinked directory (macOS /tmp is one), a plain path comparison
+// would skip main() and exit 0 with no output.
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  }
+}
+
+if (isMainModule()) {
   main(process.argv.slice(2)).catch((err) => {
     const r = err instanceof Refusal ? err : new Refusal("unexpected", err?.message ?? String(err), 1);
     process.stdout.write(`${JSON.stringify({ ok: false, error: { code: r.code, message: r.message, ...r.extra } })}\n`);

@@ -474,6 +474,21 @@ console.log([
   pass "fm-t3-mcp telemetry: a Linux /proc environ with variables after the setting still reads off"
 }
 
+test_runs_through_a_symlinked_path() {
+  local link="$TMP_ROOT/linked-bin"
+  fresh_case symlinked-path
+  ln -s "$ROOT/bin" "$link"
+  OUT=$(node "$link/fm-t3-mcp.mjs" status --token-file "$CRED" 2>/dev/null)
+  RC=$?
+  expect_code 0 "$RC" "status through a symlinked path should run"
+  assert_equals true "$(field "$OUT" ok)" "the helper run through a symlinked directory must answer, not exit silently"
+  OUT=$(node "$link/fm-t3-mcp.mjs" status --token-file "$TMP_ROOT/absent-token" 2>/dev/null)
+  RC=$?
+  expect_code 4 "$RC" "a refusal through a symlinked path keeps its exit status"
+  assert_equals no_credential "$(field "$OUT" error.code)" "a refusal through a symlinked path keeps its typed error"
+  pass "fm-t3-mcp: run through a symlinked directory, the CLI still answers and refuses"
+}
+
 t3_fake_start "$TMP_ROOT/server"
 test_login_writes_private_credential_and_never_prints_token
 test_login_origin_defaults
@@ -493,3 +508,4 @@ test_thread_for_root
 test_typed_failure_and_transport_errors
 test_telemetry_reported
 test_telemetry_parses_nul_separated_environ
+test_runs_through_a_symlinked_path
