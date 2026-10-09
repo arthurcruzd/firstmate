@@ -306,29 +306,32 @@ fm_control_backend_state_verified() {  # <backend>
   return 1
 }
 
-# Whether <backend> can stop an agent for `exit`. T3 Code cannot: it has no
-# composer for the harness exit command, and its Orchestrator V2 `/mcp` tools
-# offer no session stop, only a turn interrupt that leaves the thread idle and
-# alive, so no stop could be proven and `exit` refuses before anything is
-# sent (docs/t3code-backend.md "Active limits").
-fm_control_backend_exit_supported() {  # <backend>
+# Whether <backend> stops an agent natively, through its own session API,
+# instead of through the harness exit command typed into the composer. T3 has
+# no composer and its Orchestrator V2 `/mcp` tools no session stop, so its
+# exit interrupts any running turn and archives the thread
+# (bin/backends/t3code.sh's fm_backend_t3code_agent_stop); the thread then
+# reads `dead`, the same recovery-grade proof the typed path waits for, and
+# keeps its transcript and worktree binding for a relaunch to resume.
+fm_control_backend_native_exit() {  # <backend>
   case "${1-}" in
-    t3code) return 1 ;;
+    t3code) return 0 ;;
   esac
-  return 0
+  return 1
 }
 
 # Whether <backend> can launch a REPLACEMENT agent into an existing task's
-# endpoint. A T3 thread is bound to the driver that first ran it (the server
-# answers "is bound to driver 'codex' and cannot switch to 'claudeAgent'"),
-# and a new turn on the thread continues the same agent with its transcript
-# rather than a fresh one, so t3code has no replacement to launch and a
-# relaunch is refused before anything is stopped (docs/t3code-backend.md
-# "Active limits"). zellij, orca, and cmux never reach this table: they fail
-# fm_control_backend_state_verified first.
+# endpoint. tmux and herdr start a new agent in the recorded pane. On t3code
+# the replacement is the same thread resumed: unarchived, set to the chosen
+# model, and given the relaunch brief as its next turn, so it continues the
+# thread's transcript in the same worktree. A thread that has run stays bound
+# to its provider instance, so a relaunch onto another harness launches a new
+# thread in the same worktree and the record rebinds to it (bin/fm-spawn.sh
+# --relaunch owns both). zellij, orca, and cmux never reach this table: they
+# fail fm_control_backend_state_verified first.
 fm_control_backend_relaunch_supported() {  # <backend>
   case "${1-}" in
-    tmux|herdr) return 0 ;;
+    tmux|herdr|t3code) return 0 ;;
   esac
   return 1
 }
@@ -363,9 +366,10 @@ fm_control_backend_relaunch_supported() {  # <backend>
 #     passes `--session <session>`, so the recheck starts and reads the session
 #     the RECORD names, through that session's own socket. The answer is about
 #     the task's endpoint and nothing else.
-#   t3code CAN prove it for exit. `missing` means archived or HTTP 404, while
-#     an unreachable server reads `unreadable`; the proof re-reads the thread.
-#     Relaunch still refuses because the thread cannot host a replacement.
+#   t3code CAN prove it. `missing` means the verified server answered that it
+#     has no such thread (an archived thread reads `dead` instead), while an
+#     unreachable server or a refused gate reads `unreadable`; the proof
+#     re-reads the thread.
 #   tmux CANNOT. `list-windows -a` describes only the server the CURRENT
 #     process addresses (its TMUX_TMPDIR/socket), and a task's record does not
 #     carry the endpoint's socket identity - so a different but running server
