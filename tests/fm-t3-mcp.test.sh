@@ -303,6 +303,78 @@ test_send_state_capture_interrupt_archive() {
   pass "fm-t3-mcp thread verbs: idempotent send, state and turn time, bounded capture, interrupt claims, and proven archive"
 }
 
+test_resume_prepares_the_same_thread() {
+  local thread msg
+  fresh_case resume
+  thread=$(new_thread)
+  msg="$TMP_ROOT/msg"
+  printf 'first turn' > "$msg"
+  mcp send --thread "$thread" --message-file "$msg" --client-request-id resume-1
+  mcp resume --thread "$thread" --model-selection "$SEL" --worktree "$WT"
+  expect_code 4 "$RC" "a thread with an active run must not be resumed"
+  assert_equals run_active "$(field "$OUT" error.code)" "the refusal names the active run"
+  mcp archive --thread "$thread"
+  mcp state --thread "$thread"
+  assert_equals true "$(field "$OUT" archived)" "the fixture thread is archived"
+  : > "$T3_FAKE_LOG"
+  mcp resume --thread "$thread" --model-selection '{"instanceId":"claudeAgent","model":"claude-haiku-5-5"}' --worktree "$TMP_ROOT/elsewhere"
+  expect_code 4 "$RC" "a thread bound to another workspace must not be resumed"
+  assert_equals binding_mismatch "$(field "$OUT" error.code)" "the refusal names the binding"
+  [ -z "$(t3_fake_mutations)" ] || fail "a refused resume changes nothing, got '$(t3_fake_mutations)'"
+  mcp resume --thread "$thread" --model-selection '{"instanceId":"claudeAgent","model":"claude-haiku-5-5"}' --worktree "$WT"
+  expect_code 0 "$RC" "resume should unarchive and reconfigure: $ERR"
+  assert_equals true "$(field "$OUT" resumed)" "a same-instance thread resumes"
+  assert_equals claude-haiku-5-5 "$(field "$OUT" model)" "the new model is read back"
+  [ "$(t3_fake_mutations)" = "t3_thread_organize t3_thread_configure" ] || fail "resume must unarchive then configure, got '$(t3_fake_mutations)'"
+  assert_contains "$(t3_fake_calls t3_thread_organize)" '"action":"unarchive"' "resume unarchives"
+  mcp state --thread "$thread"
+  assert_equals false "$(field "$OUT" archived)" "a resumed thread is not archived"
+  : > "$T3_FAKE_LOG"
+  mcp resume --thread "$thread" --model-selection '{"instanceId":"codex","model":"gpt-5.6-luna"}' --worktree "$WT"
+  expect_code 0 "$RC" "a thread on another instance is reported, not an error: $ERR"
+  assert_equals false "$(field "$OUT" resumed)" "another instance reads resumed=false"
+  assert_equals claudeAgent "$(field "$OUT" providerInstanceId)" "the bound instance is reported"
+  [ -z "$(t3_fake_mutations)" ] || fail "a thread on another instance is left untouched, got '$(t3_fake_mutations)'"
+  pass "fm-t3-mcp resume: refuses an active run or another workspace, unarchives and reconfigures the same thread, reports another instance untouched"
+}
+
+test_watch_triggers() {
+  local thread other msg start elapsed
+  fresh_case watch
+  thread=$(new_thread)
+  other=$(new_thread)
+  msg="$TMP_ROOT/msg"
+  printf 'go' > "$msg"
+  start=$(date +%s)
+  mcp watch --threads "$thread,$other" --timeout-ms 1500
+  elapsed=$(( $(date +%s) - start ))
+  expect_code 0 "$RC" "watch on idle threads: $ERR"
+  assert_equals timeout "$(field "$OUT" trigger)" "idle threads only time out"
+  [ "$elapsed" -ge 1 ] || fail "a timeout watch must block for its budget"
+  assert_equals idle "$(field "$OUT" threads.0.status)" "watch reports each thread's level"
+  mcp send --thread "$thread" --message-file "$msg" --client-request-id watch-1
+  FM_T3_ID="$thread" t3_fake_set 'w.threads[process.env.FM_T3_ID].pendingRequestCount = 1'
+  mcp watch --threads "$thread,$other" --timeout-ms 5000
+  assert_equals blocked "$(field "$OUT" trigger)" "a running thread with a pending request triggers blocked at once"
+  assert_equals true "$(field "$OUT" threads.0.blocked)" "the blocked thread is flagged"
+  assert_equals false "$(field "$OUT" threads.1.blocked)" "an idle thread is never blocked"
+  mcp watch --threads "$thread,$other" --escalated "$thread" --timeout-ms 1200
+  assert_equals timeout "$(field "$OUT" trigger)" "an already-escalated pending request does not end the wait"
+  FM_T3_ID="$thread" t3_fake_set 'w.threads[process.env.FM_T3_ID].pendingRequestCount = 0; w.waitEnds = "completed"'
+  : > "$T3_FAKE_LOG"
+  mcp watch --threads "$thread,$other" --timeout-ms 5000
+  assert_equals turn-end "$(field "$OUT" trigger)" "an active run reaching a terminal status ends the wait"
+  assert_equals completed "$(field "$OUT" threads.0.latestRunStatus)" "the finished run is reported"
+  assert_equals "" "$(field "$OUT" threads.0.activeRunId)" "the thread has no active run after the turn end"
+  assert_contains "$(t3_fake_calls t3_thread_wait)" '"runId":"run:' "the wait names the active run"
+  t3_fake_set 'w.waitEnds = null'
+  FM_T3_ID="$thread" t3_fake_set 'const t = w.threads[process.env.FM_T3_ID]; t.status = "interrupted"; t.pendingRequestCount = 3'
+  mcp watch --threads "$thread" --timeout-ms 1200
+  assert_equals timeout "$(field "$OUT" trigger)" "a pending count on a thread with no active run is never blocked"
+  assert_equals 0 "$(field "$OUT" threads.0.pending)" "pending is read only on an active run"
+  pass "fm-t3-mcp watch: times out on idle threads, triggers on a fresh pending request or a terminal run, and skips escalated or finished threads"
+}
+
 test_thread_for_root() {
   local project captain other
   fresh_case thread-for-root
@@ -404,6 +476,8 @@ test_projects_by_real_path
 test_launch_binds_workspace
 test_launch_refusals
 test_send_state_capture_interrupt_archive
+test_resume_prepares_the_same_thread
+test_watch_triggers
 test_thread_for_root
 test_typed_failure_and_transport_errors
 test_telemetry_reported

@@ -131,16 +131,17 @@ The submit primitive reports `empty` when T3 accepts the message, so the daemon 
 Escape and Ctrl-C are both a `t3_thread_interrupt` confirmed by T3's own `t3_thread_wait` on the run; Enter is a no-op and Ctrl-U is unsupported.
 
 The control plane ([`agent-control.md`](agent-control.md)) reads the same status table.
-`interrupt` is a `t3_thread_interrupt` proven by the thread still reading alive afterwards.
-`exit` is refused before anything is sent: the V2 `/mcp` tools have no session stop, and an interrupt leaves the thread idle and alive, so no stop could be proven.
-`relaunch` is refused before anything is stopped: a T3 thread is bound to the driver that first ran it, and a new turn continues the same agent, so no replacement agent can be launched into the endpoint.
+`interrupt` is a `t3_thread_interrupt` proven by the thread still reading alive afterwards, and it reports `cancel=confirmed` once T3's own wait sees the run terminal.
+`exit` has no typed command to send and the V2 `/mcp` tools have no session stop, so it interrupts any running turn and archives the thread; the archive ends the provider process, and the thread reads `dead` while keeping its transcript and worktree binding.
+`relaunch` resumes that thread: it unarchives it, applies the chosen model with `t3_thread_configure`, requires T3 to read it back bound to the recorded worktree, and sends the relaunch brief (with its progress note) as the next turn, so the replacement continues the thread's transcript.
+A thread that has run stays bound to its provider instance, so a relaunch onto a harness on another instance, or of a thread the server no longer has, launches a new thread in the same worktree and rebinds the record to it, leaving the old thread archived.
 
 The watcher and `fm-crew-state.sh` use the adapter's [thread status table](#restart-and-liveness-behavior) ahead of harness gates and hook records (source `t3code-native`), so a codex crew settles from T3's status even though codex has no verified hook writer.
 Native uncertainty stays unknown instead of falling through to a hook record or rendered fallback.
 Watcher re-rings for ordinary records treat that uncertainty like busy, so a due doorbell waits and spends the same busy-deferral budget [`bin/fm-task-inbox-lib.sh`](../bin/fm-task-inbox-lib.sh) owns before a stuck-busy escalation.
 The initial `fm-send.sh` doorbell follows that library's best-effort ring contract instead.
 A thread's capture stays byte-identical through a long tool call, so before reporting a possible wedge the watcher rechecks the [thread status table](#restart-and-liveness-behavior) and resets its stale timer only for the `running` word.
-That deferral is itself bounded by `FM_BUSY_TURN_MAX_SECS`, measured from the latest run boundary T3 records (completion, or start while the run is still active), so a hung run still reaches the possible-wedge alert, and a missing run timestamp never defers.
+That deferral is itself bounded by `FM_BUSY_TURN_MAX_SECS`, measured from the active run's start, so a run stuck in `running` reaches the possible-wedge alert within that bound plus `FM_STALE_ESCALATE_SECS`, and a missing run timestamp never defers.
 `wedge_defer_t3code_running` in `bin/fm-watch.sh` owns that consult; all other classified words keep the ordinary escalation ladder, including its declared-wait, worktree-write, and dead-record checks.
 T3 launches Claude with the `user,project,local` setting sources, so the worktree `.claude/settings.local.json` busy hooks fire as on every other backend.
 T3 starts every agent with the T3 server's own environment, not a login shell's.
@@ -158,26 +159,37 @@ The `fm-` project of a torn-down secondmate home stays in T3 Code pointing at th
 ## Restart and liveness behavior
 
 The T3 thread id, transcript, provider binding, and Treehouse worktree outlive a server connection.
-A server restart cancels in-flight runs even though the thread still exists, so a worker whose turn ended without a terminal status line needs a steer.
+A server restart terminalizes every in-flight run as `cancelled` and resumes none of them, even when the server advertises restart continuation, so the worker's turn ends without its own status line.
 Thread persistence alone does not prove a live agent.
 
-`bin/backends/t3code.sh` owns one status table over the thread's V2 status, read with `t3_thread_read`:
+`bin/backends/t3code.sh` owns one status table over the thread's V2 status, read with `t3_thread_read`; it is recovery-grade in both halves:
 
 - `preparing`, `queued`, `starting`, `running`, and `waiting` (the run's post-turn drain) read busy/alive.
+  A pending request counts only while a run is active, where it reads busy/alive and `blocked` to the push.
 - `idle`, `completed`, `interrupted`, `cancelled`, and `rolled_back` read idle/alive.
 - `failed` reads unknown/dead.
-- An archived thread, or one the verified server does not have, reads missing.
+- An archived thread is a stopped agent whose thread is kept (`exit` archives and `relaunch` unarchives), so it reads idle/dead.
+- A thread the verified server does not have reads missing.
 - An unreachable server, a refused gate, or a failed read reads `unknown unreadable`, which is never treated as proof that a replacement agent is safe.
 
+Restart reconciliation runs at the top of every watcher cycle, before signals are classified, for each ship or scout thread: a latest run that reads `cancelled` is one a restart ended, because Firstmate's own interrupt ends a run `interrupted`.
+The watcher re-steers that thread once per cancelled run, under a request id derived from the run so a retried send is the same message, telling the worker to re-read its instructions, status, and steering inbox and continue.
+It then clears the window's stale and wedge bookkeeping, so the quiet the restart caused is never reported as a wedge, and `state/<id>.t3code-restart` records the reconciled run until teardown.
+Because the re-steer comes first, a turn-end notification the dying provider's own hook wrote meets a thread that is provably working again and is absorbed.
+`fm_backend_t3code_restart_reconcile` owns the detection and the send, and `t3code_restart_pass` in `bin/fm-watch.sh` owns the watcher hook.
+
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
-A new turn continues the same driver and transcript; `fm-control.sh relaunch` remains refused.
 Teardown still requires a proven archive before returning the worktree.
 
 ## Push events and polling fallback
 
-T3 accepts an `mcp-client` session only on `/mcp`, so its WebSocket event stream is not available to this credential, and T3 windows stay on the watcher's poll loop at the existing cadence.
-Pending approvals on a running thread therefore read busy rather than `blocked`.
-An event-driven turn-end wait through `t3_thread_wait` is follow-up work.
+T3 accepts an `mcp-client` session only on `/mcp`, so its WebSocket event stream is not available to this credential.
+The watcher's terminal wait for T3 windows is instead one bounded `bin/fm-t3-mcp.mjs watch` call per cycle: a `t3_thread_wait` on every active run, plus a read of each active run's pending-request count every two seconds, within the watcher's poll budget.
+A pending request on a running thread is normalized to `blocked` and goes through the shared transition policy in `bin/fm-transition-lib.sh` and the existing durable wake path, including its declared-wait exemptions; it is reported once per request, and the dedupe clears as soon as the thread reads anything but blocked.
+A pending count on a thread with no active run is never read as waiting on a human.
+A run that reaches a terminal status touches the task's `state/<id>.turn-ended` notification, the same file a harness turn-end hook touches, so a Codex worker's turn end reaches the watcher as promptly as a Claude worker's; a watcher's first sight of an already-finished run and a restart-cancelled run never do.
+A watch call that fails falls back to polling, and repeated failures disable the push for the current watcher process; its successor probes again.
+The poll loop still runs every cycle, so the push only ever shortens latency.
 
 <a id="away-mode"></a>
 
@@ -194,7 +206,7 @@ Away housekeeping keeps an overdue stale alert pending and buffers one possible-
 Delivered warnings stay suppressed while the same unknown condition persists.
 If a fresh daemon entry discards a queued, undelivered warning, it clears that warning's reported marker and preserves its stale timer, so the next housekeeping pass queues exactly one replacement.
 Refreshing a live daemon preserves the queue; a failed start restores the previous queue and reported markers.
-Confirmed busy activity or a missing thread clears the stale and reported markers, so a later unknown condition can report again.
+Confirmed busy activity, a missing thread, or an exited (archived) thread clears the stale and reported markers, so a later unknown condition can report again.
 Declared external-wait rechecks also survive native uncertainty; the worker's declaration still controls their cadence.
 `stale_window_is_busy` and `housekeeping` in `bin/fm-supervise-daemon.sh` own stale tracking; `fm_afk_clear_stale_artifacts` in `bin/fm-afk-start.sh` and the launcher in `bin/fm-afk-launch.sh` own queue discard and startup rollback.
 `tests/fm-backend-t3code.test.sh` covers retention, deduplication, and re-arming across native restart.
@@ -228,8 +240,7 @@ Whether T3 V2 still serves a thread created through that transport is unverified
   Unless `config/keep-ai-trailers` is present, the per-worktree environment selects Firstmate's Git commit hook to strip known AI trailers, including on T3 workers.
 - T3 also owns the Codex provider command, so Firstmate cannot apply the pane-backed worker's hook-disable or turn-end notify options.
   Firstmate's pane-backed hook-trust workaround therefore does not apply; supervision uses T3's [thread status table](#restart-and-liveness-behavior).
-- `fm-control.sh exit` is refused because the V2 `/mcp` tools have no session stop, and `relaunch` is refused because a thread is bound to its existing driver.
-- There is no push stream for an `mcp-client` credential, so T3 windows are polled.
+- `fm-control.sh exit` archives the thread, so an exited worker's thread is hidden in T3 Code's active list until a relaunch unarchives it.
 - A tracked `.codex/config.toml` that already defines `[shell_environment_policy]` is refused by file and table name before a slot is leased.
 - While a tracked Codex overlay is installed, do not edit that file or clear its `skip-worktree` flag; configuration changes require cleanup first.
 - Shell typing and Ctrl-U are unsupported; runtime Escape and Ctrl-C still interrupt the turn.

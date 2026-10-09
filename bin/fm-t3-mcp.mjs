@@ -43,9 +43,27 @@
 //     running one. The client request id makes a retry idempotent.
 //   fm-t3-mcp.mjs state --thread <id>
 //     exists, archived, status, activeRunId, pendingRequestCount,
-//     worktreePath, and turnAt (the latest run's completion, else its start or
-//     request time); a thread the verified server does not have reads
-//     exists:false.
+//     worktreePath, providerInstanceId, model, latestRunId, latestRunStatus,
+//     and turnAt (the latest run's completion, else its start or request
+//     time); a thread the verified server does not have reads exists:false.
+//   fm-t3-mcp.mjs resume --thread <id> --model-selection <json> [--worktree <abs-path>]
+//     Prepare an existing thread with no active run for a relaunch: unarchive
+//     it when archived, apply the model selection with t3_thread_configure,
+//     and read both back (resumed=true). It refuses, changing nothing, unless
+//     the thread is bound to <worktree> (the project root without it). A
+//     thread bound to another provider instance is left untouched and reads
+//     resumed=false, because a thread that has run cannot switch driver; the
+//     caller launches a new thread.
+//   fm-t3-mcp.mjs watch --threads <id[,id...]> [--timeout-ms <n>] [--escalated <id[,id...]>] [--poll-ms <n>]
+//     The watcher's push wait, bounded by --timeout-ms (default 30000). It
+//     returns as soon as a running thread not named in --escalated has a
+//     pending request (trigger=blocked), an active run reaches a terminal
+//     status through t3_thread_wait (trigger=turn-end), or a thread's active
+//     run changes between --poll-ms reads (trigger=change, default 2000), else
+//     at the timeout (trigger=timeout). Pending requests are read only on
+//     threads with an active run. threads[] reports each thread's level after
+//     the trigger: exists, archived, status, activeRunId, pending, blocked,
+//     latestRunId, latestRunStatus.
 //   fm-t3-mcp.mjs read --thread <id> [--limit <n>]
 //     t3_thread_read: the thread record and its latest run, unchanged.
 //   fm-t3-mcp.mjs capture --thread <id> [--lines <n>]
@@ -561,6 +579,10 @@ async function state(flags) {
     activeRunId: t.activeRunId ?? null,
     pendingRequestCount: t.pendingRequestCount ?? 0,
     worktreePath: t.worktreePath ?? null,
+    providerInstanceId: t.providerInstanceId ?? null,
+    model: t.model ?? null,
+    latestRunId: run.runId ?? t.latestRunId ?? null,
+    latestRunStatus: run.status ?? null,
     turnAt: run.completedAt ?? run.startedAt ?? run.requestedAt ?? null,
   };
 }
@@ -771,6 +793,112 @@ async function archive(flags) {
   throw new Refusal("close_unproven", `thread ${threadId} did not read back archived with no active run within ${timeoutMs} ms (archived=${t.archived === true || Boolean(t.archivedAt)}, activeRunId=${t.activeRunId ?? null})`, 3, { thread: t });
 }
 
+// resume: the relaunch half that keeps the same thread, so the replacement
+// agent continues the thread's transcript in the same worktree. Only a thread
+// with no active run is prepared; a thread bound to another provider instance
+// is reported, never changed.
+async function resume(flags) {
+  const threadId = need(flags, "thread");
+  const selection = modelSelection(flags);
+  const { session } = await verifiedSession(flags);
+  const worktree = flags.worktree;
+  if (worktree !== undefined && !path.isAbsolute(worktree)) usage("--worktree must be an absolute path");
+  let t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+  if (worktree ? realOrRaw(t.worktreePath ?? "") !== realOrRaw(worktree) : (t.worktreePath ?? null) !== null) {
+    throw new Refusal("binding_mismatch", `thread ${threadId} is bound to ${t.worktreePath ?? "the project root"}, not ${worktree ?? "the project root"}; refusing to resume it there`, 4);
+  }
+  if ((t.providerInstanceId ?? null) !== selection.instanceId) {
+    return { ok: true, threadId, resumed: false, providerInstanceId: t.providerInstanceId ?? null };
+  }
+  if (t.activeRunId) {
+    throw new Refusal("run_active", `thread ${threadId} still has active run ${t.activeRunId}; stop it before resuming`, 4, { activeRunId: t.activeRunId });
+  }
+  if (t.archived === true || t.archivedAt) await session.call("t3_thread_organize", { threadId, action: "unarchive" });
+  await session.call("t3_thread_configure", { threadId, modelSelection: selection });
+  t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+  const problems = [];
+  if (t.archived === true || t.archivedAt) problems.push("still archived");
+  if (t.providerInstanceId !== selection.instanceId) problems.push(`provider ${t.providerInstanceId ?? "none"}`);
+  if (t.model !== selection.model) problems.push(`model ${t.model ?? "none"}`);
+  if (problems.length) throw new Refusal("resume_unproven", `thread ${threadId} did not read back resumed (${problems.join(", ")})`, 3);
+  return { ok: true, threadId, resumed: true, model: t.model, status: t.status ?? null };
+}
+
+function idList(flags, key) {
+  return String(flags[key] ?? "").split(",").filter(Boolean);
+}
+
+// watch: the push wait. One gated session reads levels; each active run gets
+// its own ungated session (same credential, already proven by the gate) for a
+// t3_thread_wait, so one long wait never queues behind another read.
+async function watch(flags) {
+  const ids = idList(flags, "threads");
+  if (!ids.length) usage("--threads needs at least one thread id");
+  const escalated = new Set(idList(flags, "escalated"));
+  const timeoutMs = positiveInt(flags, "timeout-ms", 30_000, 3_600_000);
+  const pollMs = positiveInt(flags, "poll-ms", 2_000, 600_000);
+  const deadline = Date.now() + timeoutMs;
+  const { cred, session } = await verifiedSession(flags);
+  const level = async (threadId) => {
+    let out;
+    try {
+      out = await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 });
+    } catch (err) {
+      if (isNotFound(err)) return { threadId, exists: false };
+      throw err;
+    }
+    const t = threadOf(out);
+    const run = (out?.recentRuns ?? [])[0] ?? {};
+    const archived = t.archived === true || Boolean(t.archivedAt);
+    const activeRunId = t.activeRunId ?? null;
+    const pending = activeRunId ? (t.pendingRequestCount ?? 0) : 0;
+    return {
+      threadId,
+      exists: true,
+      archived,
+      status: t.status ?? null,
+      activeRunId,
+      pending,
+      blocked: !archived && activeRunId !== null && ACTIVE_STATUSES.includes(t.status) && pending > 0,
+      latestRunId: run.runId ?? t.latestRunId ?? null,
+      latestRunStatus: run.status ?? null,
+    };
+  };
+  const levels = async () => Promise.all(ids.map(level));
+  const fresh = (ls) => ls.some((l) => l.blocked && !escalated.has(l.threadId));
+  let first = await levels();
+  if (fresh(first)) return { ok: true, trigger: "blocked", timedOut: false, threads: first };
+  let settled = false;
+  const triggers = [];
+  for (const l of first) {
+    if (!l.exists || l.archived || !l.activeRunId) continue;
+    triggers.push((async () => {
+      const waiter = new McpSession(cred.origin, cred.access_token);
+      await waiter.open();
+      const remaining = Math.max(1, deadline - Date.now());
+      const out = await waiter.call("t3_thread_wait", { threadId: l.threadId, runId: l.activeRunId, timeoutMs: remaining }, { timeoutMs: remaining + 15_000 });
+      // Only a terminal run is a turn end; a wait that timed out (or answered
+      // without one) leaves the poll and the deadline to decide.
+      if (out?.timedOut === true || !TERMINAL_RUN.has(out?.status)) return new Promise(() => {});
+      return "turn-end";
+    })());
+  }
+  triggers.push((async () => {
+    while (!settled && Date.now() + pollMs < deadline) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      if (settled) break;
+      const now = await levels();
+      if (fresh(now)) return "blocked";
+      if (now.some((l, i) => l.activeRunId !== first[i].activeRunId || l.archived !== first[i].archived)) return "change";
+    }
+    return new Promise(() => {});
+  })());
+  triggers.push(new Promise((r) => setTimeout(() => r("timeout"), Math.max(0, deadline - Date.now()))));
+  const trigger = await Promise.race(triggers);
+  settled = true;
+  return { ok: true, trigger, timedOut: trigger === "timeout", threads: await levels() };
+}
+
 // thread-for-root: away-mode supervisor discovery. T3 puts no thread id into
 // the agent's environment, so the only self-discovery is a cwd match: on the
 // project rooted at <root>, the unarchived thread with no worktree of its own
@@ -801,6 +929,7 @@ const VERBS = {
   "project-ensure": projectEnsure,
   "project-read": projectRead,
   launch,
+  resume,
   send,
   read,
   capture,
@@ -808,6 +937,7 @@ const VERBS = {
   interrupt,
   archive,
   "thread-for-root": threadForRoot,
+  watch,
 };
 
 async function main(argv) {
@@ -815,8 +945,10 @@ async function main(argv) {
   const fn = VERBS[verb];
   if (!fn) usage(`unknown verb '${verb ?? ""}' (verbs: ${Object.keys(VERBS).join(", ")})`);
   const out = await fn(parseFlags(rest));
-  if (verb === "capture") process.stdout.write(`${out.text}\n`);
-  else process.stdout.write(`${JSON.stringify(out)}\n`);
+  const text = verb === "capture" ? `${out.text}\n` : `${JSON.stringify(out)}\n`;
+  // watch leaves its losing waits in flight; exit once the reply is flushed.
+  if (verb === "watch") process.stdout.write(text, () => process.exit(0));
+  else process.stdout.write(text);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

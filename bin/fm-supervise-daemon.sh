@@ -736,8 +736,10 @@ task_window_harness() {  # <window> <state>
 # stale_window_is_busy: 0 when the semantic busy-state contract
 # (bin/fm-busy-lib.sh) reports busy, 2 when the endpoint is gone, 3 for T3
 # native uncertainty, and 1 otherwise. Uncertainty cannot prove work resumed.
-# A T3 thread is gone only when the adapter reads it missing (archived or 404);
-# its verdict is native, so a failed transcript read is uncertainty, not removal.
+# A T3 thread is gone when the adapter reads it missing (the server has no such
+# thread) or reads a stopped agent with nothing left to wedge (an archived
+# thread reads idle and dead); its verdict is native, so a failed transcript
+# read or a failed run is uncertainty, not removal.
 # Other backends treat a failed capture as gone.
 stale_window_is_busy() {  # <window> <state>
   local win=$1 state=$2 backend harness label task tail40='' verdict
@@ -746,7 +748,10 @@ stale_window_is_busy() {  # <window> <state>
   task=$(window_to_task "$win" "$state")
   label="fm-$task"
   if [ "$backend" = t3code ]; then
-    [ "$(fm_backend_agent_state "$backend" "$win" 2>/dev/null)" != missing ] || return 2
+    case "$(fm_backend_agent_state "$backend" "$win" 2>/dev/null)" in
+      missing) return 2 ;;
+      dead) [ "$(fm_backend_busy_state "$backend" "$win" 2>/dev/null)" != idle ] || return 2 ;;
+    esac
   else
     tail40=$(fm_backend_capture "$backend" "$win" 40 "$label" 2>/dev/null) || return 2
   fi

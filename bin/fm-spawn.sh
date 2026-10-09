@@ -66,10 +66,13 @@
 #   model, and effort may change, which is what makes a harness switch one
 #   ordinary relaunch. It refuses unless the recorded endpoint is positively
 #   agent-free on a backend with both a recovery-grade agent-state classifier
-#   and replacement-agent support (tmux or herdr), and clears the previous
-#   harness's per-task wiring before arming the new incarnation. T3 Code has
-#   the classifier but refuses relaunch because a thread stays bound to its
-#   original driver. Two verdicts are agent-free: a `dead` endpoint is
+#   and replacement-agent support (tmux, herdr, or t3code), and clears the
+#   previous harness's per-task wiring before arming the new incarnation. On
+#   t3code the adopted endpoint is the archived thread: it is unarchived, set
+#   to the chosen model, and given the relaunch brief as its next turn, unless
+#   it is bound to another T3 provider instance, in which case a new thread is
+#   launched in the same worktree and the record rebinds to it, the old thread
+#   staying archived. Two verdicts are agent-free: a `dead` endpoint is
 #   ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
@@ -1857,11 +1860,9 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint" >&2
     exit 1
   }
-  # The same table refuses a backend that cannot host a REPLACEMENT at all:
-  # a T3 thread is bound to its driver, and a turn on its stopped session
-  # continues the same agent instead of launching a new one.
+  # The same table refuses a backend that cannot host a REPLACEMENT at all.
   fm_control_backend_relaunch_supported "$BACKEND" || {
-    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint (a T3 thread is bound to its driver, and a turn on a stopped thread continues the same agent); refusing to relaunch $ID" >&2
+    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint; refusing to relaunch $ID" >&2
     exit 1
   }
   # Two states are agent-free, and both license a relaunch:
@@ -3758,6 +3759,43 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
   exit 1
 fi
 
+# spawn_t3code_relaunch_prepare: the T3 project and model selection a t3code
+# relaunch resumes or launches with, read from the task's own record and the
+# relaunch profile, and the removal of the previous incarnation's per-directory
+# channel files, which the install below writes afresh (a fresh spawn refuses
+# them as foreign, and only a Firstmate spawn put them there).
+spawn_t3code_relaunch_prepare() {
+  T3CODE_PROJECT_ID=$(fm_meta_get "$RELAUNCH_META" t3_project_id)
+  [ -n "$T3CODE_PROJECT_ID" ] || {
+    echo "error: task $ID's record has no t3_project_id; refusing to relaunch it on t3code" >&2
+    exit 1
+  }
+  T3CODE_MODEL_SELECTION=$(fm_backend_t3code_model_selection "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$T3CODE_PROJECT_ID") || exit 1
+  "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$WT" || {
+    echo "error: could not remove the previous Codex environment overlay from $WT before relaunching $ID" >&2
+    exit 1
+  }
+  if [ "$KIND" != secondmate ] && ! git -C "$WT" ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1; then
+    rm -f "$WT/CLAUDE.local.md"
+  fi
+}
+
+# spawn_t3code_relaunch_launch: a new thread in the task's own worktree (or a
+# secondmate's home root) for a relaunch that cannot resume the recorded one.
+# The task keeps its lease, so an abort archives only the new thread.
+spawn_t3code_relaunch_launch() {
+  local wt_arg=$WT
+  [ "$KIND" != secondmate ] || wt_arg=
+  T3CODE_CREATE_UNCERTAIN=1
+  T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
+    "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$wt_arg" "$T3CODE_MODEL_SELECTION") || {
+      [ "$?" -eq 1 ] || T3CODE_CREATE_UNCERTAIN=0
+      exit 1
+    }
+  T3CODE_CREATE_UNCERTAIN=0
+  T3CODE_ABORT_CLEANUP=1
+}
+
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
   # A secondmate's home already resolved WT above through the same validation a
@@ -3774,6 +3812,32 @@ if [ "$RELAUNCH" -eq 1 ]; then
     T=$RELAUNCH_TARGET
     WT_TARGET=$T
     SES=${T%%:*}
+    if [ "$BACKEND" = t3code ]; then
+      # The adopted endpoint is the archived thread `exit` left. Resume it on
+      # the chosen model so the replacement continues its transcript, or, when
+      # it is bound to another provider instance, launch a new thread in the
+      # same worktree. Either way an abort before the record is republished
+      # archives the thread again, and the task keeps its lease.
+      spawn_t3code_relaunch_prepare
+      t3code_resume_wt=$WT
+      [ "$KIND" != secondmate ] || t3code_resume_wt=
+      case "$(fm_backend_t3code_thread_resume "$T" "$T3CODE_MODEL_SELECTION" "$t3code_resume_wt")" in
+        resumed) T3CODE_ABORT_CLEANUP=1 ;;
+        rebind) spawn_t3code_relaunch_launch ;;
+        *)
+          echo "error: T3 thread $T for $ID could not be resumed for the relaunch; see the reason above" >&2
+          exit 1
+          ;;
+      esac
+      WT_TARGET=$T
+    fi
+  elif [ "$BACKEND" = t3code ]; then
+    # The verified server answered that it has no such thread, so there is
+    # nothing to resume: launch one new thread in the recorded worktree and
+    # rebind the record to it, as herdr re-creates a pane.
+    spawn_t3code_relaunch_prepare
+    spawn_t3code_relaunch_launch
+    WT_TARGET=$T
   else
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the
@@ -3782,10 +3846,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # worktree, armed poll and status log are untouched.
     #
     # Herdr is the ONLY backend that reaches here: the gate above rebinds only
-    # on a PROVEN-gone endpoint, and absence is provable only on herdr, whose
-    # every read is scoped to the session the record names
-    # (fm_control_endpoint_absence_verdict owns that argument). tmux and every
-    # secondmate were already refused, so there is no dispatch left to make.
+    # on a PROVEN-gone endpoint, absence is provable only on herdr and t3code
+    # (fm_control_endpoint_absence_verdict owns that argument), and t3code took
+    # its own branch above. tmux and every secondmate were already refused, so
+    # there is no dispatch left to make.
     #
     # This deliberately uses the FLAT container shape rather than Herdr's
     # presentation projection: projection is a presentation-only layout that is
@@ -4523,6 +4587,11 @@ agy_spawn_fail() {  # <detail>
 
 if [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = orca ]; then
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
+elif [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = t3code ]; then
+  # A T3 thread has no shell to drift: its worktree binding was read back from
+  # T3 when the relaunch resumed it (fm_backend_t3code_thread_resume) or
+  # launched its replacement, so there is no pane location to prove here.
+  :
 elif [ "$RELAUNCH" -eq 1 ]; then
   # No worktree is acquired: the recorded one is reused as-is. What must be
   # proven instead is that the adopted endpoint's shell is actually sitting in

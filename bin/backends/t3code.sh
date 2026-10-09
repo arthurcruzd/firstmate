@@ -31,6 +31,9 @@
 # adapter loads the same library every other backend does.
 # shellcheck source=bin/fm-composer-lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/../fm-composer-lib.sh"
+# The push normalizes thread levels into the shared transition record.
+# shellcheck source=bin/fm-transition-lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/../fm-transition-lib.sh"
 
 FM_BACKEND_T3CODE_HELPER="$(cd "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/fm-t3-mcp.mjs"
 
@@ -212,10 +215,12 @@ fm_backend_t3code_thread_state() {  # <thread-id>
 
 # fm_backend_t3code_probe: one word naming the thread's row in the status
 # table, from its V2 thread status: idle, starting (preparing, queued,
-# starting), running (running, or waiting while the run drains), ready
-# (completed), interrupted (interrupted, cancelled, rolled_back), error
-# (failed), archived, http-404 (the verified server has no such thread), or
-# http-failure (unreachable, refused, or unreadable).
+# starting), running (running, or waiting while the run drains), blocked (an
+# active run with a pending request, which T3 counts only while the run is
+# live), ready (completed), interrupted (interrupted, rolled_back), cancelled
+# (the run a T3 restart terminalized), error (failed), archived, http-404 (the
+# verified server has no such thread), or http-failure (unreachable, refused,
+# or unreadable).
 fm_backend_t3code_probe() {  # <thread-id>
   local out
   out=$(fm_backend_t3code_thread_state "$1" 2>/dev/null) || { printf 'http-failure'; return 0; }
@@ -229,9 +234,10 @@ const word = () => {
   switch (d.status) {
     case "idle": return "idle";
     case "preparing": case "queued": case "starting": return "starting";
-    case "running": case "waiting": return "running";
+    case "running": case "waiting": return d.activeRunId && d.pendingRequestCount > 0 ? "blocked" : "running";
     case "completed": return "ready";
-    case "interrupted": case "cancelled": case "rolled_back": return "interrupted";
+    case "interrupted": case "rolled_back": return "interrupted";
+    case "cancelled": return "cancelled";
     case "failed": return "error";
     default: return "http-failure";
   }
@@ -254,13 +260,18 @@ process.stdout.write(String(Math.max(0, Math.floor((Date.now() - at) / 1000))));
 ' 2>/dev/null
 }
 
-# The one status table: "<busy_state> <agent_state>" per probe row.
+# The one status table: "<busy_state> <agent_state>" per probe row. Both
+# halves are recovery-grade: busy and idle come from T3's own run state, and
+# an archived thread is a stopped agent whose thread, transcript, and worktree
+# binding are kept (exit archives; relaunch unarchives), so it reads dead,
+# while only a thread the verified server does not have reads missing.
 fm_backend_t3code_state_row() {  # <probe-row>
   case "$1" in
-    starting|running) printf 'busy alive' ;;
-    ready|idle|interrupted) printf 'idle alive' ;;
+    starting|running|blocked) printf 'busy alive' ;;
+    ready|idle|interrupted|cancelled) printf 'idle alive' ;;
+    archived) printf 'idle dead' ;;
     error) printf 'unknown dead' ;;
-    archived|http-404) printf 'unknown missing' ;;
+    http-404) printf 'unknown missing' ;;
     *) printf 'unknown unreadable' ;;
   esac
 }
@@ -343,6 +354,182 @@ fm_backend_t3code_kill() {  # <thread-id>
   fi
   out=$(fm_backend_t3code_mcp archive --thread "$thread") || return 1
   [ "$(printf '%s' "$out" | fm_backend_t3code_json_get closed)" = true ]
+}
+
+# fm_backend_t3code_agent_stop: the control plane's `exit`. V2 `/mcp` has no
+# session stop, so the agent is stopped the one way T3 offers: interrupt any
+# running turn, then archive the thread, which ends its provider process. The
+# thread, transcript, and worktree binding stay, and the archive is
+# reversible, so the endpoint is preserved for a relaunch to resume. Success
+# needs the same read-back the teardown close needs.
+fm_backend_t3code_agent_stop() {  # <thread-id>
+  fm_backend_t3code_kill "$1"
+}
+
+# fm_backend_t3code_thread_resume <thread-id> <model-selection-json>
+# [worktree]: the relaunch half that keeps the endpoint. Prints `resumed` once
+# T3 reads the thread back unarchived on <model-selection> and bound to
+# <worktree> (the project root when empty), so the next message continues the
+# same transcript in the copy holding the work; prints `rebind` when the thread
+# is bound to another provider instance, which a thread that has run cannot
+# leave, so the caller launches a new thread in the same worktree instead.
+# Fails otherwise, a thread bound to any other workspace included.
+fm_backend_t3code_thread_resume() {  # <thread-id> <model-selection-json> [worktree]
+  local out
+  local -a where=()
+  [ -z "${3:-}" ] || where=(--worktree "$3")
+  out=$(fm_backend_t3code_mcp resume --thread "$1" --model-selection "$2" ${where[@]+"${where[@]}"}) || return 1
+  case "$(printf '%s' "$out" | fm_backend_t3code_json_get resumed)" in
+    true) printf 'resumed' ;;
+    false) printf 'rebind' ;;
+    *) return 1 ;;
+  esac
+}
+
+# fm_backend_t3code_restart_reconcile <thread-id> <marker-file> <message>: a
+# T3 server restart terminalizes every in-flight run as `cancelled` and does
+# not resume it, so the worker's turn ended without its own status line.
+# Firstmate never cancels a run itself (its interrupt ends a run
+# `interrupted`), so a latest run that reads `cancelled` and is not yet in
+# <marker-file> is re-steered once with <message>, under a request id derived
+# from that run so a retried send is the same message. Prints the reconciled
+# run id and returns 0 after the send; returns 1 when there is nothing to
+# reconcile; returns 2 when the read or send failed (the marker is untouched,
+# so the next poll retries).
+fm_backend_t3code_restart_reconcile() {  # <thread-id> <marker-file> <message>
+  local thread=$1 marker=$2 message=$3 out run seen='' rid file rc=0
+  out=$(fm_backend_t3code_thread_state "$thread" 2>/dev/null) || return 2
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get exists)" = true ] || return 1
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get archived)" = false ] || return 1
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get status)" = cancelled ] || return 1
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get latestRunStatus)" = cancelled ] || return 1
+  run=$(printf '%s' "$out" | fm_backend_t3code_json_get latestRunId) || return 1
+  [ ! -f "$marker" ] || IFS= read -r seen < "$marker" || true
+  [ "$seen" != "$run" ] || return 1
+  rid="fm-restart-$(printf '%s' "$run" | LC_ALL=C tr -c 'A-Za-z0-9._:-' '_')"
+  file=$(mktemp "${TMPDIR:-/tmp}/fm-t3code-msg.XXXXXX") || return 2
+  printf '%s' "$message" > "$file" || { rm -f "$file"; return 2; }
+  fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" --client-request-id "$rid" >/dev/null || rc=$?
+  rm -f "$file"
+  [ "$rc" -eq 0 ] || return 2
+  printf '%s\n' "$run" > "$marker" || return 2
+  printf '%s' "$run"
+}
+
+# --- watcher push -------------------------------------------------------------
+# T3 refuses an mcp-client on its WebSocket stream, so the push is the helper's
+# `watch` verb: a bounded t3_thread_wait on every active run, plus a read of
+# each active run's pending-request count, inside the watcher's poll budget.
+# A pending request on a running thread normalizes to `blocked` (the shared
+# transition policy's only actionable status), an active run to `working`, and
+# everything else to `idle` or `unknown`. A run that reached a terminal status
+# since the last read touches the task's state/<id>.turn-ended wake
+# notification, the same file a harness turn-end hook touches, so a Codex
+# worker's turn end reaches the watcher as promptly as a Claude worker's. A
+# `cancelled` run is left to fm_backend_t3code_restart_reconcile instead.
+
+fm_backend_t3code_marker_key() {  # <thread-id>
+  printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_'
+}
+
+fm_backend_t3code_escalation_marker() {  # <state-dir> <thread-id>
+  printf '%s/.t3code-escalated-%s' "$1" "$(fm_backend_t3code_marker_key "$2")"
+}
+
+fm_backend_t3code_turn_marker() {  # <state-dir> <thread-id>
+  printf '%s/.t3code-turn-%s' "$1" "$(fm_backend_t3code_marker_key "$2")"
+}
+
+fm_backend_t3code_events_capable() {  # [session]
+  fm_backend_t3code_runtime_check >/dev/null 2>&1
+}
+
+# fm_backend_t3code_turn_seen <state-dir> <thread-id> <run-id> <run-status>:
+# record the thread's latest run and touch its task's turn-ended notification
+# on a fresh terminal edge: the same run seen active before, or a different
+# run, but never a first sight (a watcher that just started must not replay
+# an old turn end) and never a cancelled run.
+fm_backend_t3code_turn_seen() {  # <state-dir> <thread-id> <run-id> <run-status>
+  local state=$1 thread=$2 run=$3 status=$4 marker prev='' now meta task
+  [ -n "$run" ] || return 0
+  marker=$(fm_backend_t3code_turn_marker "$state" "$thread")
+  [ ! -f "$marker" ] || IFS= read -r prev < "$marker" || true
+  case "$status" in
+    completed|failed|interrupted|rolled_back|cancelled) now="$run terminal" ;;
+    *) now="$run active" ;;
+  esac
+  [ "$prev" != "$now" ] || return 0
+  printf '%s\n' "$now" > "$marker" || return 1
+  [ -n "$prev" ] && [ "${now##* }" = terminal ] && [ "$status" != cancelled ] || return 0
+  meta=$(fm_backend_meta_for_window "$thread" "$state" 2>/dev/null) || return 0
+  [ -n "$meta" ] || return 0
+  task=${meta##*/}
+  task=${task%.meta}
+  touch "$state/$task.turn-ended"
+}
+
+# Returns 0 with one normalized actionable record, 1 after the watch returned
+# (its budget spent, or early on a turn end or a run change, which the
+# watcher's next cycle picks up), or 2 for the polling fallback. Dedupe is
+# committed only after the watcher durably queues the wake, and a thread
+# already escalated is passed back so its standing pending request cannot end
+# every wait early.
+fm_backend_t3code_wait_transition() {  # <session> <timeout-secs> <state-dir> <thread...>
+  local timeout=$2 state=$3 out levels thread level run status marker record found='' rc=1 t threads='' escalated=''
+  local -a extra=()
+  shift 3
+  [ "$#" -gt 0 ] || return 2
+  case "$timeout" in ''|*[!0-9]*|0) timeout=30 ;; esac
+  if [ "${FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED:-0}" != 1 ]; then
+    fm_backend_t3code_events_capable || return 2
+  fi
+  for t in "$@"; do
+    threads="${threads:+$threads,}$t"
+    [ ! -e "$(fm_backend_t3code_escalation_marker "$state" "$t")" ] || escalated="${escalated:+$escalated,}$t"
+  done
+  [ -z "$escalated" ] || extra=(--escalated "$escalated")
+  out=$(fm_backend_t3code_mcp watch --threads "$threads" --timeout-ms "$((timeout * 1000))" \
+    ${extra[@]+"${extra[@]}"} 2>/dev/null) || return 2
+  levels=$(printf '%s' "$out" | node -e '
+let d;
+try { d = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { process.exit(1); }
+if (!d || d.ok !== true) process.exit(1);
+for (const l of d.threads || []) {
+  const level = !l.exists || l.archived ? "unknown" : l.blocked ? "blocked" : l.activeRunId ? "working" : "idle";
+  console.log([l.threadId, level, l.latestRunId || "", l.latestRunStatus || ""].join("\t"));
+}
+') || return 2
+  while IFS=$'\t' read -r thread level run status; do
+    [ -n "$thread" ] || continue
+    fm_backend_t3code_turn_seen "$state" "$thread" "$run" "$status" || true
+    record=$(fm_transition_record "$thread" '' '' "$level" '')
+    marker=$(fm_backend_t3code_escalation_marker "$state" "$thread")
+    # These are levels read at the end of the watch, not an edge stream, so a
+    # thread that is not blocked right now has no pending request left to
+    # dedupe: any other level clears its marker, and its next pending request
+    # escalates again even if the watch never saw it working in between.
+    if [ "$(fm_transition_policy "$level")" = actionable ]; then
+      if [ -z "$found" ] && [ ! -e "$marker" ]; then found=$record; rc=0; fi
+    else
+      rm -f "$marker"
+    fi
+  done <<EOF
+$levels
+EOF
+  [ "$rc" -ne 0 ] || printf '%s' "$found"
+  return "$rc"
+}
+
+fm_backend_t3code_commit_transition() {  # <state-dir> <session> <record>
+  local thread
+  thread=$(fm_transition_pane_id "$3")
+  [ -n "$thread" ] || return 1
+  : > "$(fm_backend_t3code_escalation_marker "$1" "$thread")"
+}
+
+fm_backend_t3code_clear_transition() {  # <state-dir> <thread-id>
+  [ -n "$2" ] || return 0
+  rm -f "$(fm_backend_t3code_escalation_marker "$1" "$2")" "$(fm_backend_t3code_turn_marker "$1" "$2")"
 }
 
 fm_backend_t3code_validate_harness() {  # <harness>

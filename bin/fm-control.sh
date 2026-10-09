@@ -42,7 +42,7 @@
 #              claimed about it, because `missing` also covers an endpoint that
 #              is merely unreachable from this seat. Herdr proves absence by
 #              reading the session the record names; T3 Code proves it by
-#              re-reading a thread whose missing result means archived or 404.
+#              re-reading a thread the verified server answers it does not have.
 #              proven gone reports `endpoint-gone` rather than
 #              `already-stopped`, because the endpoint this verb normally
 #              preserves did not survive; a pane that turns out to be there and
@@ -52,9 +52,11 @@
 #              endpoint, so this verb cannot tell a destroyed window from one on
 #              a tmux server it cannot address, and it will not claim a stop it
 #              cannot see. A missing T3 thread reports `endpoint-gone`.
-#              Refused on t3code before anything is sent: T3's `/mcp` tools
-#              have no session stop (bin/fm-control-lib.sh
-#              fm_control_backend_exit_supported); interrupt ends its turn.
+#              On T3 Code, whose `/mcp` tools have no session stop and whose
+#              thread has no composer, the exit command is the backend's own
+#              stop: interrupt any running turn, then archive the thread, which
+#              then reads `dead` with its transcript and worktree binding kept
+#              (bin/fm-control-lib.sh fm_control_backend_native_exit).
 #   relaunch   Transactionally replace the running agent with a new one, in the
 #              SAME worktree - and the same endpoint whenever that endpoint
 #              still exists - on the same or a newly chosen
@@ -83,9 +85,12 @@
 #              The same pre-stop refusal applies to this home's worker tool
 #              exclusions (bin/fm-exclude-tools-lib.sh): a malformed list, or a
 #              replacement runtime that cannot hide the listed tools.
-#              Refused on t3code before anything is stopped: a T3 thread is
-#              bound to its driver and a new turn continues the same agent
-#              (fm_control_backend_relaunch_supported).
+#              On t3code the endpoint is the thread: the launch owner unarchives
+#              it, applies the chosen model, and sends the relaunch brief as its
+#              next turn, so the replacement continues the thread's transcript;
+#              a harness on another T3 provider instance gets a new thread in
+#              the same worktree instead, because a thread that has run stays
+#              bound to its driver (fm_control_backend_relaunch_supported).
 #              --note is required for a ship or scout, whose replacement
 #              inherits the local copy but none of the conversation; a
 #              secondmate reconciles its own home's records at startup, so its
@@ -121,12 +126,13 @@
 #   - An unverified harness, or a harness whose control mechanics are unknown,
 #     is refused rather than guessed at.
 #   - A backend that cannot deliver the harness's interrupt key is refused
-#     (Orca's terminal API has no Escape).
+#     (Orca's terminal API has no Escape). T3 interrupts the turn natively
+#     instead, and its own wait on the run reports the cancellation claim.
 #   - `exit` and `relaunch` require a backend with a recovery-grade agent-state
 #     classifier (tmux, herdr, or t3code), because without one the "the agent
 #     stopped" postcondition cannot be proven. Relaunch also requires replacement
-#     support, which t3code lacks. zellij, orca, and cmux are refused rather than
-#     reported as successful blind.
+#     support. zellij, orca, and cmux are refused rather than reported as
+#     successful blind.
 #   - An ambiguous or unreadable endpoint state refuses; only a positively
 #     classified state acts.
 #   - A composer that visibly holds pending text refuses before an exit command
@@ -537,7 +543,15 @@ interrupt_cancel_claim() {
 # adapter's first press rendered no running turn, so nothing was cancelled; a
 # dismissed revert picker is reported beside the claim.
 deliver_interrupt() {
-  local cancel devin_gen=
+  local cancel devin_gen='' rc=0
+  # A backend that interrupts the turn itself (T3) needs no key mechanics and
+  # reports its own cancellation claim, confirmed by its own wait on the run.
+  cancel=$(fm_backend_native_interrupt "$BACKEND" "$T") || rc=$?
+  case "$rc" in
+    0) printf '%s' "$cancel"; return 0 ;;
+    2) ;;
+    *) die "task $ID's $BACKEND endpoint did not accept the interrupt" ;;
+  esac
   # Devin does not emit Stop for cancellation. Capture this incarnation before
   # keys, then invalidate its state conservatively rather than claiming idle.
   if [ "$HARNESS" = devin ]; then
@@ -648,8 +662,6 @@ retire_busy_incarnation() {
 do_exit() {
   local state cmd hazard verdict composer_state cancel absence interrupt_result=not-needed dialog
   require_state_verified_backend exit
-  fm_control_backend_exit_supported "$BACKEND" \
-    || die "task $ID runs on the $BACKEND backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread"
   state=$(agent_state)
   case "$state" in
     dead)
@@ -710,47 +722,54 @@ do_exit() {
       esac
       ;;
   esac
-  cmd=$(fm_control_exit_command "$HARNESS")
-  hazard=$(fm_control_interrupt_hazard_signal "$HARNESS")
-  if [ -n "$hazard" ] && rendered_matches "$hazard"; then
-    die "task $ID shows the $HARNESS revert picker, where typed text becomes a search and Enter reverts file changes; refusing to type the $cmd exit command. Close it with $(fm_control_interrupt_key "$HARNESS"), never Enter, then retry '$VERB'"
-  fi
-  : > "$FM_COMPOSER_DIALOG_SINK" \
-    || die "task $ID's dialog check could not be recorded"
-  composer_state=$(fm_backend_composer_state "$BACKEND" "$T" "$LABEL" 2>/dev/null) \
-    || composer_state=unknown
-  # The classify that filled the sink ran in a subshell, so read the file
-  # rather than a function that subshell sourced.
-  if [ -s "${FM_COMPOSER_DIALOG_SINK:-}" ]; then
-    dialog=$(cat "$FM_COMPOSER_DIALOG_SINK")
-    refuse_blocking_prompt "$dialog"
-  fi
-  case "$composer_state" in
-    empty) ;;
-    pending)
-      die "task $ID's composer visibly holds pending text; refusing to type the $cmd exit command because it would concatenate onto that text. Clear or submit the pending text, then retry '$VERB'"
-      ;;
-    *)
-      die "task $ID's composer state is '$composer_state', not proven empty; refusing to type the $cmd exit command because it could concatenate onto existing text. Clear the composer, then retry '$VERB'"
-      ;;
-  esac
-  # The submit verdict is NOT the postcondition here: a successful exit command
-  # destroys the composer the verdict is read from, so a post-exit read can
-  # legitimately report anything. Only a hard transport failure aborts; the
-  # authoritative proof is the agent-state wait below. The retried Enter still
-  # matters, because a slash command opens a completion popup on some TUIs that
-  # swallows the first Enter.
-  verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
-    || die "the exit command could not be sent to task $ID on $BACKEND"
-  [ "$verdict" != send-failed ] \
-    || die "the exit command could not be sent to task $ID on $BACKEND"
-  # The submitting Enter can open the picker. The agent is still alive, and
-  # another Enter would confirm the selected row. A dead agent may leave the
-  # same text behind; that is not a prompt still waiting.
-  if [ -s "${FM_COMPOSER_DIALOG_SINK:-}" ]; then
-    dialog=$(cat "$FM_COMPOSER_DIALOG_SINK")
-    if [ "$(agent_state)" != dead ]; then
+  if fm_control_backend_native_exit "$BACKEND"; then
+    # No composer to type into: the backend's own stop is the exit command,
+    # and the agent-state wait below stays the only proof of it.
+    fm_backend_agent_stop "$BACKEND" "$T" \
+      || die "the $BACKEND stop could not be proven for task $ID"
+  else
+    cmd=$(fm_control_exit_command "$HARNESS")
+    hazard=$(fm_control_interrupt_hazard_signal "$HARNESS")
+    if [ -n "$hazard" ] && rendered_matches "$hazard"; then
+      die "task $ID shows the $HARNESS revert picker, where typed text becomes a search and Enter reverts file changes; refusing to type the $cmd exit command. Close it with $(fm_control_interrupt_key "$HARNESS"), never Enter, then retry '$VERB'"
+    fi
+    : > "$FM_COMPOSER_DIALOG_SINK" \
+      || die "task $ID's dialog check could not be recorded"
+    composer_state=$(fm_backend_composer_state "$BACKEND" "$T" "$LABEL" 2>/dev/null) \
+      || composer_state=unknown
+    # The classify that filled the sink ran in a subshell, so read the file
+    # rather than a function that subshell sourced.
+    if [ -s "${FM_COMPOSER_DIALOG_SINK:-}" ]; then
+      dialog=$(cat "$FM_COMPOSER_DIALOG_SINK")
       refuse_blocking_prompt "$dialog"
+    fi
+    case "$composer_state" in
+      empty) ;;
+      pending)
+        die "task $ID's composer visibly holds pending text; refusing to type the $cmd exit command because it would concatenate onto that text. Clear or submit the pending text, then retry '$VERB'"
+        ;;
+      *)
+        die "task $ID's composer state is '$composer_state', not proven empty; refusing to type the $cmd exit command because it could concatenate onto existing text. Clear the composer, then retry '$VERB'"
+        ;;
+    esac
+    # The submit verdict is NOT the postcondition here: a successful exit command
+    # destroys the composer the verdict is read from, so a post-exit read can
+    # legitimately report anything. Only a hard transport failure aborts; the
+    # authoritative proof is the agent-state wait below. The retried Enter still
+    # matters, because a slash command opens a completion popup on some TUIs that
+    # swallows the first Enter.
+    verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
+      || die "the exit command could not be sent to task $ID on $BACKEND"
+    [ "$verdict" != send-failed ] \
+      || die "the exit command could not be sent to task $ID on $BACKEND"
+    # The submitting Enter can open the picker. The agent is still alive, and
+    # another Enter would confirm the selected row. A dead agent may leave the
+    # same text behind; that is not a prompt still waiting.
+    if [ -s "${FM_COMPOSER_DIALOG_SINK:-}" ]; then
+      dialog=$(cat "$FM_COMPOSER_DIALOG_SINK")
+      if [ "$(agent_state)" != dead ]; then
+        refuse_blocking_prompt "$dialog"
+      fi
     fi
   fi
   state=$(wait_agent_state "$EXIT_WAIT" dead) || {
@@ -1087,7 +1106,7 @@ do_relaunch() {
 
   require_state_verified_backend relaunch
   fm_control_backend_relaunch_supported "$BACKEND" \
-    || die "task $ID runs on the $BACKEND backend, where a thread is bound to its driver and a new turn continues the same agent, so no replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch"
+    || die "task $ID runs on the $BACKEND backend, which cannot launch a replacement agent into its endpoint"
   resolve_relaunch_profile
 
   case "$KIND" in

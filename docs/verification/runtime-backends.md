@@ -1988,8 +1988,7 @@ The portable classifier regression is `tests/fm-backend-cmux.test.sh`.
 ### Orchestrator V2 transport
 
 The `/mcp` transport was verified live on 2026-10-08 against `t3 v0.0.46-nightly.20261008.2833` (npm launcher plus native `@t3code/t3-darwin-arm64`), run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295, codex-cli 0.160.1, node 26.8.2, and treehouse 2.3.0 on macOS arm64.
-That run drove `bin/fm-t3-mcp.mjs` through an earlier standalone wiring of the same helper in a scratch Firstmate home, scratch project, and private Treehouse pool root; this backend's adapter calls the same tools with the same arguments.
-This backend's own spawn, steer, interrupt, and teardown wiring ran live on 2026-10-09 on a WSL host ([WSL host driving Windows programs](#wsl-host-driving-windows-programs)).
+That run drove `bin/fm-t3-mcp.mjs` through an earlier standalone wiring of the same helper in a scratch Firstmate home, scratch project, and private Treehouse pool root; this backend's own wiring ran live in the [semantic supervision](#semantic-supervision) run below and on a WSL host ([WSL host driving Windows programs](#wsl-host-driving-windows-programs)).
 T3 stable 0.0.45 lacks the `t3_thread_*` tools, and 0.0.46 nightly answers 404 for the pre-V2 `POST /api/orchestration/dispatch` route.
 
 ```sh
@@ -2025,7 +2024,46 @@ Live facts the backend relies on:
 - T3's Claude reads the worktree's `.claude/settings.local.json`: Firstmate's busy and turn-end hooks fired, and a lab commit carried no agent co-author trailer.
 - The listening server's process environment showed `T3CODE_TELEMETRY_ENABLED=false`, so status reported `telemetry: off`.
 - After `t3 auth session revoke`, `t3 auth session list` reported no active sessions and the next helper call was refused as unauthorized.
-- The 0.0.46 nightly binary's schemas offer the `root`, `existing_worktree`, and `worktree` launch workspace strategies, `t3_thread_list` filtered by status per project, and no session-stop tool, which is why a secondmate launches at `root` and `fm-control.sh exit` refuses.
+- The 0.0.46 nightly binary's schemas offer the `root`, `existing_worktree`, and `worktree` launch workspace strategies, `t3_thread_list` filtered by status per project, and no session-stop tool, which is why a secondmate launches at `root` and `fm-control.sh exit` stops an agent by archiving its thread.
+
+### Semantic supervision
+
+Verified live on 2026-10-09 against `t3 v0.0.46-nightly.20261008.2849`, run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295 (`claude-sonnet-5-5`, low effort), node 26.8.2, and treehouse 2.3.0 on macOS arm64.
+The run used real `bin/fm-spawn.sh`, `bin/fm-send.sh`, `bin/fm-control.sh`, `bin/fm-watch.sh`, and `bin/fm-teardown.sh` from a clone of this backend in a scratch Firstmate home with `config/backend=t3code`, a scratch project, and a private Treehouse pool root, on one `fm-brief.sh` Claude scout thread.
+
+```sh
+bin/fm-spawn.sh lab1 projects/labproj claude --scout --model claude-sonnet-5-5 --effort low
+bin/fm-t3-mcp.mjs watch --threads <thread> --timeout-ms 180000
+bin/fm-control.sh lab1 interrupt
+bin/fm-control.sh lab1 exit
+bin/fm-control.sh lab1 relaunch --note '<progress note>'
+FM_STALE_ESCALATE_SECS=30 bin/fm-watch.sh        # T3 restarted by its native pid mid-run
+FM_BUSY_TURN_MAX_SECS=60 FM_STALE_ESCALATE_SECS=20 bin/fm-watch.sh   # a deliberately hung run
+bin/fm-teardown.sh lab1
+```
+
+```text
+busy verdict: busy t3code-native ... busy verdict: idle t3code-native
+{"ok":true,"trigger":"turn-end","timedOut":false,"threads":[{...,"status":"completed","latestRunStatus":"completed"}]}
+interrupt-delivered lab1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+stopped lab1 harness=claude backend=t3code endpoint=<thread> ...
+relaunched lab1 harness=claude from=claude model=claude-sonnet-5-5 effort=low backend=t3code endpoint=<same thread> ...
+re-steered after a T3 restart cancelled run run:thread:<thread>:ordinal:7: <thread>
+stale: <thread> (idle 20s, possible wedge, escalation 1)
+```
+
+| Step | Result |
+| --- | --- |
+| Busy and idle | The task read `busy t3code-native` from spawn until the launch turn ended, then `idle t3code-native`, with no harness hook consulted. |
+| Turn-end push | `watch` returned `turn-end` 0.95 s after T3's recorded `completedAt`. |
+| Interrupt of a running `python3` tool call | `cancel=confirmed` in 3.4 s; the child was gone 2 s later. |
+| Exit | 4.2 s; the thread read back `archived:true` with no active run, and the agent state read `dead`. |
+| Relaunch | 14.5 s; the same thread id, unarchived, took the relaunch brief as run 4, and the worker recalled a codeword it had been given in the thread before the exit and never wrote down. |
+| T3 restart mid-run (SIGTERM to the native pid) | The run read `cancelled` and its child was gone; the watcher re-steered the thread within about 1 s of the server answering again, a new run started, and no stale or wedge wake followed in the next 90 s on a 30 s stale timer. |
+| Hung run, 60 s busy-turn bound, 20 s stale timer, 5 s poll | A possible-wedge wake for the thread 73.4 s after the run started, while the run still read `running`. |
+| Teardown of the relaunched task | 6.6 s; the thread read back archived with no active run, the record was removed, and the slot read `available`. |
+
+Also observed on this nightly: the server advertises `threadRestartContinuation`, yet the run cancelled by the restart was not resumed; `t3_thread_list` rows carry no pending-request count, so the push reads `t3_thread_read` for each running thread; and `t3_thread_configure` changes the model of a thread that has run on the same provider instance.
 
 ### Live transport guard
 
@@ -2050,8 +2088,8 @@ tests/fm-backend.test.sh
 tests/fm-daemon.test.sh
 ```
 
-`tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, launch binding and its uncertain and refused outcomes, send idempotency, capture, interrupt claims, the proven archive, and the supervisor lookup.
-`tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort and uncertain-launch lease retention, tracked Codex configuration preservation, the exit and relaunch refusals, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
+`tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, launch binding and its uncertain and refused outcomes, send idempotency, capture, interrupt claims, the proven archive, resume, the watch triggers, and the supervisor lookup.
+`tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort and uncertain-launch lease retention, tracked Codex configuration preservation, the confirmed and unconfirmed interrupt claims, exit by archive, relaunch on the same thread or a new one across provider instances, the push wait's blocked edge and turn end, restart re-steering under the real watcher, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
 `tests/fm-daemon.test.sh` covers discovery precedence and native busy state.
 
 The tracked Codex configuration guard is independent of the transport and passed on 2026-09-15 with `codex-cli 0.154.0` and Python 3.14.7.
