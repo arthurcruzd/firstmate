@@ -57,6 +57,21 @@ The credential appears in `t3 auth session list` as subject `mcp-client` with la
 Revoke it with `t3 auth session revoke <id>` and delete `config/t3-token` when retiring the backend.
 A revoked credential is refused as unauthorized.
 
+### Windows programs from WSL
+
+To pilot Windows programs such as Power BI Desktop or Excel, run T3 inside WSL beside the Firstmate home, not as a native Windows server.
+A native Windows T3 installs and starts, but it cannot bind a worktree leased inside WSL: Windows git reports that worktree under its Linux path, which never matches the `\\wsl.localhost` path a Windows server sees, and the providers would need their own Windows logins.
+Workers reach Windows through WSL interop, which runs each Windows program in the signed-in user's desktop session.
+
+- A server started by systemd or over SSH does not get WSL's appended Windows `PATH`.
+  Put `/mnt/c/Windows/System32`, `/mnt/c/Windows/System32/WindowsPowerShell/v1.0`, and any PowerShell 7 directory on the server's own `PATH`, or workers cannot find `powershell.exe` and `cmd.exe`.
+- Workers should run Windows tools from `/tmp` or a `/mnt/c` directory, because `cmd.exe` rejects a `\\wsl.localhost` working directory and falls back to the Windows directory.
+- An interrupt or teardown that ends a worker's command also ends the Windows process behind it, because interop stops the Windows program when its WSL-side process dies.
+  A program started detached, for example with `Start-Process`, is not that child and survives, so the worker closes what it opened.
+- MCP servers in the provider's own user configuration, such as a Windows-side Power BI modeling server, reach T3's Claude and Codex threads unchanged.
+
+To reach the UI from another machine, keep the server on loopback and publish it with `tailscale serve`, which stays inside the tailnet.
+
 ### Capability gate
 
 Every helper call first runs `tools/list` and refuses unless T3 offers `t3_thread_launch`, `t3_thread_send`, `t3_thread_read`, `t3_thread_wait`, `t3_thread_interrupt`, `t3_thread_organize`, `t3_project_list`, `t3_project_create`, and `t3_environment_read`.

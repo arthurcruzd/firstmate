@@ -2043,6 +2043,53 @@ tests/fm-t3-live-e2e.test.sh
 
 The fake-server suites cover the sign-in, every gate and credential refusal, the spawn refusals, the spawn abort, the doorbell, the interrupt claims, and teardown's ordering and refusals; the live guard refreshes the transport facts above without spending model tokens.
 
+### WSL host driving Windows programs
+
+Verified on 2026-10-09 against `t3 v0.0.46-nightly.20261008.2849` (native `@t3code/t3-linux-x64`) in WSL2 Ubuntu 24.04 on Windows 10.0.26200, with Claude Code 2.1.295, codex-cli 0.161.0, node 26.8.2, and treehouse 2.3.0.
+Windows had Excel 16.0.20430.20146, Power BI Desktop 2.158.1304.0 (Store), and `@microsoft/powerbi-modeling-mcp` 0.5.0-beta.13 run through a WSL wrapper in both providers' user MCP configuration.
+The server ran as a systemd user service on `127.0.0.1` with `T3CODE_TELEMETRY_ENABLED=false` and the Windows directories on its `PATH`, published to the tailnet with `tailscale serve`.
+The lab drove a scratch Firstmate home cloned from the branch, a scratch project with its own origin, a private `TREEHOUSE_ROOT`, and a scratch workbook under the Windows user profile.
+
+```sh
+bin/fm-t3-mcp.mjs login --url http://127.0.0.1:<port> --access full-access --t3 <t3> --base-dir <t3-base-dir>
+FM_T3_LIVE=1 tests/fm-t3-live-e2e.test.sh
+bin/fm-spawn.sh <id> projects/<scratch> --scout --harness claude --model claude-sonnet-5-5 --effort low
+bin/fm-send.sh <id> '<read another cell, then append a status line>'
+bin/fm-send.sh <id> '<run powershell.exe Start-Sleep -Seconds 240 in the foreground>'
+bin/fm-control.sh <id> interrupt
+bin/fm-teardown.sh <id>
+bin/fm-spawn.sh <id> projects/<scratch> --scout --harness codex --model gpt-6-luna --effort low
+```
+
+Bounded output:
+
+```text
+ok - t3 live transport: T3 0.0.46-nightly.20261008.2849 environment <id> passes the gate (telemetry=off)
+spawned <id> harness=claude kind=scout window=fm-<id> worktree=<pool slot>
+done [at=<epoch>]: Excel COM read-only open from WSL T3 thread worked (A1=FM-T3-PILOT, B1=42); no leaked EXCEL process; report written
+working [at=<epoch>]: steer 1 handled, A2=<scratch text>
+interrupt-delivered <id> harness=claude backend=t3 verified=endpoint cancel=confirmed
+teardown <id> complete (window mcp:<uuid>@<id>, worktree <pool slot>)
+```
+
+| Step | Result |
+| --- | --- |
+| Spawn, including the Treehouse lease and idle-thread creation | 1.8 s |
+| Inbox steer send to the worker's status line and `handled/` acknowledgement | 22 s |
+| `fm-control.sh interrupt` during a Windows `Start-Sleep -Seconds 240` | 1.1 s; the WSL-side process and the Windows `powershell.exe` were both gone 3 s later |
+| Teardown, including the archive read-back and slot return | 1.7 s |
+| Blank Power BI Desktop launch to its local model instance | 7 s |
+
+Live facts the Windows guidance relies on:
+
+- Processes started by the systemd user service ran Windows programs in the signed-in desktop session (`SessionId` 1), but had no Windows directories on `PATH` until the service added them.
+- `SIGINT`, `SIGTERM`, and `SIGKILL` to a WSL-side `powershell.exe` process each ended its Windows process within 3 s.
+- A Claude thread and a Codex thread both listed the user-configured `powerbi-modeling` MCP tools; the Claude thread launched a blank Power BI Desktop, connected through `ListLocalInstances`, listed 0 tables, and closed it with no process left.
+- Teardown reaped one leftover worktree process after the Power BI thread was archived.
+- Excel's COM process outlived `Quit()` by about 7 s before exiting on its own.
+- Windows git lists a WSL-created linked worktree under its Linux path (`/home/...`), and refuses the repository as dubious ownership without a `safe.directory` exception.
+- On Linux the telemetry probe reads the listener's NUL-separated `/proc/<pid>/environ`; `tests/fm-t3-mcp.test.sh` pins that parse.
+
 ## Codex App host tools
 
 A reusable Desktop host-tool smoke ran on 2026-07-06 against Codex Desktop bundle version 26.623.101652, build 4674, bundle id `com.openai.codex`.
