@@ -1988,7 +1988,8 @@ The portable classifier regression is `tests/fm-backend-cmux.test.sh`.
 ### Orchestrator V2 transport
 
 The `/mcp` transport was verified live on 2026-10-08 against `t3 v0.0.46-nightly.20261008.2833` (npm launcher plus native `@t3code/t3-darwin-arm64`), run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295, codex-cli 0.160.1, node 26.8.2, and treehouse 2.3.0 on macOS arm64.
-That run drove `bin/fm-t3-mcp.mjs` through an earlier standalone wiring of the same helper in a scratch Firstmate home, scratch project, and private Treehouse pool root; this backend's adapter calls the same tools with the same arguments, but its own wiring has fake-server coverage only and no live run yet.
+That run drove `bin/fm-t3-mcp.mjs` through an earlier standalone wiring of the same helper in a scratch Firstmate home, scratch project, and private Treehouse pool root; this backend's adapter calls the same tools with the same arguments.
+This backend's own spawn, steer, interrupt, and teardown wiring ran live on 2026-10-09 on a WSL host ([WSL host driving Windows programs](#wsl-host-driving-windows-programs)).
 T3 stable 0.0.45 lacks the `t3_thread_*` tools, and 0.0.46 nightly answers 404 for the pre-V2 `POST /api/orchestration/dispatch` route.
 
 ```sh
@@ -2035,10 +2036,10 @@ FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live
 ```
 
 ```text
-ok - t3 live transport: T3 0.0.46-nightly.20261008.2833 environment <id> passes the gate (telemetry=off)
+ok - t3code live transport: T3 0.0.46-nightly.20261008.2849 environment <id> passes the gate (telemetry=off)
 ```
 
-That result is from the standalone guard of the 2026-10-08 run, which made the same gate and missing-thread checks; refresh it with the command above after signing in.
+That result is from 2026-10-09 against the WSL host below; refresh it with the command above after signing in.
 
 ### Portable regression coverage
 
@@ -2071,6 +2072,55 @@ Adapter smokes on 2026-09-15, through the pre-V2 transport, established the tran
 Claude and Codex both received per-directory environment through their native project configuration.
 Claude required the task-worker statement in the worktree's git-excluded `CLAUDE.local.md` to accept the encoded launch brief.
 A Codex mid-turn steer joined the running turn.
+
+### WSL host driving Windows programs
+
+Verified on 2026-10-09 against `t3 v0.0.46-nightly.20261008.2849` (native `@t3code/t3-linux-x64`) in WSL2 Ubuntu 24.04 on Windows 10.0.26200, with Claude Code 2.1.295, codex-cli 0.161.0, node 26.8.2, and treehouse 2.3.0.
+Windows had Excel 16.0.20430.20146, Power BI Desktop 2.158.1304.0 (Store), and `@microsoft/powerbi-modeling-mcp` 0.5.0-beta.13 run through a WSL wrapper in both providers' user MCP configuration.
+The server ran as a systemd user service on `127.0.0.1` with `T3CODE_TELEMETRY_ENABLED=false` and the Windows directories on its `PATH`, published to the tailnet with `tailscale serve`.
+The run drove this backend through a scratch Firstmate home cloned from the branch, a scratch project with its own origin, a private `TREEHOUSE_ROOT`, and a scratch workbook under the Windows user profile.
+
+```sh
+bin/fm-t3-mcp.mjs login --url http://127.0.0.1:<port> --access full-access --t3 <t3> --base-dir <t3-base-dir>
+FM_T3CODE_LIVE_E2E=1 bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
+bin/fm-spawn.sh <id> projects/<scratch> --scout --harness claude --model claude-sonnet-5-5 --effort low
+bin/fm-send.sh <id> '<open a blank Power BI Desktop and read it through powerbi-modeling>'
+bin/fm-send.sh <id> '<run powershell.exe Start-Sleep -Seconds 240 in the foreground>'
+bin/fm-control.sh <id> interrupt
+bin/fm-teardown.sh <id>
+bin/fm-spawn.sh <id> projects/<scratch> --scout --harness codex --model gpt-6-luna --effort low
+```
+
+Bounded output:
+
+```text
+spawned <id> harness=claude kind=scout window=fm-<id> worktree=<pool slot>
+done [at=<epoch>]: Excel via WSL interop works; Pilot A1=FM-T3-PILOT B1=42; report at data/<id>/report.md
+working [at=<epoch>]: steer 1 handled, powerbi tables=0, closed=yes
+interrupt-delivered <id> harness=claude backend=t3code verified=agent-alive cancel=unconfirmed
+{"ok":true,...,"status":"interrupted","activeRunId":null,...}
+teardown <id> complete (window mcp:<uuid>, worktree <pool slot>)
+```
+
+| Step | Result |
+| --- | --- |
+| Spawn, including the Treehouse lease and idle-thread launch | 2.7 s |
+| Power BI steer send to the worker's status line and `handled/` acknowledgement | 65 s, including a blank Power BI Desktop launch, `ListLocalInstances`, connect, table list, and close |
+| `fm-control.sh interrupt` during a Windows `Start-Sleep -Seconds 240` | 1.4 s; the run read back `interrupted`, and the WSL-side process and the Windows `powershell.exe` were both gone 3 s later |
+| `bin/fm-t3-mcp.mjs interrupt` on the same kind of command | 0.65 s, `cancel=confirmed`; both sides gone 3 s later |
+| Teardown, including the archive read-back and slot return | 4 s |
+
+Live facts the Windows guidance relies on:
+
+- Processes started by the systemd user service ran Windows programs in the signed-in desktop session (`SessionId` 1), but had no Windows directories on `PATH` until the service added them.
+- `SIGINT`, `SIGTERM`, and `SIGKILL` to a WSL-side `powershell.exe` process each ended its Windows process within 3 s.
+- Claude's tool moved a 240 s and a 600 s foreground command to a background task at 120 s and ended the turn; the 240 s command ran to completion, through an `fm-control.sh interrupt` sent after that turn ended, while teardown ended the 600 s one on both sides.
+- `fm-control.sh interrupt` reports `cancel=unconfirmed` on this backend even when T3 reads the run back as `interrupted`, because it does not read T3's own cancel claim.
+- A Claude thread and a Codex thread both listed the user-configured `powerbi-modeling` MCP tools; the Codex thread's `ListLocalInstances` returned an empty list with no Desktop open.
+- A Claude worker interrupted mid-command treated the interrupt as a rejected tool call and asked before retrying.
+- Excel's COM process outlived `Quit()` by about 7 s before exiting on its own.
+- Windows git lists a WSL-created linked worktree under its Linux path (`/home/...`), and refuses the repository as dubious ownership without a `safe.directory` exception.
+- On Linux the telemetry probe reads the listener's NUL-separated `/proc/<pid>/environ`; `tests/fm-t3-mcp.test.sh` pins that parse.
 
 ## Codex App host tools
 
