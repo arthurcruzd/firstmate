@@ -683,7 +683,7 @@ fm_backend_source() {  # <name>
       set -- fm-backend-hometag-lib.sh fm-composer-lib.sh
       ;;
     t3code)
-      set -- fm-composer-lib.sh
+      set -- fm-composer-lib.sh fm-transition-lib.sh fm-t3-mcp.mjs
       ;;
     *)
       return 1
@@ -931,6 +931,38 @@ fm_backend_kill() {  # <backend> <target>
   esac
 }
 
+# fm_backend_native_interrupt: a backend whose runtime interrupts a turn itself
+# and reports the outcome, instead of receiving the harness's interrupt key.
+# Prints confirmed, not-running, or unconfirmed. Returns 2 for every backend
+# without one, so the caller delivers the harness's key instead.
+fm_backend_native_interrupt() {  # <backend> <target>
+  case "$1" in
+    t3code)
+      fm_backend_source t3code || return 1
+      fm_backend_t3code_native_interrupt "$2"
+      ;;
+    *) return 2 ;;
+  esac
+}
+
+# fm_backend_agent_stop: stop the agent and keep its endpoint, on a backend
+# whose agent is stopped through the backend itself rather than through the
+# harness's exit command typed into a composer (bin/fm-control-lib.sh's
+# fm_control_backend_native_exit names them). T3 has no composer and its
+# `/mcp` tools no session stop, so its stop is interrupt-then-archive with a
+# read-back proof (bin/backends/t3code.sh). Every other backend refuses here:
+# its exit is the typed command the control plane owns.
+fm_backend_agent_stop() {  # <backend> <target>
+  local backend=$1
+  shift
+  [ -n "${1:-}" ] || { echo "error: refusing empty backend agent-stop target" >&2; return 1; }
+  fm_backend_source "$backend" || return 1
+  case "$backend" in
+    t3code) fm_backend_t3code_agent_stop "$1" ;;
+    *) echo "error: backend '$backend' stops an agent through its harness exit command, not a native stop" >&2; return 1 ;;
+  esac
+}
+
 fm_backend_remove_worktree() {  # <backend> <worktree-id>
   local backend=$1
   shift
@@ -1099,9 +1131,10 @@ fm_backend_agent_alive() {  # <backend> <target>
 # and for those backends replaces its blind `sleep POLL` with a bounded wait on
 # fm_backend_wait_transition. Every push-capable backend reuses the shared
 # normalized-transition shape and policy table (bin/fm-transition-lib.sh); today
-# herdr implements the surface (see its backend guide). T3 Code has no push
-# here: its `/mcp` credential is refused on T3's WebSocket stream, so T3
-# windows stay on the poll loop.
+# herdr and t3code implement the surface (see their backend guides). T3's
+# `/mcp` credential is refused on its WebSocket stream, so the t3code push is a
+# bounded t3_thread_wait on every active run plus a pending-request read on
+# running threads (bin/backends/t3code.sh).
 # A backend with no native push
 # reports has-push false and returns 2 from the dispatchers below, so the
 # watcher falls back to its poll loop - the permanent fail-closed backstop.
@@ -1109,7 +1142,7 @@ fm_backend_agent_alive() {  # <backend> <target>
 # fm_backend_has_push: 0 if <backend> exposes a native transition push stream.
 fm_backend_has_push() {  # <backend>
   case "$1" in
-    herdr) return 0 ;;
+    herdr|t3code) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1125,6 +1158,7 @@ fm_backend_events_capable() {  # <backend> <session>
   fm_backend_source "$backend" || return 1
   case "$backend" in
     herdr) fm_backend_herdr_events_capable "$@" ;;
+    t3code) fm_backend_t3code_events_capable "$@" ;;
     *) return 1 ;;
   esac
 }
@@ -1142,6 +1176,7 @@ fm_backend_wait_transition() {  # <backend> <session> <timeout_secs> <state_dir>
   fm_backend_source "$backend" || return 2
   case "$backend" in
     herdr) fm_backend_herdr_wait_transition "$@" ;;
+    t3code) fm_backend_t3code_wait_transition "$@" ;;
     *) return 2 ;;
   esac
 }
@@ -1153,6 +1188,7 @@ fm_backend_commit_transition() {  # <backend> <state_dir> <session> <record>
   fm_backend_source "$backend" || return 1
   case "$backend" in
     herdr) fm_backend_herdr_commit_transition "$@" ;;
+    t3code) fm_backend_t3code_commit_transition "$@" ;;
     *) return 1 ;;
   esac
 }
@@ -1164,17 +1200,19 @@ fm_backend_clear_transition() {  # <backend> <state_dir> <window>
   fm_backend_source "$backend" || return 1
   case "$backend" in
     herdr) fm_backend_herdr_clear_transition "$@" ;;
+    t3code) fm_backend_t3code_clear_transition "$@" ;;
     *) return 0 ;;
   esac
 }
 
-# Event connection grouping and record identity: pane backends use session:id.
+# Event connection grouping and record identity differ from pane target syntax.
+# T3 uses one configured server for all threads; pane backends retain session:id.
 fm_backend_event_session() {  # <backend> <target>
-  printf '%s' "${2%%:*}"
+  case "$1" in t3code) printf 'server' ;; *) printf '%s' "${2%%:*}" ;; esac
 }
 
 fm_backend_transition_target() {  # <backend> <session> <endpoint-id>
-  printf '%s:%s' "$2" "$3"
+  case "$1" in t3code) printf '%s' "$3" ;; *) printf '%s:%s' "$2" "$3" ;; esac
 }
 
 # Early spawn checks for API-owned sessions. Other backends keep their

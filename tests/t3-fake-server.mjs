@@ -16,7 +16,8 @@
 //   tools (array of names; default all), revoked (every /mcp call is 401),
 //   sse (SSE replies), expiresIn (seconds), bindWorktree, bindInstance,
 //   bindRuntimeMode (override what a launch binds), archiveKeepsRun,
-//   waitTimesOut, failTools ({name: {code, message}}), dropTools ({name:
+//   waitTimesOut, waitEnds (a t3_thread_wait on an active run ends it with
+//   this status), failTools ({name: {code, message}}), dropTools ({name:
 //   count}: close the connection without a reply that many times), probePath
 //   (each log line records whether it exists), projects ([{id, title,
 //   workspaceRoot, defaultModelSelection, deletedAt}]), threads ({id: detail
@@ -32,7 +33,8 @@ for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].slice(2)] 
 
 const ALL_TOOLS = [
   "t3_thread_launch", "t3_thread_send", "t3_thread_read", "t3_thread_wait", "t3_thread_interrupt",
-  "t3_thread_organize", "t3_thread_list", "t3_project_list", "t3_project_create", "t3_environment_read",
+  "t3_thread_organize", "t3_thread_list", "t3_thread_configure", "t3_project_list", "t3_project_create",
+  "t3_environment_read",
 ];
 const ACTIVE = new Set(["preparing", "queued", "starting", "running", "waiting"]);
 
@@ -81,6 +83,7 @@ function startRun(t, text) {
   t.runs = t.runs ?? [];
   t.runs.unshift({ runId, ordinal: t.runs.length + 1, status: "running", requestedAt: now(), startedAt: now(), completedAt: null });
   t.activeRunId = runId;
+  t.latestRunId = runId;
   t.status = "running";
   t.items = t.items ?? [];
   t.items.push({ type: "user_message", status: "completed", text });
@@ -161,6 +164,11 @@ function callTool(w, name, a) {
     }
     case "t3_thread_wait": {
       if (!t) return [notFound(a.threadId), false];
+      if (w.waitEnds && t.activeRunId && !w.waitTimesOut) {
+        const runId = t.activeRunId;
+        endRun(t, w.waitEnds);
+        return [ok({ threadId: t.threadId, runId, status: t.status, timedOut: false }), true];
+      }
       return [ok({ threadId: t.threadId, runId: t.activeRunId ?? null, status: t.status, timedOut: Boolean(w.waitTimesOut) }), false];
     }
     case "t3_thread_interrupt": {
@@ -176,7 +184,18 @@ function callTool(w, name, a) {
         t.archived = true;
         if (!w.archiveKeepsRun && t.activeRunId) endRun(t, "interrupted");
       }
+      if (a.action === "unarchive") t.archived = false;
       return [ok({ threadId: t.threadId, action: a.action }), true];
+    }
+    case "t3_thread_configure": {
+      if (!t) return [notFound(a.threadId), false];
+      const sel = a.modelSelection ?? {};
+      if ((t.runs ?? []).length && sel.instanceId && sel.instanceId !== t.providerInstanceId) {
+        return [err("invalid_request", `Thread ${a.threadId} is bound to driver '${t.providerInstanceId}' and cannot switch to '${sel.instanceId}'.`), false];
+      }
+      if (sel.instanceId) t.providerInstanceId = sel.instanceId;
+      t.model = sel.model;
+      return [ok({ sequence: 1 }), true];
     }
     default:
       return [err("unknown_tool", `no tool ${name}`), false];
