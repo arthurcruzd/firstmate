@@ -1,0 +1,32 @@
+Live product drive of bin/fm-watch-arm.sh --take-over in marked fm-lab homes
+Reproduction: SIGSTOP holds TERM past the five-second wait (portable stand-in
+for stock macOS bash 3.2 holding TERM until a command substitution exits).
+
+=== Scenario: late-TERM take-over restores acknowledged episode ===
+-- take-over stdout --
+watcher: attached pid=3982206 (beacon 7s)
+watcher: started pid=3986537 (beacon fresh)
+-- .watcher-down before/after (same acked generation; no downtime) --
+before: acked:handling:3982759.1791505590.QSvJ8N
+after:  acked:handling:3982759.1791505590.QSvJ8N
+-- cycle ledger (TERM then taken-over -> started successor) --
+arm_pid=3982183	watcher_pid=3982206	origin=started	exit_code=143	signal=TERM	reason=signal-exit	beacon_age=7	successor=none
+arm_pid=3984411	watcher_pid=3982206	origin=attached	exit_code=unknown	signal=unknown	reason=taken-over	beacon_age=7	successor=started:3986537
+
+=== Scenario: held watcher killed by another signal resurfaces ===
+-- take-over stdout --
+watcher: attached pid=3988066 (beacon 7s)
+watcher: started pid=3991191 (beacon fresh)
+check: rearm-resurface
+
+=== Scenario: prompt-TERM take-over stays quiet ===
+-- take-over stdout --
+watcher: started pid=3994043 (beacon fresh)
+-- .watcher-down before/after --
+before: acked:handling:3992515.1791505615.xKZC6A
+after:  acked:handling:3992515.1791505615.xKZC6A
+
+=== Focused regression (tests/fm-watch-arm.test.sh take-over cases) ===
+ok - watch-arm: --take-over owns a fresh cycle without a recovery wake and still surfaces queued work
+ok - watch-arm: takeover preserves self-exit downtime and surfaces a recovery wake
+ok - watch-arm: --take-over restores a stop whose TERM lands late and still resurfaces a genuine outage

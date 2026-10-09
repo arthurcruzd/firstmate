@@ -1,0 +1,3 @@
+PASS late-term-restore: followed held TERM, restored acked episode, no rearm-resurface; down=acked:handling:3982759.1791505590.QSvJ8N
+PASS late-term-genuine-outage: genuine outage (KILL while held) resurfaced as check: rearm-resurface
+PASS prompt-term-restore: prompt TERM restored acked episode, no rearm-resurface; down=acked:handling:3992515.1791505615.xKZC6A
