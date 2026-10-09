@@ -980,7 +980,7 @@ fi
 
 spawn_remote_secondmate() {
   local id=$1 remote host root home harness positional model effort backend out rc meta tmp
-  local remote_backend remote_target remote_harness remote_herdr_session registry_lock remote_lock remote_generation
+  local remote_backend remote_target remote_harness remote_herdr_session registry_lock remote_lock remote_generation endpoint
   local remote_traceparent remote_recorded_traceparent sm_primary_head sync_out sync_rc
   local -a launch_args
   id=${POS[0]:-}
@@ -1047,19 +1047,33 @@ spawn_remote_secondmate() {
       [ -n "$effort" ] || effort=-
     fi
   fi
-  # A remote second mate always runs on Herdr: its server belongs to the host's
-  # own GUI login session, so the endpoint outlives every SSH connection that
-  # supervises it. bin/fm-remote-doctor.sh gates that host on the same
-  # requirement, and the remote home's config/backend never overrides it.
+  # The route's registry endpoint names the runtime hosting the second-mate
+  # agent on its host: Herdr's fm-remote session (the default) or that host's
+  # own T3 server. Either outlives every SSH connection that supervises it,
+  # bin/fm-remote-doctor.sh gates the host on the matching readiness set, and
+  # the remote home's config/backend never overrides it. An explicit --backend
+  # must agree with the route; moving a mate is bin/fm-remote-secondmate-move.sh.
+  endpoint=$(secondmate_registry_field "$DATA/secondmates.md" "$id" endpoint)
   case "${BACKEND_ARG:--}" in
-  - | herdr) backend=herdr ;;
+  - | "$endpoint") backend=$endpoint ;;
   *)
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
-    echo "error: a remote secondmate runs only on the herdr backend, not '$BACKEND_ARG'" >&2
+    echo "error: remote secondmate $id runs on its route's '$endpoint' endpoint, not '$BACKEND_ARG'; move it with bin/fm-remote-secondmate-move.sh" >&2
     return 1
     ;;
   esac
+  if [ "$backend" = t3code ]; then
+    case "$harness" in
+    claude | codex) ;;
+    *)
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: remote secondmate $id runs on its host's T3 server, which runs only the claude and codex harnesses, not '$harness'" >&2
+      return 1
+      ;;
+    esac
+  fi
   case "$effort" in
   - | low | medium | high | xhigh | max | ultra) ;;
   *)
@@ -1185,11 +1199,11 @@ spawn_remote_secondmate() {
   remote_target=$(printf '%s\n' "$out" | sed -n 's/^target=//p' | tail -1)
   remote_harness=$(printf '%s\n' "$out" | sed -n 's/^harness=//p' | tail -1)
   remote_herdr_session=$(printf '%s\n' "$out" | sed -n 's/^herdr_session=//p' | tail -1)
-  if [ "$remote_backend" != herdr ]; then
+  if [ "$remote_backend" != "$backend" ]; then
     fm_lock_release "$remote_lock" || true
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
-    echo "error: remote launch returned backend '${remote_backend:-missing}', expected herdr; preserving the remote route for reconciliation" >&2
+    echo "error: remote launch returned backend '${remote_backend:-missing}', expected $backend; preserving the remote route for reconciliation" >&2
     return 1
   fi
   [ -n "$remote_target" ] && [ "$remote_harness" = "$harness" ] || {
@@ -1199,7 +1213,18 @@ spawn_remote_secondmate() {
     echo "error: remote launch returned malformed route metadata; preserving the remote route for reconciliation" >&2
     return 1
   }
-  if [ "$remote_herdr_session" != fm-remote ] || [ "${remote_target%%:*}" != "$remote_herdr_session" ]; then
+  if [ "$backend" = t3code ]; then
+    case "$remote_target" in
+    mcp:?*) ;;
+    *)
+      fm_lock_release "$remote_lock" || true
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: remote launch returned T3 target '$remote_target', which is not a thread id; preserving the remote route for reconciliation" >&2
+      return 1
+      ;;
+    esac
+  elif [ "$remote_herdr_session" != fm-remote ] || [ "${remote_target%%:*}" != "$remote_herdr_session" ]; then
     fm_lock_release "$remote_lock" || true
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
@@ -1232,7 +1257,7 @@ spawn_remote_secondmate() {
     echo "remote_host=$host"
     echo "remote_root=$root"
     echo "remote_backend=$remote_backend"
-    echo "remote_herdr_session=$remote_herdr_session"
+    [ -z "$remote_herdr_session" ] || echo "remote_herdr_session=$remote_herdr_session"
     echo "remote_target=$remote_target"
     [ -z "$remote_recorded_traceparent" ] || echo "traceparent=$remote_recorded_traceparent"
   } >"$tmp"
@@ -4169,8 +4194,11 @@ EOF
     if [ "$KIND" = secondmate ]; then
       # The home's own daemon and crew call the same server, so they read the
       # primary's credential through a link rather than a copy of the secret.
-      if ! { mkdir -p "$PROJ_ABS/config" &&
-        ln -sfn "$(cd "$CONFIG" && pwd -P)/t3code-token" "$PROJ_ABS/config/t3code-token"; }; then
+      # A remote host's launch reads the home's OWN config (bin/fm-remote-
+      # secondmate-control.sh), whose credential is already that file: linking
+      # it to itself would replace the secret with a dangling self-link.
+      if [ "$(cd "$CONFIG" && pwd -P)" != "$(mkdir -p "$PROJ_ABS/config" && cd "$PROJ_ABS/config" && pwd -P)" ] &&
+        ! ln -sfn "$(cd "$CONFIG" && pwd -P)/t3code-token" "$PROJ_ABS/config/t3code-token"; then
         echo "error: could not link the T3 credential into $PROJ_ABS/config for $ID" >&2
         exit 1
       fi
@@ -4194,6 +4222,15 @@ EOF
       [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
       T3CODE_LEASED=1
       validate_spawn_worktree "treehouse get --lease" "$W"
+      # T3 binds a thread only to a linked worktree of the project root it was
+      # registered with. Treehouse keys pools by repository identity, so two
+      # homes cloning the same remote can share one pool whose slots belong to
+      # the other home's clone; never bind this task to another home's clone.
+      T3CODE_SLOT_ROOT=$(git -C "$WT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+      if [ -z "$T3CODE_SLOT_ROOT" ] || [ "$(cd "$T3CODE_SLOT_ROOT" 2>/dev/null && pwd -P)" != "$(cd "$PROJ_ABS" && pwd -P)" ]; then
+        echo "error: Treehouse slot $WT belongs to ${T3CODE_SLOT_ROOT:-an unknown repository}, not $PROJ_ABS; T3 would refuse it, and it may be another home's pool. Give this home's clone its own pool root (root= in a git-excluded treehouse.toml, docs/t3code-backend.md)" >&2
+        exit 1
+      fi
       T3CODE_CREATE_UNCERTAIN=1
       T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
         "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$WT" "$T3CODE_MODEL_SELECTION") || {
@@ -5756,6 +5793,16 @@ if [ "$BACKEND" = t3code ]; then
     T3CODE_ENV+=(FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= \
       "FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$FM_HOME" "FM_HOME=$PROJ_ABS" "FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE" \
       "FM_SUPERVISION_MODEL=$supervision_model" FM_SUPERVISOR_BACKEND=t3code "FM_SUPERVISOR_TARGET=$T")
+    # A remote host's launch of a T3-hosted mate sends that mate's own workers
+    # to the same server (bin/fm-remote-secondmate-control.sh).
+    case "${FM_SPAWN_SECONDMATE_CREW_BACKEND:-}" in
+    '') ;;
+    t3code) T3CODE_ENV+=(FM_BACKEND=t3code) ;;
+    *)
+      echo "error: unsupported FM_SPAWN_SECONDMATE_CREW_BACKEND '$FM_SPAWN_SECONDMATE_CREW_BACKEND'" >&2
+      exit 1
+      ;;
+    esac
   fi
   spawn_t3code_env_install "$HARNESS" "${T3CODE_ENV[@]}" || {
     echo "error: could not write the $HARNESS environment config for $ID into $WT" >&2

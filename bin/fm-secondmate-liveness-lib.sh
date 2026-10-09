@@ -36,7 +36,8 @@
 # Modes:
 #   full - session-start sweep: remote routes run the full readiness repair
 #          sequence before probing, and an alive remote route is revalidated
-#          (route readable, backend herdr) so the sweep reports drift.
+#          (route readable, backend the one its launch recorded) so the sweep
+#          reports drift.
 #   poll - watcher tick: remote routes take one read-only state probe per
 #          check; repair still happens, but inside fm-spawn's launch gate only
 #          when a relaunch is actually authorized.
@@ -133,7 +134,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   local meta=$1 id=$2 mode=$3
   FM_SM_LIVE_STATUS=skipped FM_SM_LIVE_STATE=unknown FM_SM_LIVE_KILL=0
   FM_SM_LIVE_CAUSE='' FM_SM_LIVE_WHERE='' FM_SM_LIVE_REASON='' FM_SM_LIVE_LINE=''
-  local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend
+  local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend expected_backend
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] || { FM_SM_LIVE_STATUS=silent; return 0; }
   harness=$(fm_meta_get "$meta" harness)
@@ -187,7 +188,10 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
             return 0
           fi
           remote_backend=$(printf '%s\n' "$route_out" | sed -n 's/^backend=//p' | tail -1)
-          if [ "$remote_backend" != herdr ]; then
+          # The backend this parent recorded at launch, from its route's
+          # registry endpoint (herdr for a record that predates the field).
+          expected_backend=$(fm_meta_get "$meta" remote_backend)
+          if [ "$remote_backend" != "${expected_backend:-herdr}" ]; then
             FM_SM_LIVE_REASON="alive remote endpoint is recorded on backend '${remote_backend:-missing}'; migrate or retire it explicitly"
             return 0
           fi

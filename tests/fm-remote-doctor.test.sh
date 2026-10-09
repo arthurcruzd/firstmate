@@ -887,3 +887,57 @@ assert_contains "$DOCTOR_OUT" 'check entrypoint-link=human:' "an operator-owned 
 unset FM_ROOT_OVERRIDE
 pass "the entrypoint symlink is recreated when absent and never overwritten when operator-owned"
 
+
+# --- a T3-hosted route needs no herdr, only node and a signed-in home --------
+
+new_case Darwin no-herdr gui
+cat > "$CASE_BIN/node" <<'SH'
+#!/usr/bin/env bash
+# Stands in for node running bin/fm-t3-mcp.mjs status: the capability gate's
+# verdict is the fixture's, so only the doctor's delegation is under test.
+[ "${FM_FAKE_T3_GATE:-refuse}" = pass ] && exit 0
+echo "error: T3 refused the credential" >&2
+exit 4
+SH
+chmod +x "$CASE_BIN/node"
+printf 't3mate\n' > "$CASE_PROJECT_HOME/.fm-secondmate-home"
+doctor --endpoint t3code
+expect_code 1 "$DOCTOR_RC" "a T3 home with no credential was reported ready"
+assert_contains "$DOCTOR_OUT" 'endpoint=t3code' "the doctor did not report its endpoint"
+assert_contains "$DOCTOR_OUT" "required node=$CASE_BIN/node" "node was not a required tool for a T3 route"
+assert_not_contains "$DOCTOR_OUT" 'required herdr' "a T3 route still required herdr"
+assert_not_contains "$DOCTOR_OUT" 'check herdr' "a T3 route still checked herdr"
+assert_not_contains "$DOCTOR_OUT" 'check launchagent' "a T3 route still checked the herdr launch agent"
+assert_contains "$DOCTOR_OUT" 'check t3-credential=human:' "a missing T3 credential was not a human gap"
+assert_contains "$DOCTOR_OUT" 'action: t3-credential:' "a missing T3 credential came with no sign-in step"
+assert_contains "$DOCTOR_OUT" 'check relay-manager=ok:' "an Aqua session did not satisfy the relay manager"
+mkdir -p "$CASE_PROJECT_HOME/config"
+printf '{}\n' > "$CASE_PROJECT_HOME/config/t3code-token"
+doctor --endpoint t3code
+assert_contains "$DOCTOR_OUT" 'check t3-credential=human:' "a refused T3 credential was not a human gap"
+assert_contains "$DOCTOR_OUT" 'T3 refused the credential' "the gate's own reason was not reported"
+export FM_FAKE_T3_GATE=pass
+doctor --endpoint t3code --fix
+unset FM_FAKE_T3_GATE
+expect_code 0 "$DOCTOR_RC" "--fix left a ready T3 host unready"
+assert_contains "$DOCTOR_OUT" 'check t3-credential=ok:' "a passing T3 credential was not confirmed"
+assert_absent "$CASE_PLIST" "--fix installed the herdr launch agent for a T3 route"
+assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" "$LABEL" "--fix touched the herdr launch agent for a T3 route"
+pass "a T3-hosted route is gated on node and the home's credential, never on herdr"
+
+# --- an isolated job state root never touches the account's own worker -------
+
+new_case Darwin with-herdr gui
+export FM_REMOTE_JOB_STATE_ROOT="$CASE_DIR/isolated-jobs"
+ISOLATED_LABEL="$JOB_LABEL.$(printf '%s' "$FM_REMOTE_JOB_STATE_ROOT" | cksum | awk '{print $1}')"
+FM_ROOT_OVERRIDE="$ROOT" doctor --fix
+assert_contains "$DOCTOR_OUT" 'check entrypoint-link=skip:' "an isolated root claimed the account's entrypoint link"
+assert_absent "$CASE_HOME/.local/bin/fm-remote-entrypoint.sh" "an isolated root created the account's entrypoint link"
+assert_absent "$CASE_JOB_PLIST" "an isolated root wrote the account's own worker agent"
+assert_present "$CASE_HOME/Library/LaunchAgents/$ISOLATED_LABEL.plist" "an isolated root did not get its own worker agent"
+[ "$(plist_value "$CASE_HOME/Library/LaunchAgents/$ISOLATED_LABEL.plist" Label)" = "$ISOLATED_LABEL" ] \
+  || fail "the isolated worker agent does not carry its own label"
+assert_grep "$FM_REMOTE_JOB_STATE_ROOT" "$CASE_HOME/Library/LaunchAgents/$ISOLATED_LABEL.plist" \
+  "the isolated worker agent does not carry its state root"
+unset FM_REMOTE_JOB_STATE_ROOT
+pass "an isolated job state root gets its own worker agent and leaves the account's alone"

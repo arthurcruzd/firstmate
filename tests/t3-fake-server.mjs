@@ -75,7 +75,7 @@ const now = () => new Date().toISOString();
 
 function detail(t) {
   const { items, runs, ...rest } = t;
-  return rest;
+  return { ...rest, itemCount: (items ?? []).length };
 }
 
 function startRun(t, text) {
@@ -152,8 +152,11 @@ function callTool(w, name, a) {
     }
     case "t3_thread_read": {
       if (!t) return [notFound(a.threadId), false];
-      const items = (t.items ?? []).slice(-(a.limit ?? 100));
-      return [ok({ thread: detail(t), recentRuns: (t.runs ?? []).slice(0, a.runLimit ?? 5), items, nextPosition: null, hasMore: false }), false];
+      // Like T3, the activity timeline pages oldest first from afterPosition.
+      const all = (t.items ?? []).map((it, position) => ({ position, ...it }));
+      const items = all.filter((it) => a.afterPosition == null || it.position > a.afterPosition).slice(0, a.limit ?? 100);
+      const last = items.at(-1)?.position ?? null;
+      return [ok({ thread: detail(t), recentRuns: (t.runs ?? []).slice(0, a.runLimit ?? 5), items, nextPosition: last, hasMore: last !== null && last < all.length - 1 }), false];
     }
     case "t3_thread_list": {
       const wanted = a.statuses ? new Set(a.statuses) : null;

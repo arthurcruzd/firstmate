@@ -2,26 +2,41 @@
 # Host-local lifecycle control for the remote secondmate home selected by fm-on.
 #
 # Usage:
-#   fm-remote-secondmate-control.sh launch <id> <harness> <model|-> <effort|-> herdr [traceparent]
+#   fm-remote-secondmate-control.sh launch <id> <harness> <model|-> <effort|-> herdr|t3code [traceparent]
 #   fm-remote-secondmate-control.sh relaunch <id> <harness> <model|default|-> <effort|default|->
 #   fm-remote-secondmate-control.sh state <id>
 #   fm-remote-secondmate-control.sh route <id>
 #   fm-remote-secondmate-control.sh send <id> <message> [fire-and-forget]
 #   fm-remote-secondmate-control.sh key <id> <key>
+#   fm-remote-secondmate-control.sh interrupt <id>
 #   fm-remote-secondmate-control.sh capture <id> [lines]
 #   fm-remote-secondmate-control.sh observe <id>
 #   fm-remote-secondmate-control.sh sync <id> [<parent-commit>]
 #   fm-remote-secondmate-control.sh update <id>
+#   fm-remote-secondmate-control.sh release <id>
 #   fm-remote-secondmate-control.sh retire <id> [--force]
 #
-# Remote placement ends here, but the second-mate agent always runs on the
-# Herdr backend in the dedicated fm-remote session, so launch refuses any other
-# selection rather than reading this home's config/backend. The interactive
-# default session remains for the user's work.
+# Remote placement ends here. The parent selects the runtime that hosts the
+# second-mate agent from its route's registry endpoint, never from this home's
+# config/backend, and launch accepts exactly two:
+#   herdr   the dedicated fm-remote Herdr session; the interactive default
+#           session remains for the user's work.
+#   t3code  a thread on this host's own T3 Code server, signed in with this
+#           home's own config/t3code-token. Launch also records the thread as
+#           the home's T3 host thread and installs the home's wake relay
+#           (bin/fm-t3-host.sh install), which owns the mate's watcher outside
+#           the session so supervision survives T3 unloading an idle mate, and
+#           the mate's own workers launch as T3 threads on this server.
 # fm-spawn/fm-send/fm-teardown keep owning the local endpoint mechanics.
-# The home's own workers keep their ordinary backend selection.
-# bin/fm-remote-doctor.sh owns that host's readiness for Herdr.
+# A Herdr-hosted mate's own workers keep their ordinary backend selection.
+# bin/fm-remote-doctor.sh owns that host's readiness for either endpoint.
 # docs/remote-secondmates.md owns why.
+#
+# interrupt runs the ordinary control plane's interrupt here and prints its
+# verdict, so a T3-hosted mate reports T3's own cancel claim. release closes
+# the recorded endpoint of an idle mate and sets its record aside, so the parent
+# can move the mate to the other endpoint (bin/fm-remote-secondmate-move.sh);
+# the home, its steering inbox, and its work are untouched.
 #
 # With <parent-commit>, sync follows the PARENT PRIMARY's default-branch commit,
 # which the parent resolves on its own checkout and passes in, so a remote home
@@ -69,9 +84,11 @@ REMOTE_HERDR_SESSION=fm-remote
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-task-inbox-lib.sh
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$SCRIPT_DIR/fm-t3-host-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,/^# With <parent-commit>/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 2; }
 validate_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $1" ;; esac; }
 
 validate_home() { # <id> [allow-absent]
@@ -97,10 +114,21 @@ remote_endpoint_load() {
   fi
   REMOTE_ENDPOINT_BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   REMOTE_ENDPOINT_TARGET=$FM_BACKEND_VALIDATED_TARGET
-  if [ "$REMOTE_ENDPOINT_BACKEND" != herdr ]; then
-    REMOTE_ENDPOINT_ERROR="remote secondmate $id endpoint is recorded on backend '$REMOTE_ENDPOINT_BACKEND', expected 'herdr'; refusing access until it is explicitly migrated"
-    return 1
-  fi
+  case "$REMOTE_ENDPOINT_BACKEND" in
+    herdr) ;;
+    t3code)
+      # The thread id T3 assigned at launch; there is no session to confine.
+      case "$REMOTE_ENDPOINT_TARGET" in
+        mcp:?*) return 0 ;;
+      esac
+      REMOTE_ENDPOINT_ERROR="remote secondmate $id endpoint target '$REMOTE_ENDPOINT_TARGET' is not a T3 thread id; refusing access until it is explicitly migrated"
+      return 1
+      ;;
+    *)
+      REMOTE_ENDPOINT_ERROR="remote secondmate $id endpoint is recorded on backend '$REMOTE_ENDPOINT_BACKEND', expected 'herdr' or 't3code'; refusing access until it is explicitly migrated"
+      return 1
+      ;;
+  esac
   herdr_session=$(fm_backend_meta_exact_value "$REMOTE_ENDPOINT_META" herdr_session 2>/dev/null || true)
   if [ "$herdr_session" != "$REMOTE_HERDR_SESSION" ]; then
     REMOTE_ENDPOINT_ERROR="remote secondmate $id endpoint is recorded in Herdr session '${herdr_session:-missing}', expected '$REMOTE_HERDR_SESSION'; refusing access until it is explicitly migrated"
@@ -141,7 +169,7 @@ print_route() { # <id>
   printf 'schema=fm-remote-secondmate-control.v1\n'
   printf 'backend=%s\n' "$REMOTE_ENDPOINT_BACKEND"
   printf 'target=%s\n' "$REMOTE_ENDPOINT_TARGET"
-  printf 'herdr_session=%s\n' "$REMOTE_HERDR_SESSION"
+  [ "$REMOTE_ENDPOINT_BACKEND" != herdr ] || printf 'herdr_session=%s\n' "$REMOTE_HERDR_SESSION"
   printf 'harness=%s\n' "$harness"
   printf 'model=%s\n' "$model"
   printf 'effort=%s\n' "$effort"
@@ -173,14 +201,26 @@ cmd_launch() {
   if [ "$effort" = ultra ]; then
     "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$harness" "$model" "$effort" || return 1
   fi
-  # Herdr is required on this host, not merely preferred: its server belongs to
-  # the GUI login session, so the endpoint survives every SSH disconnection that
-  # a remote route depends on. bin/fm-remote-doctor.sh is the readiness owner.
-  case "$selected_backend" in herdr) ;; *) die "a remote secondmate runs only on the herdr backend, not '$selected_backend'" ;; esac
+  # Both endpoints outlive every SSH disconnection a remote route depends on:
+  # Herdr's server belongs to the GUI login session, and this host's T3 server
+  # is a user service that owns its threads. bin/fm-remote-doctor.sh is the
+  # readiness owner for each.
+  case "$selected_backend" in
+    herdr) ;;
+    t3code)
+      case "$harness" in claude|codex) ;; *) die "a T3-hosted remote secondmate runs only the claude or codex harness, not '$harness'" ;; esac
+      [ -f "$TARGET_HOME/bin/fm-t3-host.sh" ] \
+        || die "remote home's Firstmate checkout predates the T3 wake relay; sync it to a commit that has bin/fm-t3-host.sh first"
+      ;;
+    *) die "a remote secondmate runs only on the herdr or t3code backend, not '$selected_backend'" ;;
+  esac
   mkdir -p "$CONTROL_STATE" "$CONTROL_DATA"
   meta=$(meta_path "$id")
   if [ -f "$meta" ]; then
     remote_endpoint_require "$id"
+    if [ "$REMOTE_ENDPOINT_BACKEND" != "$selected_backend" ]; then
+      die "remote secondmate $id endpoint is recorded on backend '$REMOTE_ENDPOINT_BACKEND', not '$selected_backend'; move it with bin/fm-remote-secondmate-move.sh, which releases the old endpoint first"
+    fi
     current=$(fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null || printf 'unreadable\n')
     case "$current" in
       alive)
@@ -203,19 +243,77 @@ cmd_launch() {
   [ "$model" = - ] || ARGS+=(--model "$model")
   [ "$effort" = - ] || ARGS+=(--effort "$effort")
   [ -z "$traceparent" ] || ARGS+=(--traceparent "$traceparent")
+  # A T3-hosted mate's own workers are T3 threads on this same server, whatever
+  # backend default the parent's inherited config/backend names, so the spawn
+  # writes FM_BACKEND=t3code into the mate thread's environment.
   if ! out=$(HERDR_SESSION="$REMOTE_HERDR_SESSION" FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
     FM_STATE_OVERRIDE="$CONTROL_STATE" FM_DATA_OVERRIDE="$CONTROL_DATA" \
     FM_CONFIG_OVERRIDE="$TARGET_HOME/config" FM_SKIP_SECONDMATE_INHERIT=1 \
     FM_SKIP_SECONDMATE_SYNC=1 \
+    FM_SPAWN_SECONDMATE_CREW_BACKEND="$([ "$selected_backend" != t3code ] || printf t3code)" \
     "$SCRIPT_DIR/fm-spawn.sh" "${ARGS[@]}" 2>&1); then
     [ -z "$out" ] || printf '%s\n' "$out" >&2
     die "remote host-local secondmate launch failed"
   fi
   [ -f "$meta" ] || die "remote launch returned without endpoint metadata"
-  herdr_session=$(fm_meta_get "$meta" herdr_session)
-  [ "$herdr_session" = "$REMOTE_HERDR_SESSION" ] \
-    || die "remote launch recorded Herdr session '${herdr_session:-missing}', expected '$REMOTE_HERDR_SESSION'"
+  if [ "$selected_backend" = herdr ]; then
+    herdr_session=$(fm_meta_get "$meta" herdr_session)
+    [ "$herdr_session" = "$REMOTE_HERDR_SESSION" ] \
+      || die "remote launch recorded Herdr session '${herdr_session:-missing}', expected '$REMOTE_HERDR_SESSION'"
+  else
+    t3_host_attach "$id"
+  fi
   print_route "$id"
+}
+
+# The home's own bin/fm-t3-host.sh, with the job's code-root overrides cleared
+# so it resolves the home as its checkout, exactly as the mate thread does.
+t3_host() { # <verb> [args...]
+  FM_HOME="$TARGET_HOME" FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_DATA_OVERRIDE='' \
+    "$TARGET_HOME/bin/fm-t3-host.sh" "$@"
+}
+
+# Record the launched thread as the home's T3 host thread and (re)install the
+# home's wake relay, which owns the mate's watcher outside the session and
+# reopens an unloaded mate with each wake. A failure here leaves the endpoint
+# launched but unsupervised across an idle unload, so it fails the launch for
+# the parent to report rather than claiming a whole route.
+t3_host_attach() { # <id>
+  local id=$1
+  remote_endpoint_require "$id"
+  t3_host adopt --thread "$REMOTE_ENDPOINT_TARGET" >/dev/null \
+    || die "remote secondmate $id launched as T3 thread $REMOTE_ENDPOINT_TARGET, but the home could not record it as its T3 host thread"
+  t3_host install >/dev/null \
+    || die "remote secondmate $id launched as T3 thread $REMOTE_ENDPOINT_TARGET, but its wake relay service could not be installed"
+}
+
+# A T3 launch writes the mate's environment into the home itself (the env block
+# of .claude/settings.local.json, or the Codex overlay), because T3 sets no
+# per-thread environment. An agent launched in the home on another endpoint
+# would read it too - FM_BACKEND=t3code and a dead thread as its supervisor -
+# so release removes exactly that and keeps every other local setting, and the
+# home's T3 host record goes with the thread it named.
+t3_env_remove() {
+  local settings="$TARGET_HOME/.claude/settings.local.json"
+  if [ -f "$settings" ]; then
+    node -e '
+const fs = require("fs");
+const file = process.argv[1];
+const data = JSON.parse(fs.readFileSync(file, "utf8"));
+delete data.env;
+if (Object.keys(data).length === 0) fs.unlinkSync(file);
+else fs.writeFileSync(file, JSON.stringify(data) + "\n");
+' "$settings" || return 1
+  fi
+  "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$TARGET_HOME" || return 1
+  rm -f "$TARGET_HOME/state/.t3-host"
+}
+
+# The T3 relay service a home installs is named for the home, so the code
+# root's own copy can remove it even after retirement removed the home.
+t3_relay_uninstall() {
+  FM_HOME="$TARGET_HOME" FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_DATA_OVERRIDE='' \
+    "$SCRIPT_DIR/fm-t3-host.sh" uninstall >/dev/null 2>&1
 }
 
 # Restart the second-mate agent this host runs, by executing the ORDINARY local
@@ -303,6 +401,13 @@ cmd_send() {
       return 0
       ;;
   esac
+  # A T3 doorbell reopens a mate session T3 unloaded while idle, and a reopened
+  # session runs no SessionStart hooks, so tell it first. Best-effort like the
+  # ring itself: the record is already durable.
+  if [ "$REMOTE_ENDPOINT_BACKEND" = t3code ] && ! fm_t3_session_holder_alive "$TARGET_HOME/state"; then
+    fm_backend_send_text_submit "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" \
+      "$FM_T3_REOPENED_SESSION_HINT" 2 0.4 0.3 "fm-$id" >/dev/null 2>&1 || true
+  fi
   fm_task_inbox_ring "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$rec" "fm-$id" || ring_rc=$?
   case "$ring_rc" in
     1) printf 'notice: doorbell skipped (composer visibly holds pending text); the steer is durably recorded at %s\n' "$rec" >&2 ;;
@@ -318,6 +423,55 @@ cmd_key() {
   remote_endpoint_require "$id"
   FM_HOME="$TARGET_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_STATE_OVERRIDE="$TARGET_HOME/state" \
     "$SCRIPT_DIR/fm-send.sh" "$REMOTE_ENDPOINT_TARGET" --key "$key"
+}
+
+# The ordinary control plane's interrupt, run here where the endpoint lives:
+# from this host the mate is a plain local secondmate (cmd_relaunch explains
+# why), so the plane's own verification and verdict apply unchanged.
+cmd_interrupt() {
+  local id=$1
+  validate_id "$id"
+  validate_home "$id"
+  remote_endpoint_require "$id"
+  FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
+    FM_STATE_OVERRIDE="$CONTROL_STATE" FM_DATA_OVERRIDE="$CONTROL_DATA" \
+    FM_CONFIG_OVERRIDE="$TARGET_HOME/config" \
+    "$SCRIPT_DIR/fm-control.sh" "$id" interrupt
+}
+
+# Close the recorded endpoint of an idle mate and set its record aside, so the
+# next launch may use the other endpoint. Refused while the agent is busy or its
+# state cannot be read, because closing it would cut a turn short; the home,
+# its steering inbox, and its work are untouched, so a pending steer is read by
+# whichever endpoint launches next.
+cmd_release() {
+  local id=$1 meta busy agent stamp
+  validate_id "$id"
+  validate_home "$id"
+  meta=$(meta_path "$id")
+  if [ ! -f "$meta" ] && [ ! -L "$meta" ]; then
+    printf 'released: %s (no endpoint recorded)\n' "$id"
+    return 0
+  fi
+  remote_endpoint_require "$id"
+  agent=$(fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null || printf 'unreadable')
+  case "$agent" in
+    alive)
+      busy=$(fm_backend_busy_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null || printf 'unknown')
+      [ "$busy" = idle ] || die "remote secondmate $id is $busy on $REMOTE_ENDPOINT_BACKEND; release it once its turn has ended"
+      ;;
+    dead|missing) ;;
+    *) die "remote secondmate $id endpoint state is $agent; refusing to release an endpoint whose state cannot be read" ;;
+  esac
+  fm_backend_kill "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" \
+    || die "remote secondmate $id endpoint $REMOTE_ENDPOINT_TARGET could not be closed on $REMOTE_ENDPOINT_BACKEND"
+  if [ "$REMOTE_ENDPOINT_BACKEND" = t3code ]; then
+    t3_relay_uninstall || true
+    t3_env_remove || die "remote secondmate $id's T3 thread is archived, but its home still carries the T3 launch environment; remove the env block from $TARGET_HOME/.claude/settings.local.json and run $SCRIPT_DIR/fm-t3code-codex-env.sh cleanup $TARGET_HOME before launching it elsewhere"
+  fi
+  stamp=$(date +%s)
+  mv -f -- "$meta" "$meta.released-$stamp" || die "could not set the released endpoint record aside"
+  printf 'released: %s backend=%s target=%s record=%s\n' "$id" "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$meta.released-$stamp"
 }
 
 cmd_capture() {
@@ -414,11 +568,19 @@ cmd_retire() {
   validate_id "$id"
   validate_home "$id" yes || rc=$?
   if [ "${rc:-0}" -eq 2 ]; then
+    t3_relay_uninstall || true
     printf 'already-retired: %s\n' "$id"
     return 0
   fi
   [ -z "$force" ] || [ "$force" = --force ] || usage
   remote_endpoint_require "$id"
+  retire_home "$id" "$force"
+  # Teardown removed the home, so its relay has nothing left to supervise.
+  [ "$REMOTE_ENDPOINT_BACKEND" != t3code ] || t3_relay_uninstall || true
+}
+
+retire_home() { # <id> [--force]
+  local id=$1 force=${2:-}
   FM_HOME="$TARGET_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_STATE_OVERRIDE="$TARGET_HOME/state" \
     FM_CONFIG_OVERRIDE="$TARGET_HOME/config" "$SCRIPT_DIR/fm-guard.sh" || true
   if [ -n "$force" ]; then
@@ -441,6 +603,8 @@ case "${1:-}" in
   route) shift; [ "$#" -eq 1 ] || usage; cmd_route "$1" ;;
   send) shift; [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage; cmd_send "$@" ;;
   key) shift; [ "$#" -eq 2 ] || usage; cmd_key "$@" ;;
+  interrupt) shift; [ "$#" -eq 1 ] || usage; cmd_interrupt "$1" ;;
+  release) shift; [ "$#" -eq 1 ] || usage; cmd_release "$1" ;;
   capture) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_capture "$@" ;;
   observe) shift; [ "$#" -eq 1 ] || usage; cmd_observe "$@" ;;
   sync) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_sync "$@" ;;

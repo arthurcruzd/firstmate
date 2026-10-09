@@ -269,6 +269,17 @@ test_send_state_capture_interrupt_archive() {
   assert_equals "t3code: status=running run=$(field "$(node "$HELPER" state --thread "$thread" --token-file "$CRED")" activeRunId)" "$(printf '%s\n' "$OUT" | tail -1)" "capture ends with the thread's status line"
   mcp capture --thread "$thread" --lines 1
   case "$OUT" in 't3code: status=running run='*) ;; *) fail "the tightest capture bound still shows the status line, got '$OUT'" ;; esac
+  local n
+  for n in 1 2 3 4 5 6; do
+    printf 'steer %s' "$n" > "$msg"
+    mcp send --thread "$thread" --message-file "$msg" --client-request-id "tail-$n"
+  done
+  printf 'hello worker' > "$msg"
+  mcp capture --thread "$thread" --lines 3
+  expect_code 0 "$RC" "capture of a long thread: $ERR"
+  assert_contains "$OUT" "[user_message/completed] steer 6" "capture shows the newest item of a timeline T3 pages oldest first"
+  assert_not_contains "$OUT" "hello worker" "capture of a long thread leaves out the oldest items"
+  case "$(printf '%s\n' "$OUT" | tail -1)" in 't3code: status=running run='*) ;; *) fail "a tail capture still ends with the status line, got '$OUT'" ;; esac
   mcp interrupt --thread "$thread"
   assert_equals confirmed "$(field "$OUT" cancel)" "interrupting a running turn is confirmed by the wait"
   mcp interrupt --thread "$thread"

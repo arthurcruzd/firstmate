@@ -1657,6 +1657,77 @@ test_spawn_secondmate_runs_thread_in_home_with_env() {
   pass "fm-spawn.sh --backend t3code --secondmate: project on the home, root-strategy thread, charter message, launch prefix as settings env"
 }
 
+# A remote host launches a T3-hosted mate with the home's OWN config as the
+# launching config (bin/fm-remote-secondmate-control.sh): the home's credential
+# must survive the launch, and the mate's own workers go to the same server.
+test_spawn_remote_host_secondmate_keeps_home_credential() {
+  local id home out settings
+  id="t3smz3"
+  t3_case spawn-secondmate-remote-host
+  home="$CASE_DIR/sm-home-remote"
+  make_t3_secondmate_home "$home" "$id"
+  mkdir -p "$home/config"
+  cp "$CONFIG/t3code-token" "$home/config/t3code-token"
+  chmod 600 "$home/config/t3code-token"
+  CONFIG="$home/config"
+  out=$(FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code spawn_t3_secondmate "$id" "$home" claude claude-sonnet-5)
+  expect_code 0 $? "a host-local T3 mate launch from the home's own config should succeed"$'\n'"$out"
+  [ -f "$home/config/t3code-token" ] && [ ! -L "$home/config/t3code-token" ] \
+    || fail "the launch replaced the home's own credential with a link to itself"
+  node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$home/config/t3code-token" \
+    || fail "the home's own credential no longer reads back"
+  settings="$home/.claude/settings.local.json"
+  [ "$(t3_json_field "$settings" 'd.env.FM_BACKEND')" = t3code ] \
+    || fail "a T3-hosted remote mate must send its own workers to T3, got '$(t3_json_field "$settings" 'd.env.FM_BACKEND')'"
+  if FM_SPAWN_SECONDMATE_CREW_BACKEND=herdr spawn_t3_secondmate "${id}b" "$home" claude claude-sonnet-5 >/dev/null; then
+    fail "an unsupported crew backend must be refused"
+  fi
+  rm -rf "/tmp/fm-$id" "/tmp/fm-${id}b"
+  pass "fm-spawn.sh --backend t3code --secondmate on its own host: keeps the home's credential and sends its crew to T3"
+}
+
+# Releasing a host-local T3 mate for a move (bin/fm-remote-secondmate-control.sh
+# release) archives its thread, removes the home's relay service, and strips the
+# launch environment from the home, so an agent later launched there on Herdr
+# never reads FM_BACKEND=t3code or a dead thread as its supervisor.
+test_remote_host_release_removes_t3_env() {
+  local id=t3smz4 home out meta thread svc
+  t3_case remote-release
+  home="$CASE_DIR/sm-home-release"
+  make_t3_secondmate_home "$home" "$id"
+  mkdir -p "$home/config" "$home/state/parent-route" "$home/data/.parent-route"
+  cp "$CONFIG/t3code-token" "$home/config/t3code-token"
+  chmod 600 "$home/config/t3code-token"
+  touch "$CASE_DIR/home/state/.last-watcher-beat" 2>/dev/null || true
+  out=$(HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$ROOT" FM_STATE_OVERRIDE="$home/state/parent-route" FM_DATA_OVERRIDE="$home/data/.parent-route" \
+    FM_CONFIG_OVERRIDE="$home/config" FM_SKIP_SECONDMATE_INHERIT=1 FM_SKIP_SECONDMATE_SYNC=1 FM_SPAWN_NO_GUARD=1 \
+    "$ROOT/bin/fm-spawn.sh" "$id" "$home" claude --model claude-sonnet-5 --backend t3code --secondmate 2>&1)
+  expect_code 0 $? "a host-local T3 mate launch should succeed"$'\n'"$out"
+  meta="$home/state/parent-route/$id.meta"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$meta")
+  FM_T3_ID="$thread" t3_fake_set 'w.threads[process.env.FM_T3_ID].status = "idle"; w.threads[process.env.FM_T3_ID].activeRunId = null;'
+  node -e 'const fs=require("fs"),f=process.argv[1],d=JSON.parse(fs.readFileSync(f,"utf8"));d.permissions={allow:["Bash(ls)"]};fs.writeFileSync(f,JSON.stringify(d))' "$home/.claude/settings.local.json"
+  printf 'thread=%s\n' "$thread" > "$home/state/.t3-host"
+  svc="$CASE_DIR/svc.log"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$svc" > "$FAKEBIN/systemctl"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$svc" > "$FAKEBIN/launchctl"
+  chmod +x "$FAKEBIN/systemctl" "$FAKEBIN/launchctl"
+  out=$(HOME="$SPAWN_HOME" FM_HOME="$home" "$ROOT/bin/fm-remote-secondmate-control.sh" release "$id" 2>&1)
+  expect_code 0 $? "releasing an idle T3 mate should succeed"$'\n'"$out"
+  rm -f "$FAKEBIN/systemctl" "$FAKEBIN/launchctl"
+  assert_contains "$out" "released: $id backend=t3code target=$thread" "release must name the closed endpoint"
+  [ "$(t3_json_field "$T3_FAKE_WORLD" "d.threads[\"$thread\"].archived")" = true ] || fail "release must archive the mate's thread"
+  assert_absent "$meta" "release must set the endpoint record aside"
+  ls "$meta".released-* >/dev/null 2>&1 || fail "release must keep the endpoint record as a released-<stamp> file"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env')" = undefined ] || fail "release must strip the T3 launch environment from the home"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.permissions.allow[0]')" = 'Bash(ls)' ] || fail "release must keep the home's other local settings"
+  assert_absent "$home/state/.t3-host" "release must drop the home's T3 host record"
+  assert_grep "disable --now fm-t3-relay-sm-home-release.service" "$svc" "release must remove the home's relay service"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-remote-secondmate-control.sh release: archives the T3 mate, removes its relay, and strips its launch environment from the home"
+}
+
 test_spawn_codex_secondmate_writes_toml_env() {
   local id home out thread toml
   t3_require_tomllib test_spawn_codex_secondmate_writes_toml_env || return 0
@@ -1763,6 +1834,22 @@ test_spawn_abort_returns_lease_only_after_archive() {  # <ok|fail>
     assert_contains "$out" "treehouse return --force" "the warning must name the manual return"
     pass "fm-spawn.sh --backend t3code: an abort that cannot archive the thread keeps the lease"
   fi
+}
+
+test_spawn_refuses_slot_of_another_clone() {
+  local id=t3foreignslot out rc other
+  t3_case spawn-foreign-slot
+  t3_worker_setup "$id"
+  other="$CASE_DIR/other-home-clone"
+  fm_git_worktree "$other" "$CASE_DIR/other-wt" "fm/other"
+  WORKER_WT="$CASE_DIR/other-wt"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "a leased slot that belongs to another clone must be refused"$'\n'"$out"
+  assert_contains "$out" "belongs to $(cd "$other" && pwd -P), not" "the refusal names the clone that owns the slot"
+  case " $(t3_dispatch_types) " in *" t3_thread_launch "*) fail "no thread may be created for another clone's slot" ;; esac
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt 0 ] || fail "the foreign slot's lease must be handed back"
+  assert_absent "$CASE_DIR/state/$id.meta" "a refused slot leaves no task record"
+  pass "fm-spawn.sh --backend t3code: refuses a leased slot that belongs to another home's clone and returns it"
 }
 
 test_uncertain_thread_launch_keeps_lease() {
@@ -1974,8 +2061,11 @@ test_spawn_claude_refuses_worktree_symlink
 test_untracked_codex_config_is_preserved
 test_spawn_codex_scout_writes_toml_env_with_traceparent
 test_spawn_secondmate_runs_thread_in_home_with_env
+test_spawn_remote_host_secondmate_keeps_home_credential
+test_remote_host_release_removes_t3_env
 test_spawn_codex_secondmate_writes_toml_env
 test_spawn_refuses_t3code_when_token_rejected
+test_spawn_refuses_slot_of_another_clone
 test_scout_teardown_stops_and_archives_before_slot_return
 test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete
 test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete codex

@@ -2079,6 +2079,43 @@ ok - t3code live transport: T3 0.0.46-nightly.20261008.2849 environment <id> pas
 
 That result is from 2026-10-09 against the WSL host below; refresh it with the command above after signing in.
 
+### Remote second mate on its host's T3 server
+
+The `endpoint: t3code` remote route was verified live on 2026-10-09 against a headless `t3 v0.0.46-nightly.20261008.2849` server (native `@t3code/t3-darwin-arm64`) on macOS 26.3 arm64, run as an Aqua launch agent bound to the host's tailnet address with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295, codex-cli 0.162.0, node 26.8.2, treehouse 2.3.0, tasks-axi 0.2.6, and the host's stock bash 3.2.57.
+The parent was a scratch home on a Linux VPS; the route used a scratch code root and remote home on the Mac, reached through an isolated `FM_REMOTE_JOB_STATE_ROOT` so the account's own remote-job worker was never used.
+The mate and its scout ran Claude `claude-opus-5-5`.
+
+```sh
+bin/fm-remote-home-seed.sh --endpoint t3code <id> <alias> <remote-root> <remote-home> <project>=<origin>
+FM_HOME=<remote-home> <remote-home>/bin/fm-t3-mcp.mjs login --access full-access --url <origin> --t3 <t3> --base-dir <base-dir>
+bin/fm-spawn.sh <id> --secondmate
+bin/fm-send.sh fm-<id> '<request>'
+bin/fm-on.sh <id> fm-remote-secondmate-control.sh interrupt <id>
+launchctl kickstart -k gui/<uid>/<t3 server label>
+```
+
+```text
+remote_backend=t3code
+remote_target=mcp:<uuid>
+interrupt-delivered <id> harness=claude backend=t3code verified=agent-alive cancel=confirmed
+fm-t3-host relay: delivered fm-t3-relay-<pid>-<arm>-<n> to mcp:<uuid> (started)
+```
+
+| Step | Result |
+| --- | --- |
+| Seed and readiness gate | The doctor's `--endpoint t3code` set passed with no Herdr check; the remote home was cloned and the isolated worker got its own launch agent label |
+| Launch | Thread at the home's root, recorded as the home's T3 host thread; the relay launch agent ran and owned the mate's watcher; the thread's settings env carried `FM_BACKEND=t3code` |
+| Request to the mate's own T3 worker to correlated answer | 2 min; the mate's scout launched on the same server without `--backend`, its report document was fetched, and the pending reply settled |
+| Steer | Durable record plus a T3 doorbell; the mate applied the change of plan in its answer |
+| Interrupt through the host | `cancel=confirmed`; a follow-up steer got the answer |
+| T3 server restart with the mate's scout mid-turn | The scout's run read `cancelled`; the relay's next wake reopened the mate with the session-start hint, the mate re-steered the scout once, and the answer settled |
+| Idle unload | T3 released the idle mate's Claude process 31 minutes after its last turn while the thread kept reading `completed` (alive); the next request's doorbell, preceded by the session-start hint, reopened it, its new scout reported, and the answer settled |
+| Release and relaunch | `release` archived the thread, removed the relay launch agent, the home's T3 launch environment, and its host record, and set the endpoint record aside; `fm-spawn.sh <id> --secondmate` then launched a new thread, fast-forwarded the home to the parent's commit, reinstalled the relay, and the mate answered |
+| Retirement | `fm-teardown.sh <id>` archived the thread, removed the home and its relay, and removed the route |
+
+The account's own remote-job worker kept the same process through every step.
+The Herdr-to-T3 move itself was not run against a live Herdr endpoint; `tests/fm-remote-secondmate-move.test.sh` covers it.
+
 ### Portable regression coverage
 
 ```sh

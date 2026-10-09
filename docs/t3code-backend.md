@@ -131,7 +131,7 @@ The submit primitive reports `empty` when T3 accepts the message, so the daemon 
 Escape and Ctrl-C are both a `t3_thread_interrupt` confirmed by T3's own `t3_thread_wait` on the run; Enter is a no-op and Ctrl-U is unsupported.
 
 The control plane ([`agent-control.md`](agent-control.md)) reads the same status table.
-`interrupt` is a `t3_thread_interrupt` proven by the thread still reading alive afterwards, and it reports `cancel=confirmed` once T3's own wait sees the run terminal.
+`interrupt` is a `t3_thread_interrupt` proven by the thread still reading alive afterwards, and its `cancel=` claim is T3's own wait on the run: `confirmed` when the turn ended, `not-running` when none was active, `unconfirmed` when the wait timed out.
 `exit` has no typed command to send and the V2 `/mcp` tools have no session stop, so it interrupts any running turn and archives the thread; the archive ends the provider process, and the thread reads `dead` while keeping its transcript and worktree binding.
 `relaunch` resumes that thread: it unarchives it, applies the chosen model with `t3_thread_configure`, requires T3 to read it back bound to the recorded worktree, and sends the relaunch brief (with its progress note) as the next turn, so the replacement continues the thread's transcript.
 A thread that has run stays bound to its provider instance, so a relaunch onto a harness on another instance, or of a thread the server no longer has, launches a new thread in the same worktree and rebinds the record to it, leaving the old thread archived.
@@ -146,7 +146,7 @@ That deferral is itself bounded by `FM_BUSY_TURN_MAX_SECS`, measured from the ac
 T3 launches Claude with the `user,project,local` setting sources, so the worktree `.claude/settings.local.json` busy hooks fire as on every other backend.
 T3 starts every agent with the T3 server's own environment, not a login shell's.
 Codex runs each command through `/bin/zsh -lc` in that environment, so the Firstmate toolchain must survive the login shell's startup files, and a startup file that rebuilds `PATH` when a marker variable is missing hides it from every Codex worker; Claude's shell tool restores its own login-shell snapshot and is unaffected.
-A remote secondmate is unaffected by this backend: it always runs on the remote host's Herdr, and `--backend t3code` on one is refused.
+A remote secondmate runs on this backend only when its route names `endpoint: t3code`, as a thread on its own host's T3 server signed in with the home's own credential; [`remote-secondmates.md`](remote-secondmates.md#t3-code-endpoint) owns that route, and `--backend t3code` on any other remote route is refused.
 
 Cleanup keeps all shared Firstmate safety checks.
 Before the slot returns to the pool, or before a secondmate home is removed, teardown interrupts any active run, archives the thread with `t3_thread_organize`, and requires T3 to read back `archived:true` with no active run, so no live thread can act in a slot another task may lease.
@@ -190,6 +190,22 @@ A pending count on a thread with no active run is never read as waiting on a hum
 A run that reaches a terminal status touches the task's `state/<id>.turn-ended` notification, the same file a harness turn-end hook touches, so a Codex worker's turn end reaches the watcher as promptly as a Claude worker's; a watcher's first sight of an already-finished run and a restart-cancelled run never do.
 A watch call that fails falls back to polling, and repeated failures disable the push for the current watcher process; its successor probes again.
 The poll loop still runs every cycle, so the push only ever shortens latency.
+
+## Firstmate itself in T3
+
+A home's own primary session can run as a pinned T3 thread, so the captain talks to Firstmate in T3's UI, including T3's mobile app, while workers stay ordinary T3 threads.
+`bin/fm-t3-host.sh` owns this: `launch` registers the Firstmate checkout as a T3 project, writes the home into the checkout's git-ignored `.claude/settings.local.json` as `FM_HOME`, and starts a full-access Claude thread on the project root, pinned; `adopt` records a thread started from T3's UI instead.
+The checkout's tracked Claude hooks run inside the thread, so session start, the session lock, and the turn-end guard work as in a terminal.
+
+T3 releases an idle provider session after 30 minutes, or after at most four hours while background work pins it, and a Stop-hook-owned watcher would die with it.
+The home therefore runs the wake relay, `bin/fm-t3-host.sh relay`, as a user service: `bin/fm-t3-host.sh install` writes a systemd user unit on Linux or an Aqua launch agent on macOS, and `uninstall` removes it.
+A [T3-hosted remote second mate](remote-secondmates.md#t3-code-endpoint) runs the same relay in its own home on its own host.
+The relay owns the watcher outside the session and sends each actionable wake to the primary's thread as an ordinary message, which also reopens an unloaded session.
+While a live relay owns the home the Claude Stop auto-arm stands aside, the turn-end guard accepts the relay's fresh beacon, and session start renders [`supervision-protocols/t3-relay.md`](supervision-protocols/t3-relay.md); in away or quiet mode the relay idles and the [away daemon](#away-mode) owns the watcher.
+A T3 server restart ends the primary's session and cancels any running worker turn; the relay's next wake reopens the session, whose session start runs again, and a cancelled worker is recovered with one steer.
+
+Treehouse keys its pools by repository identity, so two homes on one machine that clone the same remote share one pool by default, and T3 binds a thread only to a linked worktree of the clone it registered.
+A spawn refuses, and returns the lease of, a slot that belongs to another clone; give each extra home's clones their own pool with a git-excluded `treehouse.toml` whose `root =` names a directory only that home uses.
 
 <a id="away-mode"></a>
 
