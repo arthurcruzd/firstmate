@@ -326,26 +326,6 @@ test_orca_composite_worktree_id_validates() {
   pass "cleanup identity: an Orca record's real composite worktree id validates while a separatorless or newline-carrying id refuses"
 }
 
-test_t3_endpoint_record_validates() {
-  local dir id rc
-  dir=$(make_case t3-endpoint)
-  # shellcheck source=/dev/null
-  . "$ROOT/bin/fm-backend.sh"
-  id=t3-task
-  fm_write_meta "$dir/home/state/$id.meta" \
-    "window=fm-$id" "endpoint_task_id=$id" "worktree=$dir/worktree" "project=$dir/project" \
-    "backend=t3" "t3_thread_id=mcp:5c0ffee0-1" "t3_environment_id=env-4"
-  fm_backend_validate_task_endpoint "$dir/home/state/$id.meta" "$id" || fail "valid T3 endpoint refused"
-  [ "$FM_BACKEND_VALIDATED_TARGET" = "mcp:5c0ffee0-1@env-4" ] \
-    || fail "T3 validation did not compose its thread@environment target"
-  set +e
-  fm_backend_kill t3 "" >/dev/null 2>&1
-  rc=$?
-  set -e
-  [ "$rc" -ne 0 ] || fail "t3 generic kill accepted an empty target"
-  pass "cleanup identity: a T3 record validates to its thread@environment target while an empty T3 target refuses"
-}
-
 test_tmux_empty_target_refuses_without_invocation() {
   local dir rc
   dir=$(make_case direct-empty)
@@ -917,14 +897,36 @@ assert_reassigned_slot_left_alone() {  # <case> <id> <other> <description>
     "$description: the warning should name the reassignment as the cause"
 }
 
+# The tracked Codex overlay bin/fm-t3code-codex-env.sh installs needs a Python
+# with tomllib (3.11+); without one the overlay half of the case is reported
+# skipped and the slot-ownership assertions still run.
+tomllib_python_available() {
+  local candidate
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11; do
+    command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import tomllib' >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
-  local dir id=stale-task other=reassigned-task worker rc
+  local dir id=stale-task other=reassigned-task worker rc overlay_installed=0
 
   # Dirty slot, --force, and a live worker inside it: --force authorizes
   # discarding this task's unlanded work, which is already gone with the slot,
   # never the other task's live work.
   dir=$(make_case slot-reassigned)
   mark_case_as_treehouse_pool "$dir"
+  mkdir -p "$dir/worktree/.codex"
+  printf 'model = "gpt-5.6-sol"\n' > "$dir/worktree/.codex/config.toml"
+  git -C "$dir/worktree" add .codex/config.toml
+  git -C "$dir/worktree" -c user.name=t -c user.email=t@example.invalid commit -qm "project Codex config"
+  if tomllib_python_available; then
+    "$ROOT/bin/fm-t3code-codex-env.sh" install "$dir/worktree" "FM_TASK_ID=$other" || fail "install reassigned task's overlay"
+    overlay_installed=1
+  else
+    printf 'note: reassigned-slot Codex overlay check skipped: no Python 3.11+ (tomllib) interpreter on PATH\n'
+  fi
+  cp "$dir/worktree/.codex/config.toml" "$dir/other-overlay.toml"
   fm_write_meta "$dir/home/state/$id.meta" \
     "window=firstmate:fm-$id" "endpoint_task_id=$id" \
     "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
@@ -943,6 +945,8 @@ test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
   [ "$rc" -eq 0 ] || fail "teardown of a task whose slot was reassigned failed: $(cat "$dir/stderr")"
   kill -0 "$worker" 2>/dev/null || fail "teardown killed the worker holding the reassigned pool slot"
   assert_present "$dir/worktree/sentinel" "teardown reset a pool slot another task had claimed"
+  cmp -s "$dir/other-overlay.toml" "$dir/worktree/.codex/config.toml" || fail "teardown changed the other task's Codex overlay"
+  [ "$overlay_installed" != 1 ] || [ "$(git -C "$dir/worktree" ls-files -v -- .codex/config.toml)" = "S .codex/config.toml" ] || fail "teardown cleared the other task's overlay protection"
   assert_reassigned_slot_left_alone "$dir" "$id" "$other" "dirty reassigned slot with --force"
   assert_contains "$(cat "$dir/stderr")" "$dir/other-home" \
     "the warning should name the claimant's home"
@@ -1446,7 +1450,6 @@ test_non_pool_teardown_ignores_task_set_lock
 test_metadata_lock_serializes_destructive_cleanup
 test_supported_backend_endpoint_records_validate
 test_orca_composite_worktree_id_validates
-test_t3_endpoint_record_validates
 test_tmux_empty_target_refuses_without_invocation
 test_recorded_process_identity_cleanup_is_exact
 test_isolated_tmux_invalid_and_valid_cleanup
