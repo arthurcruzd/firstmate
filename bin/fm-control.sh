@@ -543,6 +543,16 @@ deliver_interrupt() {
   if [ "$HARNESS" = devin ]; then
     devin_gen=$(fm_busy_current_gen "$STATE" "$ID" 2>/dev/null || true)
   fi
+  # T3 owns the run state, so its own interrupt reports the cancel: the helper
+  # interrupts the turn and waits on the run (confirmed, not-running, or
+  # unconfirmed when the wait times out).
+  if [ "$BACKEND" = t3code ]; then
+    cancel=$(fm_backend_t3code_native_interrupt "$T") \
+      || die "interrupt was not delivered to task $ID on t3code"
+    case "$cancel" in confirmed|not-running|unconfirmed) ;; *) cancel=unconfirmed ;; esac
+    printf '%s' "$cancel"
+    return 0
+  fi
   prepare_interrupt_ack
   send_interrupt_keys
   if [ "$INTERRUPT_ARMED" = no ]; then

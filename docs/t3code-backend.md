@@ -116,7 +116,7 @@ The submit primitive reports `empty` when T3 accepts the message, so the daemon 
 Escape and Ctrl-C are both a `t3_thread_interrupt` confirmed by T3's own `t3_thread_wait` on the run; Enter is a no-op and Ctrl-U is unsupported.
 
 The control plane ([`agent-control.md`](agent-control.md)) reads the same status table.
-`interrupt` is a `t3_thread_interrupt` proven by the thread still reading alive afterwards.
+`interrupt` is a `t3_thread_interrupt` proven by the thread still reading alive afterwards, and its `cancel=` claim is T3's own wait on the run: `confirmed` when the turn ended, `not-running` when none was active, `unconfirmed` when the wait timed out.
 `exit` is refused before anything is sent: the V2 `/mcp` tools have no session stop, and an interrupt leaves the thread idle and alive, so no stop could be proven.
 `relaunch` is refused before anything is stopped: a T3 thread is bound to the driver that first ran it, and a new turn continues the same agent, so no replacement agent can be launched into the endpoint.
 

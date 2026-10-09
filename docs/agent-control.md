@@ -44,6 +44,7 @@ Devin's double Escape also opens its `/revert` picker on an idle agent, where En
 An interrupt whose first press shows no running turn stops there and reports `cancel=not-running`, leaving busy state untouched; a picker a mistimed press opened is closed with one Escape and reported as `revert-picker=dismissed`, and `exit` refuses to type into an open picker.
 [`bin/fm-control-lib.sh`](../bin/fm-control-lib.sh) owns the arm signal, press gap, and picker signal.
 muse's session log records `terminal=cancelled` for the interrupted run, so the control plane reports `cancel=confirmed` only after observing that exact acknowledgement.
+On t3code the acknowledgement is T3's own run state: the control plane reports the native interrupt's verdict, `cancel=confirmed` once T3's wait sees the turn end ([`t3code-backend.md`](t3code-backend.md#current-lifecycle-and-safety)).
 
 On pane backends, an interrupt is not complete until the composer is empty.
 muse is the one verified adapter that restores the cancelled prompt back into its composer as real text, so its interrupt key is followed by a Ctrl+U clear; without it the next submitted line - including this plane's own exit command - would concatenate onto the restored prompt and submit both as one line.

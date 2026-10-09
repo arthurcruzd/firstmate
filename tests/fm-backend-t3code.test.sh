@@ -992,6 +992,7 @@ test_control_exit_refused_before_any_call() {
   out=$(run_t3_control "$id" interrupt); rc=$?
   expect_code 0 "$rc" "interrupt on a t3code task should succeed"$'\n'"$out"
   case "$(t3_dispatch_types)" in t3_thread_interrupt*) ;; *) fail "interrupt must call t3_thread_interrupt, got '$(t3_dispatch_types)'" ;; esac
+  assert_contains "$out" "cancel=confirmed" "T3's own run wait confirms the cancel of a running turn"
   [ "$(t3_run 'fm_backend_busy_state t3code "$1"' "$thread"):$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = idle:alive ] \
     || fail "an interrupted thread is idle and alive"
   pass "fm-control.sh backend=t3code: exit refuses before any call (V2 has no session stop); interrupt ends the turn natively"
