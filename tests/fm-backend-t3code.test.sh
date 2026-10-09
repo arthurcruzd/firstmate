@@ -1443,8 +1443,9 @@ test_spawn_remote_host_secondmate_keeps_home_credential() {
   settings="$home/.claude/settings.local.json"
   [ "$(t3_json_field "$settings" 'd.env.FM_BACKEND')" = t3code ] \
     || fail "a T3-hosted remote mate must send its own workers to T3, got '$(t3_json_field "$settings" 'd.env.FM_BACKEND')'"
-  out=$(FM_SPAWN_SECONDMATE_CREW_BACKEND=herdr spawn_t3_secondmate "${id}b" "$home" claude claude-sonnet-5)
-  [ $? -ne 0 ] || fail "an unsupported crew backend must be refused"
+  if FM_SPAWN_SECONDMATE_CREW_BACKEND=herdr spawn_t3_secondmate "${id}b" "$home" claude claude-sonnet-5 >/dev/null; then
+    fail "an unsupported crew backend must be refused"
+  fi
   rm -rf "/tmp/fm-$id" "/tmp/fm-${id}b"
   pass "fm-spawn.sh --backend t3code --secondmate on its own host: keeps the home's credential and sends its crew to T3"
 }
