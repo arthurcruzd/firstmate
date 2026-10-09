@@ -41,7 +41,7 @@ test_login_writes_private_credential_and_never_prints_token() {
   assert_equals env-fake-1 "$(field "$OUT" environmentId)" "login should record the server's environment id"
   assert_not_contains "$OUT$ERR" "tok-" "login must never print the access token"
   assert_not_contains "$OUT$ERR" "PAIR-OK" "login must never print the pairing code"
-  [ "$(stat -f %Lp "$CRED" 2>/dev/null || stat -c %a "$CRED")" = 600 ] || fail "credential file must be mode 0600"
+  [ "$(stat -c %a "$CRED" 2>/dev/null || /usr/bin/stat -f %Lp "$CRED")" = 600 ] || fail "credential file must be mode 0600"
   assert_grep '"environment_id":"env-fake-1"' "$CRED" "credential must record the environment id"
   assert_grep '"origin":"'"$T3_FAKE_URL"'"' "$CRED" "credential must record the origin"
   assert_grep "auth pairing create --base-dir $TMP_ROOT/t3home --scope orchestration:read --scope orchestration:operate --ttl 2m" "$TMP_ROOT/cli/t3-cli.log" \
@@ -281,6 +281,25 @@ test_telemetry_reported() {
   pass "fm-t3-mcp status: reports telemetry off only when the server process proves it, and warns otherwise"
 }
 
+# Linux reads the listener's /proc/<pid>/environ, which is NUL-separated, so
+# the value must end at the NUL even when more variables follow it.
+test_telemetry_parses_nul_separated_environ() {
+  local states
+  states=$(FM_T3_HELPER="$HELPER" node --input-type=module -e '
+const { telemetryState } = await import(process.env.FM_T3_HELPER);
+const env = (vars) => () => vars.join("\0") + "\0";
+const origin = "http://127.0.0.1:47391";
+console.log([
+  telemetryState(origin, env(["HOME=/h", "T3CODE_TELEMETRY_ENABLED=false", "PATH=/usr/bin"])),
+  telemetryState(origin, env(["T3CODE_TELEMETRY_ENABLED=false"])),
+  telemetryState(origin, env(["T3CODE_TELEMETRY_ENABLED=true", "PATH=/usr/bin"])),
+  telemetryState(origin, env(["PATH=/usr/bin"])),
+].join(" "));
+')
+  assert_equals "off off on on" "$states" "a NUL-separated environ reads the variable's own value"
+  pass "fm-t3-mcp telemetry: a Linux /proc environ with variables after the setting still reads off"
+}
+
 t3_fake_start "$TMP_ROOT/server"
 test_login_writes_private_credential_and_never_prints_token
 test_login_refuses_other_ceilings
@@ -294,3 +313,4 @@ test_launch_refusals
 test_send_capture_interrupt_archive
 test_typed_failure_and_transport_errors
 test_telemetry_reported
+test_telemetry_parses_nul_separated_environ

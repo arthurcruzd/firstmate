@@ -404,7 +404,7 @@ export function telemetryState(origin, probe = probeListenerEnv) {
   if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return "unknown";
   const env = probe(url.port || (url.protocol === "https:" ? "443" : "80"));
   if (env === null) return "unknown";
-  const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=(\S*)/);
+  const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=([^\s\0]*)/);
   if (!m) return "on";
   return /^(false|0|no|off)$/i.test(m[1]) ? "off" : "on";
 }
