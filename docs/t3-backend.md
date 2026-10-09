@@ -110,6 +110,17 @@ Once they pass, it archives the thread and requires T3 to read back `archived:tr
 A close that is not proven, or a T3 that is unreachable or fails the gate, stops cleanup with every record and the leased slot intact, even under `--force`, because a live thread bound to a returned slot would act on whatever task leases it next.
 Archived threads stay in T3, can be unarchived there, and are never deleted.
 
+## Firstmate itself in T3
+
+A home's own primary session can run as a pinned T3 thread, so the captain talks to Firstmate in T3's UI, including T3's mobile app, while workers stay ordinary T3 threads.
+`bin/fm-t3-host.sh` owns this: its `launch` verb registers the Firstmate checkout as a T3 project, writes the home into the checkout's git-ignored `.claude/settings.local.json` as `FM_HOME` (a T3 thread has the server's environment, not a per-thread one), and starts a full-access Claude thread bound to the checkout; `adopt` records a thread started from T3's UI instead.
+The checkout's tracked Claude hooks run inside the thread, so session start, the session lock, and the turn-end guard work as in a terminal.
+
+T3 releases an idle provider session after 30 minutes, or after at most four hours while background work pins it, and a Stop-hook-owned watcher would die with it.
+The home therefore runs the wake relay, `bin/fm-t3-host.sh relay`, as a user service (`bin/fm-t3-host.sh install` writes the systemd unit).
+The relay owns the watcher outside the session and sends each actionable wake to the primary's thread as an ordinary message, which also reopens an unloaded session; the Claude Stop auto-arm stands aside while a live relay owns the home, the turn-end guard accepts the relay's fresh beacon, and session start renders [`supervision-protocols/t3-relay.md`](supervision-protocols/t3-relay.md).
+A T3 server restart ends the primary's session and cancels any running worker turn; the relay's next wake reopens the session, whose session start runs again, and a cancelled worker is recovered with one steer.
+
 ## What this backend refuses
 
 - `--secondmate` spawns.

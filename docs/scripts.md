@@ -74,6 +74,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `backends/cmux.sh`       | Experimental cmux session-provider adapter                                           |
 | `backends/t3.sh`         | Experimental T3 Code thread adapter for ship and scout workers                       |
 | `fm-t3-mcp.mjs`          | T3 Code `/mcp` transport: captain-run sign-in, capability gate, and thread verbs     |
+| `fm-t3-host.sh`          | Run a home's own primary as a T3 Code thread, with the host-level wake relay that owns its watcher |
 | `fm-config-push.sh`      | Push declared inherited local material to live local or remote secondmates and send the placement-specific config reread when changed |
 | `fm-project-mode.sh`     | Resolve a project's registered delivery posture, forge binding, or ship-branch prefix from `data/projects.md` for fleet sync, home seeding, and the forge agreement a ship spawn or scout promotion applies |
 | `fm-forge-detect.sh`     | Propose a clone's forge binding from its origin remote for project-add intake, never recording it |

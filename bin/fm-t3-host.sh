@@ -14,14 +14,15 @@
 #
 # Usage:
 #   fm-t3-host.sh launch [--model <id>] [--effort <level>] [--title <title>] [--message-file <file>]
-#     Registers this home's checkout as a T3 project, writes FM_HOME into the
-#     home's git-ignored .claude/settings.local.json (a T3 thread gets the T3
-#     server's environment, not a per-thread one), launches the primary as a
-#     full-access Claude thread bound to the checkout, and records it in
-#     state/.t3-host. Refuses when the record names a thread that still exists
+#     Registers this script's Firstmate checkout (the code root, which is also
+#     the home when FM_HOME is unset) as a T3 project, writes FM_HOME into the
+#     checkout's git-ignored .claude/settings.local.json (a T3 thread gets the
+#     T3 server's environment, not a per-thread one), launches the primary as a
+#     full-access Claude thread bound to the checkout, pins it, and records it
+#     in the home's state/.t3-host. Refuses when the record names a thread that still exists
 #     and is not archived; that thread is the primary.
 #   fm-t3-host.sh adopt --thread <id>
-#     Records an existing T3 thread, bound to this checkout and not archived,
+#     Records an existing T3 thread, bound to the checkout and not archived,
 #     as the primary, for a session started from T3's own UI.
 #   fm-t3-host.sh relay
 #     The wake relay loop, for a service manager. It records itself in
@@ -74,9 +75,9 @@ mcp() {
 }
 
 ensure_home_env_setting() {
-  local file="$FM_HOME/.claude/settings.local.json" tmp
-  mkdir -p "$FM_HOME/.claude"
-  tmp=$(mktemp "$FM_HOME/.claude/.settings.local.XXXXXX") || return 1
+  local file="$FM_ROOT/.claude/settings.local.json" tmp
+  mkdir -p "$FM_ROOT/.claude"
+  tmp=$(mktemp "$FM_ROOT/.claude/.settings.local.XXXXXX") || return 1
   # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions.
   node -e '
 const fs = require("fs");
@@ -100,7 +101,7 @@ cmd_launch() {
     esac
   done
   : "${title:=Firstmate ($(basename "$FM_HOME"))}"
-  [ -f "$FM_HOME/AGENTS.md" ] && [ -d "$FM_HOME/bin" ] || die "$FM_HOME is not a Firstmate checkout"
+  [ -f "$FM_ROOT/AGENTS.md" ] && [ -d "$FM_ROOT/bin" ] || die "$FM_ROOT is not a Firstmate checkout"
   mkdir -p "$STATE"
   existing=$(record_get "$HOST_RECORD" thread)
   if [ -n "$existing" ]; then
@@ -109,18 +110,19 @@ cmd_launch() {
       die "the primary already runs as T3 thread $existing; send it a message instead of launching another"
     fi
   fi
-  ensure_home_env_setting || die "could not write FM_HOME into $FM_HOME/.claude/settings.local.json"
-  project=$(mcp project-ensure --root "$FM_HOME" --title "$title" | json_get projectId) || die "could not register $FM_HOME as a T3 project"
-  [ -n "$project" ] || die "T3 did not report a project id for $FM_HOME"
-  branch=$(git -C "$FM_HOME" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  ensure_home_env_setting || die "could not write FM_HOME into $FM_ROOT/.claude/settings.local.json"
+  project=$(mcp project-ensure --root "$FM_ROOT" --title "$title" | json_get projectId) || die "could not register $FM_ROOT as a T3 project"
+  [ -n "$project" ] || die "T3 did not report a project id for $FM_ROOT"
+  branch=$(git -C "$FM_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
   if [ -z "$msg" ]; then
     msg=$(mktemp) || die "mktemp failed"
     printf '%s\n' 'Session open. Run your session start and report the digest outcome briefly.' > "$msg"
   fi
   out=$(mcp launch --project "$project" --title "$title" --harness claude --model "$model" --effort "$effort" \
-    --worktree "$FM_HOME" ${branch:+--branch "$branch"} --message-file "$msg") || die "T3 did not launch the primary: $out"
+    --worktree "$FM_ROOT" ${branch:+--branch "$branch"} --message-file "$msg") || die "T3 did not launch the primary: $out"
   thread=$(printf '%s' "$out" | json_get threadId)
   [ -n "$thread" ] || die "T3 did not report a thread id: $out"
+  mcp pin --thread "$thread" >/dev/null || echo "fm-t3-host: warning: could not pin thread $thread; pin it in T3's sidebar" >&2
   {
     printf 'thread=%s\n' "$thread"
     printf 'project=%s\n' "$project"
@@ -144,8 +146,8 @@ cmd_adopt() {
   [ "$(printf '%s' "$out" | json_get exists)" = true ] || die "T3 has no thread $thread"
   [ "$(printf '%s' "$out" | json_get archived)" != true ] || die "T3 thread $thread is archived"
   wt=$(printf '%s' "$out" | json_get worktreePath)
-  [ "$(cd "${wt:-/nonexistent}" 2>/dev/null && pwd -P)" = "$(cd "$FM_HOME" && pwd -P)" ] || die "T3 thread $thread is bound to ${wt:-no worktree}, not $FM_HOME"
-  ensure_home_env_setting || die "could not write FM_HOME into $FM_HOME/.claude/settings.local.json"
+  [ "$(cd "${wt:-/nonexistent}" 2>/dev/null && pwd -P)" = "$(cd "$FM_ROOT" && pwd -P)" ] || die "T3 thread $thread is bound to ${wt:-no worktree}, not this checkout $FM_ROOT"
+  ensure_home_env_setting || die "could not write FM_HOME into $FM_ROOT/.claude/settings.local.json"
   mkdir -p "$STATE"
   { printf 'thread=%s\n' "$thread"; printf 'adopted=%s\n' "$(date +%s)"; } > "$HOST_RECORD.tmp" && mv "$HOST_RECORD.tmp" "$HOST_RECORD"
   printf 'adopted primary thread=%s home=%s\n' "$thread" "$FM_HOME"
@@ -239,7 +241,7 @@ Description=Firstmate T3 wake relay for $FM_HOME
 
 [Service]
 Type=simple
-WorkingDirectory=$FM_HOME
+WorkingDirectory=$FM_ROOT
 Environment=FM_HOME=$FM_HOME
 Environment=PATH=$PATH
 ExecStart=$FM_ROOT/bin/fm-t3-host.sh relay
@@ -259,6 +261,7 @@ cmd_status() {
   local thread
   thread=$(record_get "$HOST_RECORD" thread)
   printf 'home=%s\n' "$FM_HOME"
+  printf 'checkout=%s\n' "$FM_ROOT"
   printf 'thread=%s\n' "${thread:-none}"
   [ -z "$thread" ] || mcp state --thread "$thread" 2>/dev/null | sed 's/^/state=/'
   if fm_t3_relay_owns_home "$STATE"; then

@@ -54,6 +54,9 @@
 //     t3_thread_organize archive, then read back until the thread reports
 //     archived:true and activeRunId:null (closed=true). A thread the verified
 //     server no longer has is already closed (missing=true).
+//   fm-t3-mcp.mjs pin --thread <id> [--action pin|unpin]
+//     t3_thread_organize pin (or unpin): keeps a home's own primary thread at
+//     the top of every T3 client's sidebar.
 //   fm-t3-mcp.mjs capabilities
 //     orchestrator_capabilities: provider instances, models, option ids.
 //
@@ -761,7 +764,18 @@ async function capabilities(flags) {
   return { ok: true, ...(await session.call("orchestrator_capabilities", {})) };
 }
 
-const VERBS = { login, status, state, "project-ensure": projectEnsure, launch, send, read, capture, wait, interrupt, archive, capabilities };
+// pin: keep a thread at the top of every T3 client's sidebar (a home's own
+// primary thread, bin/fm-t3-host.sh); unpin reverses it.
+async function pin(flags) {
+  const threadId = need(flags, "thread");
+  const action = flags.action ?? "pin";
+  if (!["pin", "unpin"].includes(action)) usage(`--action ${action} is not pin or unpin`);
+  const { session } = await verifiedSession(flags);
+  await session.call("t3_thread_organize", { threadId, action });
+  return { ok: true, threadId, action };
+}
+
+const VERBS = { login, status, state, "project-ensure": projectEnsure, launch, send, read, capture, wait, interrupt, archive, pin, capabilities };
 
 async function main(argv) {
   const [verb, ...rest] = argv;
