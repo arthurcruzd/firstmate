@@ -172,24 +172,21 @@ test_window_to_task_matches_the_meta_pipeline() {
   mkdir -p "$state/dir.meta"
   printf 'window=sess:w9\n' > "$state/theta.meta"
   chmod 000 "$state/theta.meta"
-  printf 'window=fm-iota\nbackend=t3\nt3_thread_id=mcp:th-10\nt3_environment_id=env-10\n' > "$state/iota.meta"
   cat > "$script" <<'SH'
 . "$1/bin/fm-classify-lib.sh"
 state=$2
 reference() {  # the replaced grep | tail -1 | cut -d= -f2- lookup
-  local w=$1 meta mw mt th te t
+  local w=$1 meta mw mt t
   for meta in "$state"/*.meta; do
     [ -e "$meta" ] || continue
     mw=$(grep '^window=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
     mt=$(grep '^terminal=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-    th=$(grep '^t3_thread_id=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-    te=$(grep '^t3_environment_id=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-    [ "$mw" = "$w" ] || [ "$mt" = "$w" ] || { [ -n "$th" ] && [ -n "$te" ] && [ "$th@$te" = "$w" ]; } || continue
+    [ "$mw" = "$w" ] || [ "$mt" = "$w" ] || continue
     t=$(basename "$meta"); printf '%s' "${t%.meta}"; return 0
   done
   t="${w##*:}"; t="${t#fm-}"; printf '%s' "$t"
 }
-for w in sess:w1 old sess:w2 term-3 '' a=b=c a sess:w5 $'sess:w5\r' ' sess:w6 ' sess:w6 t7 sess:w9 sess:fm-fallback-x unknown fm-iota mcp:th-10@env-10 mcp:th-10@env-other; do
+for w in sess:w1 old sess:w2 term-3 '' a=b=c a sess:w5 $'sess:w5\r' ' sess:w6 ' sess:w6 t7 sess:w9 sess:fm-fallback-x unknown; do
   got=$(window_to_task "$w" "$state")
   want=$(reference "$w")
   [ "$got" = "$want" ] || printf 'window %q: helper %q, pipeline %q\n' "$w" "$got" "$want"
@@ -197,9 +194,7 @@ done
 SH
   run_everywhere "window_to_task" "$script" "$state"
   chmod 600 "$state/theta.meta"
-  [ "$(bash -c '. "$1/bin/fm-classify-lib.sh"; window_to_task mcp:th-10@env-10 "$2"' _ "$ROOT" "$state")" = iota ] ||
-    fail "window_to_task must map a t3 thread@environment target to its task"
-  pass "window_to_task resolves every recorded window exactly as the grep/tail/cut pipeline did, t3 targets included"
+  pass "window_to_task resolves every recorded window exactly as the grep/tail/cut pipeline did"
 }
 
 test_classify_stat_helpers_read_the_kernel_name_once() {

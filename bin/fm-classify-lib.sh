@@ -2135,29 +2135,25 @@ status_open_activities() {  # <status-file-or-dash>
 # task id from a recorded window target, falling back to the tmux-shaped
 # "<session>:fm-<id>" form when no metadata state is available.
 window_to_task() {
-  local w=$1 state=${2:-${STATE:-${FM_STATE_OVERRIDE:-}}} meta mw mt th te t line
+  local w=$1 state=${2:-${STATE:-${FM_STATE_OVERRIDE:-}}} meta mw mt t3_thread t line
   if [ -n "$state" ]; then
     for meta in "$state"/*.meta; do
       [ -e "$meta" ] || continue
-      # The last window= and terminal= values, read in one pass without the
+      # The last endpoint values, read in one pass without the
       # grep | tail -1 | cut -d= -f2- pipelines this once forked per key.
-      # A t3 task is addressed as <t3_thread_id>@<t3_environment_id>
-      # (fm_backend_target_of_meta in bin/fm-backend.sh), not by its window.
       mw=
       mt=
-      th=
-      te=
+      t3_thread=
       {
         while IFS= read -r line || [ -n "$line" ]; do
           case "$line" in
             window=*) mw=${line#window=} ;;
             terminal=*) mt=${line#terminal=} ;;
-            t3_thread_id=*) th=${line#t3_thread_id=} ;;
-            t3_environment_id=*) te=${line#t3_environment_id=} ;;
+            t3_thread_id=*) t3_thread=${line#t3_thread_id=} ;;
           esac
         done < "$meta"
       } 2>/dev/null
-      [ "$mw" = "$w" ] || [ "$mt" = "$w" ] || { [ -n "$th" ] && [ -n "$te" ] && [ "$th@$te" = "$w" ]; } || continue
+      [ "$mw" = "$w" ] || [ "$mt" = "$w" ] || [ "$t3_thread" = "$w" ] || continue
       t=${meta##*/}
       t=${t%.meta}
       printf '%s' "$t"

@@ -31,7 +31,7 @@
     "docs/zellij-backend.md",
     "docs/orca-backend.md",
     "docs/cmux-backend.md",
-    "docs/t3-backend.md",
+    "docs/t3code-backend.md",
     "docs/remote-secondmates.md"
   ],
   "requiredOwnerPointers": [
@@ -100,7 +100,7 @@
       "target": "docs/verification/runtime-backends.md"
     },
     {
-      "source": "docs/t3-backend.md",
+      "source": "docs/t3code-backend.md",
       "target": "docs/verification/runtime-backends.md"
     },
     {
@@ -466,7 +466,7 @@
       "audience": "maintainer-architecture"
     },
     {
-      "path": "docs/t3-backend.md",
+      "path": "docs/t3code-backend.md",
       "audience": "operator-current"
     },
     {
