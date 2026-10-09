@@ -933,6 +933,51 @@ unit_native_lifecycle() {
   rm -rf "$st"
 }
 
+# A home whose T3 wake relay is live hands the daemon to that relay: T3 can end
+# the session whose background job would otherwise host it, so start-native
+# records the relay as the daemon's owner, tells the session not to start one,
+# and stop still ends the posture without a terminal to close.
+unit_native_entry_on_relay_home_hands_daemon_to_relay() {
+  local st out relay started
+  st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-relay.XXXXXX")
+  mkdir -p "$st/state"
+  bash -c 'sleep 60; :' fm-t3-host.sh relay &
+  # shellcheck disable=SC2031 # $! is read in this shell, right after the fork.
+  relay=$!
+  sleep 0.2
+  started=$(bash -c '. "$1/bin/fm-t3-host-lib.sh"; fm_t3_relay_proc_started "$2"' _ "$ROOT" "$relay")
+  printf 'pid=%s\nstarted=%s\n' "$relay" "$started" > "$st/state/.t3-relay"
+  FM_AFK_MODE=quiet enter_posture "$st" || fail "relay handoff: could not enter fixture posture"
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" start-native 2>&1)
+  if [ "$(cat "$st/state/.afk-daemon-terminal")" = "$(printf 'none\t-\trelay')" ] \
+    && [ "$(head -n 1 "$st/state/.afk")" = quiet ] \
+    && printf '%s' "$out" | grep -F "the T3 wake relay's service runs the daemon" >/dev/null \
+    && printf '%s' "$out" | grep -F 'do not start bin/fm-afk-start.sh in this session' >/dev/null; then
+    pass "relay handoff: start-native on a relay-owned home records the relay as the daemon's owner and says so"
+  else
+    fail "relay handoff: the record or the handoff line is wrong: $(cat "$st/state/.afk-daemon-terminal" 2>&1); $out"
+  fi
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" stop 2>&1)
+  if [ ! -e "$st/state/.afk" ] && [ ! -e "$st/state/.afk-daemon-terminal" ] \
+    && printf '%s' "$out" | grep -F 'no daemon terminal was running' >/dev/null; then
+    pass "relay handoff: stop ends the relay-owned posture without a terminal to close"
+  else
+    fail "relay handoff: stop retained state or claimed a teardown: $out"
+  fi
+  kill "$relay" 2>/dev/null
+  wait "$relay" 2>/dev/null
+  rm -f "$st/state/.t3-relay"
+  enter_posture "$st" || fail "relay handoff: could not re-enter fixture posture"
+  FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" start-native >/dev/null 2>&1
+  if [ "$(cut -f3 "$st/state/.afk-daemon-terminal")" = native ]; then
+    pass "relay handoff: without a live relay start-native keeps the native record"
+  else
+    fail "relay handoff: a home with no live relay did not record a native daemon"
+  fi
+  FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" stop >/dev/null 2>&1
+  rm -rf "$st"
+}
+
 # A Claude home runs the supervision host by default and it is the home's away
 # session, so away mode launches no daemon there with no file or any file but
 # off; quiet mode still does, a plain refresh of a running quiet daemon is
@@ -1752,6 +1797,7 @@ unit_readiness_failure_rolls_back_terminal
 unit_readiness_failure_preserves_unconfirmed_record
 unit_tmux_absence_distinguishes_probe_failure
 unit_native_lifecycle
+unit_native_entry_on_relay_home_hands_daemon_to_relay
 unit_supervision_host_claude_home_runs_no_away_daemon
 unit_supervision_host_other_harnesses_run_no_away_daemon
 unit_daemon_quiet_entry_holds_nothing_for_a_return

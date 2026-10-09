@@ -201,7 +201,9 @@ T3 releases an idle provider session after 30 minutes, or after at most four hou
 The home therefore runs the wake relay, `bin/fm-t3-host.sh relay`, as a user service: `bin/fm-t3-host.sh install` writes a systemd user unit on Linux or an Aqua launch agent on macOS, and `uninstall` removes it.
 A [T3-hosted remote second mate](remote-secondmates.md#t3-code-endpoint) runs the same relay in its own home on its own host.
 The relay owns the watcher outside the session and sends each actionable wake to the primary's thread as an ordinary message, which also reopens an unloaded session.
-While a live relay owns the home the Claude Stop auto-arm stands aside, the turn-end guard accepts the relay's fresh beacon, and session start renders [`supervision-protocols/t3-relay.md`](supervision-protocols/t3-relay.md); in away or quiet mode the relay idles and the [away daemon](#away-mode) owns the watcher.
+While a live relay owns the home the Claude Stop auto-arm stands aside, the turn-end guard accepts the relay's fresh beacon, and session start renders [`supervision-protocols/t3-relay.md`](supervision-protocols/t3-relay.md).
+In away or quiet mode the relay delivers no wakes: it runs the [away daemon](#away-mode) itself, which owns the watcher, handles routine wakes without a turn, and sends the thread only what needs Firstmate.
+So `/quiet` on a T3-hosted primary keeps routine fleet traffic out of the captain's conversation and survives T3 unloading the idle session.
 A T3 server restart ends the primary's session and cancels any running worker turn; the relay's next wake reopens the session, whose session start runs again, and a cancelled worker is recovered with one steer.
 
 Treehouse keys its pools by repository identity, so two homes on one machine that clone the same remote share one pool by default, and T3 binds a thread only to a linked worktree of the clone it registered.
@@ -226,7 +228,10 @@ Confirmed busy activity, a missing thread, or an exited (archived) thread clears
 Declared external-wait rechecks also survive native uncertainty; the worker's declaration still controls their cadence.
 `stale_window_is_busy` and `housekeeping` in `bin/fm-supervise-daemon.sh` own stale tracking; `fm_afk_clear_stale_artifacts` in `bin/fm-afk-start.sh` and the launcher in `bin/fm-afk-launch.sh` own queue discard and startup rollback.
 `tests/fm-backend-t3code.test.sh` covers retention, deduplication, and re-arming across native restart.
-Only `bin/fm-afk-launch.sh start-native` launches the daemon here, as the captain's own tracked background job; `start` refuses because T3 hosts no terminal to create.
+Only `bin/fm-afk-launch.sh start-native` prepares the daemon here; `start` refuses because T3 hosts no terminal to create.
+Where a [wake relay](#firstmate-itself-in-t3) owns the home, `start-native` hands the daemon to the relay's service, which runs it aimed at the recorded primary thread, restarts it while the mode stands, and stops it when the mode ends, because T3 can end the session whose background job would otherwise host it.
+Without a relay the daemon runs as the captain's own tracked background job and lasts only as long as that session.
+A daemon escalation that reopens an unloaded session carries the relay's run-session-start hint while the session lock names a dead process.
 A secondmate spawned on this backend carries its supervisor identity in its environment, so its own daemon needs no discovery.
 
 ## Switching back to Herdr
@@ -260,18 +265,18 @@ Whether T3 V2 still serves a thread created through that transport is unverified
 - A tracked `.codex/config.toml` that already defines `[shell_environment_policy]` is refused by file and table name before a slot is leased.
 - While a tracked Codex overlay is installed, do not edit that file or clear its `skip-worktree` flag; configuration changes require cleanup first.
 - Shell typing and Ctrl-U are unsupported; runtime Escape and Ctrl-C still interrupt the turn.
-- A Codex supervisor has no away mode on this backend because it has no tracked background tool for `start-native`, and T3 has no terminal for `start` to create.
+- A Codex supervisor without a wake relay has no away mode on this backend because it has no tracked background tool for `start-native`, and T3 has no terminal for `start` to create.
 - T3 checkpoints each turn as hidden refs under `refs/t3/orchestration-v2/checkpoints/` in the project clone; they are never pushed and do not affect the landed-work test.
 
 ## Regression entry points
 
 ```sh
-bin/fm-test-run.sh tests/fm-t3-mcp.test.sh tests/fm-backend-t3code.test.sh
+bin/fm-test-run.sh tests/fm-t3-mcp.test.sh tests/fm-backend-t3code.test.sh tests/fm-t3-host.test.sh
 bin/fm-test-run.sh tests/fm-backend.test.sh tests/fm-daemon.test.sh tests/fm-control.test.sh
 FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
 ```
 
-The first two run against a fake T3 `/mcp` server ([`tests/t3-fake-server.mjs`](../tests/t3-fake-server.mjs)) and a fake Treehouse.
+The first three run against a fake T3 `/mcp` server ([`tests/t3-fake-server.mjs`](../tests/t3-fake-server.mjs)) and a fake Treehouse; `tests/fm-t3-host.test.sh` also covers the relay hosting the away daemon.
 The live guard spends no model tokens and changes nothing on the server: it checks the gate, the project catalog, and a typed missing-thread read against the server the configured credential names, and skips cleanly without one.
 Set `FM_T3CODE_LIVE_E2E=0` to disable it or `FM_T3CODE_LIVE_E2E=1` to require it; the shared `FM_LIVE` override also applies.
 [`verification/runtime-backends.md`](verification/runtime-backends.md#t3-code) records the dated live results.

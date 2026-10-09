@@ -28,8 +28,16 @@
 #   fm-t3-host.sh relay
 #     The wake relay loop, for a service manager. It records itself in
 #     state/.t3-relay and exits when another live relay owns the home. While
-#     the home needs supervision and is not in away or quiet mode (the away
-#     daemon owns the watcher then) it runs bin/fm-watch-arm.sh in the foreground,
+#     state/.afk exists (away or quiet mode) the away daemon owns the watcher
+#     and triage, and the relay runs that daemon itself as its own child,
+#     aimed at the recorded thread, so T3 ending the session that entered the
+#     mode cannot end supervision: it starts bin/fm-afk-start.sh when no live
+#     daemon holds the home and no away-mode launch or stop is in progress,
+#     restarts it if it exits while the flag stands, and stops it once the flag
+#     clears. A daemon another owner already runs is left alone. Entering the
+#     mode while a watcher cycle is open ends that cycle at once and delivers
+#     nothing, so the daemon drains its wake from the durable queue.
+#     Otherwise, while the home needs supervision, it runs bin/fm-watch-arm.sh in the foreground,
 #     and on an actionable close (signal:, stale:, check:, heartbeat) sends the
 #     reason lines to the recorded thread under an idempotent request id
 #     (telling a session T3 reopened without its SessionStart hooks, found by a
@@ -49,7 +57,13 @@
 #     home. Changes nothing.
 #
 # Environment: FM_HOME (default: this checkout), FM_T3_RELAY_IDLE_POLL (seconds
-# between need checks while the home needs no watcher, default 15).
+# between need checks while the home needs no watcher, and the pause before a
+# hosted away daemon is restarted, default 15), FM_T3_RELAY_MODE_POLL
+# (seconds between state/.afk checks while the relay waits on a watcher cycle
+# or runs the away daemon, default 2).
+# Test seams: FM_T3_RELAY_DAEMON_ENTRY replaces bin/fm-afk-start.sh as the
+# command the relay runs for the away daemon, and FM_T3_RELAY_ARM_ENTRY
+# replaces bin/fm-watch-arm.sh as its watcher cycle.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +75,11 @@ RELAY_RECORD="$STATE/.t3-relay"
 MCP="$SCRIPT_DIR/fm-t3-mcp.mjs"
 IDLE_POLL=${FM_T3_RELAY_IDLE_POLL:-15}
 case "$IDLE_POLL" in ''|*[!0-9]*|0) IDLE_POLL=15 ;; esac
+MODE_POLL=${FM_T3_RELAY_MODE_POLL:-2}
+case "$MODE_POLL" in ''|*[!0-9]*|0) MODE_POLL=2 ;; esac
+DAEMON_ENTRY=${FM_T3_RELAY_DAEMON_ENTRY:-$SCRIPT_DIR/fm-afk-start.sh}
+ARM_ENTRY=${FM_T3_RELAY_ARM_ENTRY:-$SCRIPT_DIR/fm-watch-arm.sh}
+RELAY_DAEMON_PID=
 
 # shellcheck source=bin/fm-t3-host-lib.sh
 . "$SCRIPT_DIR/fm-t3-host-lib.sh"
@@ -205,6 +224,52 @@ fm_t3_relay_mine() {
   [ "$(record_get "$RELAY_RECORD" pid)" = "$$" ]
 }
 
+# True while bin/fm-afk-launch.sh holds its lock: an entry, refresh, or stop is
+# rewriting the away-mode state, so the relay must not start a daemon under it.
+relay_afk_launch_busy() {
+  local pid
+  pid=$(cat "$STATE/.afk-launch.lock/pid" 2>/dev/null) || return 1
+  fm_pid_alive "$pid"
+}
+
+# One pass of away or quiet mode (the usage above): run the away daemon as this
+# relay's child until state/.afk clears, it exits, or this relay is replaced.
+relay_host_daemon() {
+  local thread mode rc
+  if daemon_lock_held_by_live_daemon || relay_afk_launch_busy; then
+    sleep "$IDLE_POLL"
+    return 0
+  fi
+  thread=$(record_get "$HOST_RECORD" thread)
+  if [ -z "$thread" ]; then
+    printf 'fm-t3-host relay: no primary thread recorded in %s; cannot run the away daemon\n' "$HOST_RECORD" >&2
+    sleep "$IDLE_POLL"
+    return 0
+  fi
+  mode=$(head -n 1 "$STATE/.afk" 2>/dev/null)
+  printf 'fm-t3-host relay: running the %s-mode daemon for %s, aimed at %s\n' "${mode:-away}" "$FM_HOME" "$thread"
+  # The launcher already prepared the flag and cleared stale artifacts; the
+  # daemon cannot discover a thread from a service, so it is named here, and
+  # the record-backed doorbell a Claude primary needs is one any thread opens.
+  FM_HOME="$FM_HOME" FM_SUPERVISOR_BACKEND=t3code FM_SUPERVISOR_TARGET="$thread" \
+    FM_DAEMON_PRIMARY_HARNESS=claude FM_AFK_STATE_PREPARED=1 "$DAEMON_ENTRY" &
+  RELAY_DAEMON_PID=$!
+  while kill -0 "$RELAY_DAEMON_PID" 2>/dev/null; do
+    if [ ! -e "$STATE/.afk" ] || ! fm_t3_relay_mine; then
+      kill -TERM "$RELAY_DAEMON_PID" 2>/dev/null
+      break
+    fi
+    sleep "$MODE_POLL"
+  done
+  wait "$RELAY_DAEMON_PID"
+  rc=$?
+  RELAY_DAEMON_PID=
+  printf 'fm-t3-host relay: the away daemon exited (rc=%s)\n' "$rc"
+  # A daemon that exits while the flag stands is restarted after a pause; a
+  # stop in progress clears the flag within it.
+  [ ! -e "$STATE/.afk" ] || sleep "$IDLE_POLL"
+}
+
 cmd_relay() {
   local out msg arm_pid rc pred='' n=0 started
   mkdir -p "$STATE"
@@ -214,26 +279,58 @@ cmd_relay() {
   fi
   started=$(fm_t3_relay_proc_started "$$")
   printf 'pid=%s\nstarted=%s\n' "$$" "$started" > "$RELAY_RECORD.tmp" && mv "$RELAY_RECORD.tmp" "$RELAY_RECORD"
-  trap 'fm_t3_relay_mine && rm -f "$RELAY_RECORD"; kill "${arm_pid:-0}" 2>/dev/null; exit 0' TERM INT HUP
+  # shellcheck disable=SC2329 # Invoked by the trap below.
+  relay_exit() {
+    local child
+    fm_t3_relay_mine && rm -f "$RELAY_RECORD"
+    for child in ${arm_pid:-} ${RELAY_DAEMON_PID:-}; do kill "$child" 2>/dev/null; done
+    exit 0
+  }
+  trap relay_exit TERM INT HUP
   # shellcheck source=bin/fm-supervision-lib.sh
   . "$SCRIPT_DIR/fm-supervision-lib.sh"
+  # The daemon-lock liveness helpers; sourcing enables errexit, which this
+  # loop does not use.
+  # shellcheck source=bin/fm-afk-start.sh
+  . "$SCRIPT_DIR/fm-afk-start.sh"
+  set +e
   out=$(mktemp) || die "mktemp failed"
   msg=$(mktemp) || die "mktemp failed"
   echo "fm-t3-host relay: owning watcher for $FM_HOME (pid $$)"
   while fm_t3_relay_mine; do
     # While state/.afk exists the away daemon owns the watcher and triage
-    # (docs/t3code-backend.md "Away-mode supervisor support").
-    if [ -e "$STATE/.afk" ] || ! fm_supervision_needed "$STATE"; then
+    # (docs/t3code-backend.md "Away-mode supervisor support"), run here.
+    if [ -e "$STATE/.afk" ]; then
+      pred=''
+      relay_host_daemon
+      continue
+    fi
+    if ! fm_supervision_needed "$STATE"; then
       pred=''
       sleep "$IDLE_POLL"
       continue
     fi
     : > "$out"
-    FM_HOME="$FM_HOME" FM_WATCH_PREDECESSOR_ARM_PID="$pred" "$SCRIPT_DIR/fm-watch-arm.sh" > "$out" 2>&1 &
+    FM_HOME="$FM_HOME" FM_WATCH_PREDECESSOR_ARM_PID="$pred" "$ARM_ENTRY" > "$out" 2>&1 &
     arm_pid=$!
+    # Entering away or quiet mode mid-cycle hands the watcher to the daemon at
+    # once; the watcher queues every wake durably before it reports one.
+    while kill -0 "$arm_pid" 2>/dev/null; do
+      if [ -e "$STATE/.afk" ] || ! fm_t3_relay_mine; then
+        kill -TERM "$arm_pid" 2>/dev/null
+        break
+      fi
+      sleep "$MODE_POLL"
+    done
     wait "$arm_pid"
     rc=$?
     pred=$arm_pid
+    arm_pid=
+    # A wake that closes once the mode began stays queued for the daemon.
+    if [ -e "$STATE/.afk" ]; then
+      pred=''
+      continue
+    fi
     if grep -Eq '^(signal:|stale:|check:|heartbeat($|:))' "$out"; then
       n=$((n + 1))
       {
@@ -244,7 +341,7 @@ cmd_relay() {
         fm_t3_session_holder_alive "$STATE" || printf '%s\n' "$FM_T3_REOPENED_SESSION_HINT"
         printf '%s\n' 'Run bin/fm-wake-drain.sh first and handle the wake. The relay owns watcher continuity; do not arm a watcher yourself.'
       } > "$msg"
-      deliver "fm-t3-relay-$$-$arm_pid-$n" "$msg" || break
+      deliver "fm-t3-relay-$$-$pred-$n" "$msg" || break
     elif [ "$rc" -ne 0 ]; then
       printf 'fm-t3-host relay: arm closed without a wake (rc=%s): %s\n' "$rc" "$(grep -E '^watcher:' "$out" | tail -1)" >&2
       pred=''

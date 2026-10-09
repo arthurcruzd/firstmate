@@ -200,6 +200,10 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$FM_DAEMON_DIR/fm-busy-lib.sh"
 
+# The reopened-session hint for a T3-hosted supervisor thread.
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$FM_DAEMON_DIR/fm-t3-host-lib.sh"
+
 # --- tunables ---------------------------------------------------------------
 # Supervisor backends this daemon knows how to inject into today. zellij, orca,
 # and cmux are real backends elsewhere in firstmate (bin/fm-backend.sh) but this
@@ -475,6 +479,14 @@ classify_stale() {  # <window> <state> [<span-record> <span-status>]
 }
 
 classify_check() {  # <full reason>  — check scripts print only when firstmate should wake
+  # The watcher's own downtime recovery (after any watcher stop, such as a
+  # relay handing its cycle to this daemon or a service restart) asks for the
+  # queued wakes to be presented again; this drain already presents and
+  # classifies each of them, so the recovery wake itself needs no turn.
+  if [ "$1" = "check: rearm-resurface" ]; then
+    printf 'self|watcher recovery: queued wakes re-presented by this drain'
+    return 0
+  fi
   printf 'escalate|%s' "$1"
 }
 
@@ -1457,6 +1469,12 @@ inject_msg() {  # <message> [state]
   # them. Then use the canonical typed envelope so downstream consumers retain
   # the exact away-supervisor kind without interpreting this payload's prose.
   msg=$(_collapse_newlines "$msg")
+  # A T3 thread that T3 unloaded reopens on this message without its
+  # SessionStart hooks, so the escalation carries the relay's run-session-start
+  # hint whenever the session lock names a dead process.
+  if [ "${FM_SUPERVISOR_BACKEND:-tmux}" = t3code ] && ! fm_t3_session_holder_alive "$state"; then
+    msg="$msg $FM_T3_REOPENED_SESSION_HINT"
+  fi
   fm_operational_input_encode away-supervisor "$msg" encoded \
     || { INJECT_LAST_FAILURE="the digest could not be encoded"; log "inject failed: $INJECT_LAST_FAILURE"; return 1; }
   body=$msg
@@ -1945,7 +1963,7 @@ fm_super_main() {
     WATCHER_PID=$!
   }
 
-  local rc reason
+  local rc reason target_seen_at=0 now
   while true; do
     # --- pane-gone guard (preserved) ---------------------------------------
     # With the #29 watcher's enqueue-before-suppress, a wake is no longer
@@ -1953,12 +1971,18 @@ fm_super_main() {
     # off while the pane is gone: self-handling needs no pane, but escalation
     # has nowhere to go, and firstmate itself is the consumer of escalations.
     # Catch-up signals persist in state/*.status and flow on the next run, so
-    # this delays rather than loses work.
-    if ! fm_backend_target_exists "$BACKEND" "$TARGET"; then
-      log "warn: supervisor target '$TARGET' gone; backing off ${INJECT_FAIL_SLEEP}s, will retry"
-      # Flush is pointless with no pane; preserve any buffered escalations.
-      sleep "$INJECT_FAIL_SLEEP"
-      continue
+    # this delays rather than loses work. A target seen alive is rechecked on
+    # the housekeeping cadence rather than every loop pass, because a T3 read
+    # is a network call; inject_msg still checks the target before each send.
+    now=$(_now)
+    if [ $((now - target_seen_at)) -ge "${FM_HOUSEKEEPING_TICK:-$HOUSEKEEPING_TICK_DEFAULT}" ]; then
+      if ! fm_backend_target_exists "$BACKEND" "$TARGET"; then
+        log "warn: supervisor target '$TARGET' gone; backing off ${INJECT_FAIL_SLEEP}s, will retry"
+        # Flush is pointless with no pane; preserve any buffered escalations.
+        sleep "$INJECT_FAIL_SLEEP"
+        continue
+      fi
+      target_seen_at=$now
     fi
 
     # --- (re)start watcher if it has exited --------------------------------
