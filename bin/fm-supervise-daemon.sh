@@ -207,8 +207,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # docs/herdr-backend.md and AGENTS.md section 4's
 # harness-verification discipline. Selecting one refuses loudly at startup
 # instead of silently running tmux primitives against a pane that is not a tmux
-# pane. t3code injects through the adapter's thread.turn.start, with its
-# shared thread classification as the busy verdict.
+# pane. t3code injects through the adapter's t3_thread_send, with its
+# thread status table as the busy verdict.
 FM_SUPERVISOR_SUPPORTED_BACKENDS="tmux herdr t3code"
 INJECT_SKIP_DEFAULT="heartbeat"
 STALE_ESCALATE_SECS_DEFAULT=240

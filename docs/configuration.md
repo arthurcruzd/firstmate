@@ -531,8 +531,8 @@ The `/afk` sub-supervisor injects escalation digests into firstmate's own endpoi
 It supports `tmux` and `herdr` supervisor panes and `t3code` supervisor threads.
 
 Set `FM_SUPERVISOR_BACKEND=tmux|herdr|t3code` and `FM_SUPERVISOR_TARGET=<target>` to override both axes explicitly; for herdr the target is `"<session>:<pane-id>"`, and for t3code it is the thread id.
-Without overrides, backend detection uses `$TMUX_PANE` first, then `HERDR_ENV=1` with `HERDR_PANE_ID`, then a cwd match over the T3 shell snapshot only when T3 Code is explicitly selected, then falls back to `tmux`.
-T3 discovery requires explicit `FM_BACKEND=t3code` or `config/backend=t3code`, an origin (`FM_T3CODE_ORIGIN` or the runtime file described in [`t3code-backend.md`](t3code-backend.md#setup)), and a `config/t3code-token` file under the effective config directory before making an HTTP call.
+Without overrides, backend detection uses `$TMUX_PANE` first, then `HERDR_ENV=1` with `HERDR_PANE_ID`, then a cwd match over T3's live threads only when T3 Code is explicitly selected, then falls back to `tmux`.
+T3 discovery requires explicit `FM_BACKEND=t3code` or `config/backend=t3code` and the `config/t3code-token` credential from the [T3 sign-in](t3code-backend.md#sign-in) under the effective config directory before making a T3 call.
 
 That keeps a tmux pane nested inside herdr on the tmux transport, matching the runtime backend's innermost-first rule.
 Target detection uses `FM_SUPERVISOR_TARGET`, then `$TMUX_PANE`, then `"${HERDR_SESSION:-default}:${HERDR_PANE_ID}"` under herdr, then the T3 thread id, then the legacy `firstmate:0` tmux fallback with a warning.
@@ -2357,7 +2357,7 @@ FM_PROJECTS_OVERRIDE=    # alternate projects dir, mainly for tests
 FM_CONFIG_OVERRIDE=      # alternate config dir, mainly for tests
 FM_PROC_ROOT_OVERRIDE=   # alternate /proc root for Linux process-identity reads in fm-wake-lib.sh and fm-teardown.sh, mainly for tests
 FM_BACKEND=             # optional runtime backend override for new spawns; tmux/herdr/zellij/orca/cmux/t3code support ship/scout spawns, codex-app is not accepted
-FM_T3CODE_ORIGIN=       # optional T3 Code server origin override for backend=t3code; the default is read from ~/.t3/userdata/server-runtime.json
+FM_T3CODE_ORIGIN=       # optional T3 Code server origin for bin/fm-t3-mcp.mjs login; the default is read from ~/.t3/userdata/server-runtime.json
 FM_TRACE_CONTEXT=       # optional trace-context override; see "Trace context propagation"
 FM_TASK_ID=             # internal task-worker marker fm-spawn.sh delivers to ship and scout environments, never set by hand; bin/fm-test-run.sh refuses to execute in the repository primary checkout while it is set
 FM_TASK_INBOX=          # internal: absolute path of the task's steering inbox (state/<id>.inbox) that fm-spawn.sh exports into every ship, scout, and secondmate launch, never set by hand; the steering doorbell names "$FM_TASK_INBOX"

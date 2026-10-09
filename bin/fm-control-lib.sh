@@ -306,22 +306,22 @@ fm_control_backend_state_verified() {  # <backend>
   return 1
 }
 
-# Whether <backend> stops an agent natively, through its own session API,
-# instead of through the harness exit command typed into the composer. T3 has
-# no composer: `thread.session.stop` is its exit, and the session reading
-# `stopped` afterwards is the same recovery-grade proof the typed path waits
-# for (bin/backends/t3code.sh's fm_backend_t3code_agent_stop).
-fm_control_backend_native_exit() {  # <backend>
+# Whether <backend> can stop an agent for `exit`. T3 Code cannot: it has no
+# composer for the harness exit command, and its Orchestrator V2 `/mcp` tools
+# offer no session stop, only a turn interrupt that leaves the thread idle and
+# alive, so no stop could be proven and `exit` refuses before anything is
+# sent (docs/t3code-backend.md "Active limits").
+fm_control_backend_exit_supported() {  # <backend>
   case "${1-}" in
-    t3code) return 0 ;;
+    t3code) return 1 ;;
   esac
-  return 1
+  return 0
 }
 
 # Whether <backend> can launch a REPLACEMENT agent into an existing task's
 # endpoint. A T3 thread is bound to the driver that first ran it (the server
 # answers "is bound to driver 'codex' and cannot switch to 'claudeAgent'"),
-# and a turn on a stopped thread restarts the same agent with its transcript
+# and a new turn on the thread continues the same agent with its transcript
 # rather than a fresh one, so t3code has no replacement to launch and a
 # relaunch is refused before anything is stopped (docs/t3code-backend.md
 # "Active limits"). zellij, orca, and cmux never reach this table: they fail

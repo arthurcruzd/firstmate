@@ -1,86 +1,63 @@
 #!/usr/bin/env bash
-# Token-free real-server guard. FM_T3CODE_LIVE_E2E=1 forces it on, =0 off.
-# FM_T3CODE_PROMPT_LIVE=1 (or FM_LIVE=1) additionally submits a short prompt.
-# Uses the configured bearer and owns only its fresh temporary project/threads.
+# Token-free live guard for the t3code backend's `/mcp` transport against the
+# real T3 server a home is signed in to. It spends no model tokens and changes
+# nothing on the server: the capability gate and environment identity
+# (status), the project catalog the adapter matches by real path, and a typed
+# thread-not-found read (state). Default-on wherever node is installed;
+# FM_T3CODE_LIVE_E2E=0 or FM_LIVE=0 turns it off, and FM_T3CODE_LIVE_E2E=1 or
+# FM_LIVE=1 makes a missing credential or unreachable server a failure.
+# The credential is FM_T3CODE_LIVE_TOKEN_FILE, else FM_CONFIG_OVERRIDE's, else
+# this checkout's own config/t3code-token; none present is a clean skip.
 # Refresh: FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
-set -euo pipefail
+# docs/verification/runtime-backends.md "T3 Code" records its result.
+set -u
+
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# shellcheck source=bin/fm-backend.sh
-. "$ROOT/bin/fm-backend.sh"
-fm_backend_source t3code
-if [ -n "${FM_T3CODE_ORIGIN:-}" ] || [ -f "$(fm_backend_t3code_runtime_file)" ] \
-  || command -v t3 >/dev/null 2>&1 || [ -d "/Applications/T3 Code.app" ] \
-  || [ -d "/Applications/T3 Code (Nightly).app" ]; then
-  t3code-server() { :; }
-fi
-fm_live_gate default-on FM_T3CODE_LIVE_E2E node treehouse t3code-server
-version=unknown
-project=''
-thread=''
-checked=0
-TMP_ROOT=$(fm_test_tmproot fm-t3code-live)
-cleanup() {
-  local rc=$? cmd
-  trap - EXIT
-  if [ -n "$thread" ]; then
-    fm_backend_t3code_agent_stop "$thread" || rc=1
-    cmd=$(fm_backend_t3code_command thread.delete "threadId=$thread")
-    fm_backend_t3code_dispatch "$cmd" >/dev/null || rc=1
+
+fm_live_gate default-on FM_T3CODE_LIVE_E2E node
+
+REQUESTED=0
+[ "${FM_T3CODE_LIVE_E2E:-}" = 1 ] || [ "${FM_LIVE:-}" = 1 ] && REQUESTED=1
+TOKEN=${FM_T3CODE_LIVE_TOKEN_FILE:-${FM_CONFIG_OVERRIDE:-$ROOT/config}/t3code-token}
+HELPER="$ROOT/bin/fm-t3-mcp.mjs"
+
+skip_or_fail() {  # <reason>
+  if [ "$REQUESTED" = 1 ]; then
+    fail "FM_T3CODE_LIVE_E2E was requested but $1"
   fi
-  if [ -n "$project" ]; then
-    cmd=$(fm_backend_t3code_command project.delete "projectId=$project")
-    fm_backend_t3code_dispatch "$cmd" >/dev/null || rc=1
-    if fm_backend_t3code_api GET /api/orchestration/shell | node -e '
-const d=JSON.parse(require("fs").readFileSync(0,"utf8"));
-process.exit((d.projects || []).some(p => p.id === process.argv[1] && !p.deletedAt) ? 1 : 0);
-' "$project"; then :; else rc=1; fi
-  fi
-  fm_test_cleanup
-  if [ "$rc" -ne 0 ]; then
-    printf 'not ok - T3 Code %s live guard failed (including cleanup)\n' "$version" >&2
-  elif [ "$checked" -ne 1 ]; then
-    printf 'not ok - T3 Code %s live guard checked nothing\n' "$version" >&2
-    rc=1
-  else
-    pass "T3 Code $version live lifecycle and cleanup"
-  fi
-  exit "$rc"
+  printf 'skip: live: %s\n' "$1"
+  exit 0
 }
-trap cleanup EXIT
-version=$(fm_backend_t3code_api GET /.well-known/t3/environment | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).serverVersion)')
-fm_backend_t3code_runtime_check
-project=$(fm_backend_t3code_project_ensure "$TMP_ROOT")
-selection=$(fm_backend_t3code_model_selection codex "${FM_T3CODE_LIVE_MODEL:-gpt-5.6-sol}" default "$project")
-thread=$(fm_backend_t3code_uuid)
-fm_backend_t3code_thread_create "$project" fm-live-guard '' '' "$selection" "$thread"
-fm_backend_t3code_thread_read "$thread" 1 | node -e '
-const t=JSON.parse(require("fs").readFileSync(0,"utf8")).thread;
-if (t.id !== process.argv[1] || t.projectId !== process.argv[2] || t.worktreePath !== null) process.exit(1);
-' "$thread" "$project"
-[ "$(fm_backend_t3code_probe "$thread")" = idle ]
-[ "$(fm_backend_t3code_state_row "$(fm_backend_t3code_probe "$thread")")" = 'idle alive' ]
-[ "$(fm_backend_capture t3code "$thread" 20)" = 't3code: session=none turn=none' ]
-# A real subscribed snapshot proves the installed server still speaks the
-# reader protocol. No thread beyond this guard is selected for output.
-FM_T3CODE_RUNTIME_FILE=$(fm_backend_t3code_runtime_file) \
-FM_T3CODE_TOKEN_FILE="$(fm_backend_t3code_config_dir)/t3code-token" \
-  node "$ROOT/bin/backends/t3code-eventwait.cjs" 1 "$thread" > "$TMP_ROOT/events"
-assert_grep 'subscribed' "$TMP_ROOT/events" "T3 Code $version did not acknowledge the stream"
-assert_grep "$thread" "$TMP_ROOT/events" "T3 Code $version stream checked no owned thread"
-# The token-free lifecycle has passed even when the nested prompt gate skips.
-checked=1
-(
-  fm_live_gate opt-in FM_T3CODE_PROMPT_LIVE node
-  fm_backend_t3code_turn_start "$thread" 'Reply with exactly FM_T3_LIVE_OK. Do not use tools.' "$selection"
-  for _ in $(seq 1 120); do
-    capture=$(fm_backend_capture t3code "$thread" 20)
-    if [[ "$capture" == *'[assistant] FM_T3_LIVE_OK'* ]]; then
-      pass "T3 Code $version prompt and capture"
-      exit 0
-    fi
-    sleep 1
-  done
-  fail "T3 Code $version prompt did not produce the expected reply"
-) | sed 's/^skip: live:/T3 prompt subtest skipped:/'
-fm_backend_t3code_agent_stop "$thread"
+
+[ -f "$TOKEN" ] || skip_or_fail "no T3 credential at $TOKEN"
+
+field() {  # <json> <key>
+  node -e 'const d=JSON.parse(process.argv[1]); const v=process.argv[2].split(".").reduce((o,k)=>o==null?o:o[k], d); process.stdout.write(v==null?"":typeof v==="object"?JSON.stringify(v):String(v))' "$1" "$2"
+}
+
+status=$(node "$HELPER" status --token-file "$TOKEN" 2>/dev/null)
+rc=$?
+case "$rc" in
+  0) ;;
+  1) skip_or_fail "the T3 server named by $TOKEN is unreachable" ;;
+  *) fail "T3 status refused (exit $rc): $status" ;;
+esac
+version=$(field "$status" serverVersion)
+env_id=$(field "$status" environmentId)
+[ -n "$version" ] && [ -n "$env_id" ] || fail "T3 status lacked a version or environment id: $status"
+
+TMP_ROOT=$(fm_test_tmproot fm-t3code-live)
+trap fm_test_cleanup EXIT
+out=$(node "$HELPER" project-read --project "fm-live-guard-$$-absent" --token-file "$TOKEN" 2>/dev/null)
+expect_code 3 $? "T3 $version: an absent project must read as a typed not-found"
+assert_equals project_not_found "$(field "$out" error.code)" "T3 $version: t3_project_list must parse into the project catalog"
+
+missing=$(node "$HELPER" state --thread "mcp:fm-live-guard-$$-absent" --token-file "$TOKEN" 2>/dev/null) \
+  || fail "T3 $version: a read of an absent thread should succeed as exists:false: $missing"
+assert_equals false "$(field "$missing" exists)" "T3 $version: an absent thread must read exists:false"
+
+node "$HELPER" thread-for-root --root "$TMP_ROOT" --token-file "$TOKEN" >/dev/null 2>&1
+expect_code 5 $? "T3 $version: a root no project uses must find no supervisor thread"
+
+pass "t3code live transport: T3 $version environment $env_id passes the gate (telemetry=$(field "$status" telemetry))"

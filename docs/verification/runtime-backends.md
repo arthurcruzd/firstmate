@@ -1985,80 +1985,75 @@ The portable classifier regression is `tests/fm-backend-cmux.test.sh`.
 
 ## T3 Code
 
-### Stable source pin
+### Orchestrator V2 transport
 
-Verified on 2026-10-01 against the read-only T3 Code `v0.0.44` tag (`451afcb22d93f06cb24f9bc16703404564952553`).
-The contracts and server source contain the V1 HTTP shell, thread detail, dispatch, environment descriptor, WebSocket ticket and subscription, every command the adapter dispatches, `threadAutoSettleOptOut`, and the per-thread `thread.auto-settle.set` command.
-The checked command set is `project.create`, `project.delete`, `thread.create`, `thread.delete`, `thread.archive`, `thread.auto-settle.set`, `thread.turn.start`, `thread.turn.interrupt`, and `thread.session.stop`.
-The checked stream records are `snapshot`, `synchronized`, `project-upserted`, `project-removed`, `thread-upserted`, and `thread-removed`, with `backgroundLiveness` on shell thread rows.
-The server descriptor reports `orchestrationProtocolVersion`, and the adapter refuses V2 before mutations.
-The local running server was a later nightly, so the stable pin has source verification and portable fake-server coverage, not a live v0.0.44 run.
+The `/mcp` transport was verified live on 2026-10-08 against `t3 v0.0.46-nightly.20261008.2833` (npm launcher plus native `@t3code/t3-darwin-arm64`), run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295, codex-cli 0.160.1, node 26.8.2, and treehouse 2.3.0 on macOS arm64.
+That run drove `bin/fm-t3-mcp.mjs` through an earlier standalone wiring of the same helper in a scratch Firstmate home, scratch project, and private Treehouse pool root; this backend's adapter calls the same tools with the same arguments, but its own wiring has fake-server coverage only and no live run yet.
+T3 stable 0.0.45 lacks the `t3_thread_*` tools, and 0.0.46 nightly answers 404 for the pre-V2 `POST /api/orchestration/dispatch` route.
 
 ```sh
-git -C <read-only-t3code-clone> checkout v0.0.44
-git -C <read-only-t3code-clone> describe --tags --exact-match
-rg -n 'orchestrationProtocolVersion|threadAutoSettleOptOut|thread.auto-settle.set' <read-only-t3code-clone>/packages/contracts/src <read-only-t3code-clone>/apps/server/src/environment
-rg -n 'orchestration/shell|orchestration/threads|orchestration/dispatch|websocket-ticket' <read-only-t3code-clone>/packages/contracts/src/environmentHttp.ts
+bin/fm-t3-mcp.mjs login --url http://127.0.0.1:<port> --access full-access --t3 <t3> --base-dir <t3-base-dir>
+bin/fm-t3-mcp.mjs status
+t3 auth session revoke <id> --base-dir <t3-base-dir>
 ```
 
 ```text
-v0.0.44
-environment.ts:146: threadAutoSettleOptOut
-environment.ts:197: orchestrationProtocolVersion
-orchestration.ts:1227: thread.auto-settle.set
-environmentHttp.ts:441: /api/auth/websocket-ticket
-environmentHttp.ts:524: /api/orchestration/threads/:threadId
-environmentHttp.ts:533: /api/orchestration/dispatch
+{"ok":true,...,"environmentId":"<id>","serverVersion":"0.0.46-nightly.20261008.2833",...,"telemetry":"off"}
+{"ok":true,...,"exists":true,"archived":true,"status":"interrupted","activeRunId":null,...}
+{"ok":false,"error":{"code":"unauthorized",...}}
 ```
 
-### Live lifecycle guard
+Measured on that run:
 
-The earlier live lifecycle guard ran on 2026-09-15 against T3 Code `0.0.41-nightly.20260914.1722`, before the stable v0.0.44 pin.
-Those runs do not validate the current version floor or auto-settle opt-out.
-The current token-free guard checks the descriptor and strict version floor, project registration, thread creation with auto-settle disabled, thread read, native state, capture, stop, and deletion of its own thread and project.
-It also opens the real `/ws` shell subscription with a short-lived ticket, requires its synchronized snapshot to contain the owned thread, and checks the reader completes its budget successfully.
-It uses only a fresh temporary project and never starts a model turn unless `FM_T3CODE_PROMPT_LIVE=1` or `FM_LIVE=1` is set.
-Refresh with the configured Firstmate home:
+| Step | Result |
+| --- | --- |
+| Spawn, including the Treehouse lease and idle-thread launch | 18.3 s |
+| Spawn return to a Claude scout's `done` line, report, and captain-hold gate | 20.7 s |
+| Inbox steer send to the worker's `handled/` acknowledgement | 8.2 s |
+| Interrupt of a running `python3` tool call, confirmed by `t3_thread_wait` | 3.2 s; the child was gone 2 s later |
+| Teardown, including the archive read-back and slot return | 12.5 s; the slot read `available` afterwards |
+| A Codex `gpt-5.6-luna` scout from spawn to `done` | 43 s; teardown completed |
+
+Live facts the backend relies on:
+
+- `t3_thread_launch` without a message creates an idle thread whose `worktreePath`, `providerInstanceId`, and `runtimeMode` read back exactly as requested, under a T3-assigned `mcp:<uuid>` id.
+- A launch on a path that is not one of the project's git worktrees is refused with `invalid_request`, and no thread is created.
+- `t3_thread_send` with a repeated `clientRequestId` returns the same run instead of a second turn.
+- `t3_thread_interrupt` on an idle thread returns `no_active_run`; on a running turn, `t3_thread_wait` then reports `interrupted`.
+- `t3_thread_organize archive` reads back `archived:true` with `activeRunId:null`, and a later send is refused with `thread_not_sendable`.
+- T3's Claude reads the worktree's `.claude/settings.local.json`: Firstmate's busy and turn-end hooks fired, and a lab commit carried no agent co-author trailer.
+- The listening server's process environment showed `T3CODE_TELEMETRY_ENABLED=false`, so status reported `telemetry: off`.
+- After `t3 auth session revoke`, `t3 auth session list` reported no active sessions and the next helper call was refused as unauthorized.
+- The 0.0.46 nightly binary's schemas offer the `root`, `existing_worktree`, and `worktree` launch workspace strategies, `t3_thread_list` filtered by status per project, and no session-stop tool, which is why a secondmate launches at `root` and `fm-control.sh exit` refuses.
+
+### Live transport guard
+
+The token-free guard checks the gate, the project catalog, a typed missing-thread read, and the supervisor lookup against the server the configured credential names, and changes nothing there.
 
 ```sh
 FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
 ```
 
 ```text
-ok - T3 Code 0.0.41-nightly.20260914.1722 live lifecycle and cleanup
+ok - t3 live transport: T3 0.0.46-nightly.20261008.2833 environment <id> passes the gate (telemetry=off)
 ```
 
-The optional prompt arm also passed on 2026-09-15 against that version:
-
-```sh
-FM_CONFIG_OVERRIDE=<home>/config FM_T3CODE_PROMPT_LIVE=1 bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
-```
-
-```text
-ok - T3 Code 0.0.41-nightly.20260914.1722 prompt and capture
-ok - T3 Code 0.0.41-nightly.20260914.1722 live lifecycle and cleanup
-```
+That result is from the standalone guard of the 2026-10-08 run, which made the same gate and missing-thread checks; refresh it with the command above after signing in.
 
 ### Portable regression coverage
 
 ```sh
+tests/fm-t3-mcp.test.sh
 tests/fm-backend-t3code.test.sh
-tests/fm-backend-t3code-events.test.sh
 tests/fm-backend.test.sh
 tests/fm-daemon.test.sh
 ```
 
-The fake-server suite covers the token and version gates, project matching, create and turn-start payloads, effort option ids, capture, keys, native status, stop-then-archive cleanup, per-directory environment, worker and secondmate spawn, the secondmate bearer link, launch-setting refusals, abort cleanup lease retention, tracked Codex configuration preservation, teardown ordering, native exit, relaunch refusal, and away-target lookup.
-Portable adapter tests use fake T3 and Treehouse boundaries rather than locally installed services.
-`test_uncertain_launch_turn_keeps_git_hooks` in `tests/fm-backend-t3code.test.sh` covers a server-accepted launch whose two responses are lost, asserting that the task's Git hook directory survives metadata rollback.
-The suite also drives the watcher through the T3 wedge and dead-agent paths, including stopped or failed sessions with background work, fresh live working jobs, and idle monitoring jobs.
-It verifies bounded alerts for hung turns and background jobs that outlive the turn-age limit.
-The same suite covers unknown busy state under shell-read failures, retained stale alerts and external-wait rechecks, once-per-condition reporting through transient detail failures, and re-arming after confirmed activity, archive, or HTTP 404.
-Its native-restart regression covers an undelivered warning queued before stop, fresh-start queue discard, startup rollback, exactly one replacement under persistent uncertainty, and suppression after delivery.
-`tests/fm-backend-t3code-events.test.sh` covers the shared classification on the stream path, subscription framing, thread filtering, reconnect reconciliation, deduplication, and polling fallback.
+`tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, launch binding and its uncertain and refused outcomes, send idempotency, capture, interrupt claims, the proven archive, and the supervisor lookup.
+`tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort and uncertain-launch lease retention, tracked Codex configuration preservation, the exit and relaunch refusals, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
 `tests/fm-daemon.test.sh` covers discovery precedence and native busy state.
 
-The tracked Codex configuration guard passed on 2026-09-15 with `codex-cli 0.154.0` and Python 3.14.7.
+The tracked Codex configuration guard is independent of the transport and passed on 2026-09-15 with `codex-cli 0.154.0` and Python 3.14.7.
 It proves the project model survives, `FM_TASK_ID` reaches `command/exec`, ordinary staging and commits retain the original configuration blob, and teardown restores the original CRLF bytes and Git flag.
 It capability-skips when Codex is absent and fails on absence when explicitly requested:
 
@@ -2070,19 +2065,12 @@ FM_T3_CODEX_CONFIG_LIVE=1 bin/fm-test-run.sh tests/fm-backend-t3code.test.sh
 ok - codex-cli 0.154.0: project config retained; shell FM_TASK_ID=t3codextrk2
 ```
 
-### Additional live evidence
+### Per-directory environment evidence
 
-The initial API probe ran on 2026-09-14 against the then-current floor, T3 Code `0.0.41-nightly.20260914.1707`, which the current version gate rejects.
-It proved bearer authorization, project and external-worktree binding, Claude mid-turn steering, interrupt, the `null` to `starting` to `running` to `ready` to `stopped` status sequence, and that thread archive or deletion does not remove the worktree.
-
-Additional adapter smokes ran on 2026-09-15 against T3 Code `0.0.41-nightly.20260914.1722`.
-Claude and Codex scouts ran in Treehouse-pooled worktrees, reported `t3code-native` busy state, and stopped and archived before their leases returned.
-Claude and Codex both received per-directory environment through their native project configuration, and a Claude secondmate ran as the home's unique worktree-less thread before teardown archived it and removed the home while retaining the T3 project and transcript.
-Captain-thread discovery resolved the home to its own T3 thread, and a native away-mode drill delivered one blocked-worker escalation as an `away-supervisor` turn after the captain had settled.
-The control smoke proved `relaunch` refuses without stopping the session, `exit` stops it idempotently, and teardown then archives it and returns the slot.
+Adapter smokes on 2026-09-15, through the pre-V2 transport, established the transport-independent facts this backend still relies on.
+Claude and Codex both received per-directory environment through their native project configuration.
 Claude required the task-worker statement in the worktree's git-excluded `CLAUDE.local.md` to accept the encoded launch brief.
-A Codex mid-turn steer joined the running turn, and a new turn restarted a stopped thread under the same driver while a driver switch ended in the server's bound-driver error.
-Local paths, thread ids, and one-off task chronology are intentionally not retained here.
+A Codex mid-turn steer joined the running turn.
 
 ## Codex App host tools
 

@@ -118,10 +118,10 @@
 #   absent backend= means tmux. Orca and cmux do not support --secondmate spawns.
 #   t3code is experimental (docs/t3code-backend.md): T3 Code
 #   owns the agent session, so the spawn leases a treehouse slot durably,
-#   creates a T3 thread on it, and starts the launch turn over HTTP instead of
-#   typing into a pane; only claude and codex harnesses. The exports a pane
-#   would receive before launch travel as per-directory harness config instead
-#   (spawn_t3code_env_install).
+#   launches a T3 thread on it, and sends the launch brief over T3's /mcp
+#   endpoint instead of typing into a pane; only claude and codex harnesses.
+#   The exports a pane would receive before launch travel as per-directory
+#   harness config instead (spawn_t3code_env_install).
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
@@ -319,8 +319,8 @@
 # Launch delivery:
 #   Every pane-backed launch receives its complete command from a never-reused
 #   0600 file in a 0700 home-scoped task namespace under /tmp, while the pane
-#   receives only a short source line. T3 Code starts a turn over HTTP instead
-#   and carries the encoded brief directly.
+#   receives only a short source line. T3 Code sends a thread message over
+#   /mcp instead and carries the encoded brief directly.
 #   This keeps commands beyond the terminal's roughly 1,024-byte input boundary
 #   intact, prevents a delayed source line from being rebound by a relaunch, and
 #   prevents equal task ids in different Firstmate homes from sharing a file.
@@ -1414,10 +1414,20 @@ spawn_abort_cleanup() {
     fi
   fi
   # Nothing has run in a leased slot before the launch turn, so an abort
-  # archives the thread (it must never re-create its worktree at a returned
-  # slot) and hands the lease back only once that succeeded; after publication
-  # the record's own teardown owns both.
-  if [ "$T3CODE_ABORT_CLEANUP" = 1 ]; then
+  # archives the thread (it must never act in a returned slot) and hands the
+  # lease back only once that succeeded; after publication the record's own
+  # teardown owns both.
+  if [ "$T3CODE_CREATE_UNCERTAIN" = 1 ]; then
+    # t3_thread_launch has no idempotency key, so a launch whose outcome was
+    # lost may have left a thread whose id never came back.
+    T3CODE_CREATE_UNCERTAIN=0
+    if [ "$T3CODE_LEASED" = 1 ]; then
+      T3CODE_LEASED=0
+      echo "warning: the T3 thread launch for $ID did not report an outcome; the leased worktree $WT stays leased until any thread T3 bound to it is found in T3 Code and archived, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
+    else
+      echo "warning: the T3 thread launch for $ID did not report an outcome; find and archive any thread it left in T3 Code before reusing its home" >&2
+    fi
+  elif [ "$T3CODE_ABORT_CLEANUP" = 1 ]; then
     T3CODE_ABORT_CLEANUP=0
     if ! fm_backend_kill t3code "$T"; then
       if [ "$T3CODE_LEASED" = 1 ]; then
@@ -1425,14 +1435,6 @@ spawn_abort_cleanup() {
         echo "warning: could not stop and archive T3 thread $T for $ID, so the leased worktree $WT stays leased; archive the thread in T3 Code, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
       else
         echo "warning: could not stop and archive T3 thread $T for $ID; archive it in T3 Code" >&2
-      fi
-    elif [ "$T3CODE_CREATE_UNCERTAIN" = 1 ]; then
-      # Two lost creation responses cannot prove a late commit is impossible.
-      if [ "$T3CODE_LEASED" = 1 ]; then
-        T3CODE_LEASED=0
-        echo "warning: T3 thread creation for $T had two transport failures; the leased worktree $WT stays leased until T3 thread ownership is verified and the thread is archived" >&2
-      else
-        echo "warning: T3 thread creation for $T had two transport failures; verify and archive that thread before reusing its home" >&2
       fi
     fi
   fi
@@ -4102,21 +4104,21 @@ EOF
     T3CODE_MODEL_SELECTION=$(fm_backend_t3code_model_selection "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$T3CODE_PROJECT_ID") || exit 1
     if [ "$KIND" = secondmate ]; then
       # The home's own daemon and crew call the same server, so they read the
-      # primary's bearer through a link rather than a copy of the secret.
+      # primary's credential through a link rather than a copy of the secret.
       if ! { mkdir -p "$PROJ_ABS/config" &&
         ln -sfn "$(cd "$CONFIG" && pwd -P)/t3code-token" "$PROJ_ABS/config/t3code-token"; }; then
-        echo "error: could not link the T3 bearer into $PROJ_ABS/config for $ID" >&2
+        echo "error: could not link the T3 credential into $PROJ_ABS/config for $ID" >&2
         exit 1
       fi
-      # No worktree of its own: worktreePath null runs the thread in the
-      # project's workspaceRoot, the home, on whatever branch it is on.
-      T=$(fm_backend_t3code_uuid) || exit 1
-      T3CODE_ABORT_CLEANUP=1
-      fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
-        "$(git -C "$PROJ_ABS" branch --show-current 2>/dev/null || true)" "" "$T3CODE_MODEL_SELECTION" "$T" || {
-          [ "$?" -ne 5 ] || T3CODE_CREATE_UNCERTAIN=1
+      # No worktree of its own: the root workspace strategy runs the thread in
+      # the project's workspaceRoot, the home, on whatever branch it is on.
+      T3CODE_CREATE_UNCERTAIN=1
+      T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
+        "$(git -C "$PROJ_ABS" branch --show-current 2>/dev/null || true)" "" "$T3CODE_MODEL_SELECTION") || {
+          [ "$?" -eq 1 ] || T3CODE_CREATE_UNCERTAIN=0
           exit 1
         }
+      T3CODE_CREATE_UNCERTAIN=0
     else
       # A durable lease (bin/fm-home-seed.sh's pattern): there is no pane to run
       # the interactive `treehouse get` in, and a slot a live T3 thread points at
@@ -4128,13 +4130,13 @@ EOF
       [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
       T3CODE_LEASED=1
       validate_spawn_worktree "treehouse get --lease" "$W"
-      T=$(fm_backend_t3code_uuid) || exit 1
-      T3CODE_ABORT_CLEANUP=1
-      fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
-        "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$WT" "$T3CODE_MODEL_SELECTION" "$T" || {
-          [ "$?" -ne 5 ] || T3CODE_CREATE_UNCERTAIN=1
+      T3CODE_CREATE_UNCERTAIN=1
+      T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
+        "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$WT" "$T3CODE_MODEL_SELECTION") || {
+          [ "$?" -eq 1 ] || T3CODE_CREATE_UNCERTAIN=0
           exit 1
         }
+      T3CODE_CREATE_UNCERTAIN=0
     fi
     T3CODE_ABORT_CLEANUP=1
     ;;
@@ -4197,7 +4199,7 @@ spawn_send_key() { # <target> <key>
 # launch boundary and makes a dropped or ignored cwd change a refusal.
 spawn_enter_recorded_worktree() {
   [ "$KIND" = secondmate ] && return 0
-  # T3 starts the agent in the leased worktree recorded by thread.create;
+  # T3 starts the agent in the leased worktree its thread launch bound;
   # there is no shell endpoint to receive a cd command.
   [ "$BACKEND" = t3code ] && return 0
   spawn_send_text_line "$WT_TARGET" "cd -- $(shell_quote "$WT")" || {
@@ -5786,9 +5788,10 @@ spawn_launch_home_token() {
   printf '%s' "$hash"
 }
 if [ "$BACKEND" = t3code ]; then
-  # No pane: the launch is a turn.start carrying the same encoded brief the
-  # LAUNCH template embeds, with MODEL/EFFORT as the thread's model selection
-  # instead of CLI flags, so nothing is staged for a shell to source.
+  # No pane: the launch is the thread's first message, carrying the same
+  # encoded brief the LAUNCH template embeds; MODEL/EFFORT were fixed as the
+  # thread's model selection at launch instead of CLI flags, so nothing is
+  # staged for a shell to source.
   T3CODE_BRIEF_TEXT=$("$FM_ROOT/bin/fm-operational-input.sh" encode launch-brief < "$BRIEF") || exit 1
   SPAWN_LAUNCH_SENT=1
   fm_backend_t3code_turn_start "$T" "$T3CODE_BRIEF_TEXT" "$T3CODE_MODEL_SELECTION" || {

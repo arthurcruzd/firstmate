@@ -2,12 +2,14 @@
 # bin/backends/t3code.sh - the T3 Code orchestration-server adapter.
 #
 # T3 owns the agent session (it launches Claude or Codex itself) while
-# Treehouse still owns the task worktree. Firstmate drives the T3 server over
-# its HTTP orchestration API with a CLI-issued bearer. There is no terminal:
-# nothing is typed, a steer is a thread.turn.start, and Escape/Ctrl-C are a
-# thread.turn.interrupt.
+# Treehouse still owns the task worktree. Firstmate drives the T3 server only
+# through its Orchestrator V2 `/mcp` endpoint, signed in as an OAuth
+# `mcp-client`; bin/fm-t3-mcp.mjs owns that transport, the credential, the
+# `tools/list` capability gate, and the environment-id check, and every
+# primitive here is one call to it. There is no terminal: nothing is typed, a
+# steer is a t3_thread_send, and Escape/Ctrl-C are a t3_thread_interrupt.
 #
-# Target string shape: the T3 thread id (uuid).
+# Target string shape: the T3 thread id T3 assigned at launch.
 #
 # T3 sets environment variables per provider instance, never per thread, so
 # every fact firstmate would type into a pane before launch (GOTMPDIR,
@@ -19,12 +21,10 @@
 # for Claude, `.codex/config.toml` `[shell_environment_policy] set` for Codex.
 #
 # Config (gitignored config/ of the active home):
-#   t3code-token      the bearer, one line, mode 0600
+#   t3code-token      the mcp-client credential the captain's
+#                     `bin/fm-t3-mcp.mjs login` writes, mode 0600
 #   t3code-instances  optional `harness=instanceId` lines (claude=claudeAgent,
 #                     codex=codex by default)
-# FM_T3CODE_ORIGIN overrides the origin read from ~/.t3/userdata/server-runtime.json.
-
-FM_BACKEND_T3CODE_MIN_VERSION=0.0.44
 
 # T3 has no composer, but the shared submit dispatcher in bin/fm-backend.sh
 # prepares and reads the composer dialog sink around every adapter, so this
@@ -32,14 +32,16 @@ FM_BACKEND_T3CODE_MIN_VERSION=0.0.44
 # shellcheck source=bin/fm-composer-lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/../fm-composer-lib.sh"
 
+FM_BACKEND_T3CODE_HELPER="$(cd "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/fm-t3-mcp.mjs"
+
 # Sourced only through fm_backend_source in bin/fm-backend.sh, which owns
 # FM_BACKEND_CONFIG_DIR.
 fm_backend_t3code_config_dir() {
   printf '%s' "$FM_BACKEND_CONFIG_DIR"
 }
 
-fm_backend_t3code_runtime_file() {
-  printf '%s/.t3/userdata/server-runtime.json' "${HOME:-}"
+fm_backend_t3code_token_file() {
+  printf '%s/t3code-token' "$(fm_backend_t3code_config_dir)"
 }
 
 fm_backend_t3code_tool_check() {
@@ -47,168 +49,44 @@ fm_backend_t3code_tool_check() {
   command -v treehouse >/dev/null 2>&1 || { echo "error: backend=t3code selected but 'treehouse' is not installed" >&2; return 1; }
 }
 
-# fm_backend_t3code_api <GET|POST> <path> - one HTTP call against the T3
-# server; a POST body is read from stdin. Prints the response body. Exit codes:
-# 0 on 2xx, 4 on HTTP 404 (a legitimate "thread gone" answer for probes), 2 on
-# a missing token or HTTP 401 (the message names the mint command with the live
-# server version), 3 when no origin can be resolved, 5 on uncertain transport
-# failure, 1 otherwise. Every failure
-# prints one line on stderr carrying the server's JSON `reason` when it sent one.
-# shellcheck disable=SC2016  # Single quotes are deliberate: ${...} belongs to the Node snippet.
-FM_BACKEND_T3CODE_API_JS='
-const fs = require("fs");
-const [method, path] = process.argv.slice(1);
-const originEnv = process.env.FM_T3CODE_ORIGIN || "";
-const runtimeFile = process.env.FM_T3CODE_RUNTIME_FILE;
-const tokenFile = process.env.FM_T3CODE_TOKEN_FILE;
-function fail(code, msg) { console.error(msg); process.exit(code); }
-let origin = originEnv;
-if (!origin) {
-  let raw;
-  try { raw = fs.readFileSync(runtimeFile, "utf8"); }
-  catch (err) { fail(3, `error: backend=t3code cannot find the T3 server origin: ${runtimeFile} is unreadable (${err.message}); start T3 Code so it writes that file, or set FM_T3CODE_ORIGIN`); }
-  try { origin = JSON.parse(raw).origin || ""; }
-  catch (err) { fail(3, `error: backend=t3code cannot parse ${runtimeFile}: ${err.message}`); }
-  if (!origin) fail(3, `error: backend=t3code found no origin in ${runtimeFile}`);
-}
-origin = origin.replace(/\/+$/, "");
-const needsAuth = !path.startsWith("/.well-known/");
-async function serverVersion() {
-  try {
-    const res = await fetch(origin + "/.well-known/t3/environment", { signal: AbortSignal.timeout(10000) });
-    const data = await res.json();
-    return data.serverVersion || "<serverVersion>";
-  } catch { return "<serverVersion>"; }
-}
-async function mintHint() {
-  return `mint one with: npx t3@${await serverVersion()} auth session issue --json --ttl 30d --label firstmate` +
-    `, then write its token field to ${tokenFile} (mode 0600)`;
-}
-(async () => {
-  const headers = { "content-type": "application/json" };
-  if (needsAuth) {
-    let token = "";
-    try { token = fs.readFileSync(tokenFile, "utf8").trim(); } catch { token = ""; }
-    if (!token) fail(2, `error: backend=t3code has no bearer token at ${tokenFile}; ${await mintHint()}`);
-    headers.authorization = `Bearer ${token}`;
-  }
-  const init = { method, headers, signal: AbortSignal.timeout(10000) };
-  if (method === "POST") init.body = fs.readFileSync(0, "utf8");
-  let res;
-  try { res = await fetch(origin + path, init); }
-  catch (err) { fail(5, `error: backend=t3code cannot reach the T3 server at ${origin}: ${err.message}; start T3 Code and retry`); }
-  let text;
-  try { text = await res.text(); }
-  catch (err) { fail(5, `error: backend=t3code could not read the T3 response at ${origin}: ${err.message}; retry`); }
-  if (res.ok) { process.stdout.write(text); return; }
-  let reason = text;
-  try { const data = JSON.parse(text); reason = data.reason || data.message || data.code || text; } catch {}
-  if (res.status === 401) fail(2, `error: the T3 server rejected the bearer at ${tokenFile} (401: ${reason}); ${await mintHint()}`);
-  fail(res.status === 404 ? 4 : 1, `error: T3 ${method} ${path} failed (${res.status}): ${reason}`);
-})();
-'
-
-fm_backend_t3code_api() {  # <GET|POST> <path>
-  FM_T3CODE_RUNTIME_FILE=$(fm_backend_t3code_runtime_file) \
-  FM_T3CODE_TOKEN_FILE="$(fm_backend_t3code_config_dir)/t3code-token" \
-    node -e "$FM_BACKEND_T3CODE_API_JS" "$1" "$2"
+# fm_backend_t3code_mcp <verb> [args...] - one helper call against this home's
+# credential. It prints one JSON object (capture prints text) and exits as its
+# header says: 0 ok, 1 transport or unexpected failure, 2 invalid use, 3 a
+# typed T3 failure, 4 a local refusal (credential or capability gate), and
+# thread-for-root's 5 and 6. Every failure prints one stderr line.
+fm_backend_t3code_mcp() {
+  command -v node >/dev/null 2>&1 || { echo "error: backend=t3code selected but 'node' is not installed" >&2; return 1; }
+  node "$FM_BACKEND_T3CODE_HELPER" "$@" --token-file "$(fm_backend_t3code_token_file)"
 }
 
-# fm_backend_t3code_command <type> [field ...] - build one dispatch body with
-# a fresh commandId. `key=value` is a string, `key:=json` is raw JSON, and
-# `key=@now` is the current ISO time.
-fm_backend_t3code_command() {
+# fm_backend_t3code_json_get <key>: one top-level scalar from the helper's JSON
+# on stdin. Fails when the object is not ok or lacks the key.
+fm_backend_t3code_json_get() {  # <key>
   node -e '
-const crypto = require("crypto");
-const [type, ...fields] = process.argv.slice(1);
-const cmd = { type, commandId: crypto.randomUUID() };
-for (const field of fields) {
-  const eq = field.indexOf("=");
-  const raw = field.slice(0, eq).endsWith(":");
-  const key = raw ? field.slice(0, eq - 1) : field.slice(0, eq);
-  const value = field.slice(eq + 1);
-  if (raw) cmd[key] = JSON.parse(value);
-  else if (value === "@now") cmd[key] = new Date().toISOString();
-  else cmd[key] = value;
-}
-process.stdout.write(JSON.stringify(cmd));
-' "$@"
+const key = process.argv[1];
+let d;
+try { d = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { process.exit(1); }
+if (!d || d.ok !== true) process.exit(1);
+const v = d[key];
+if (v === undefined || v === null || typeof v === "object") process.exit(1);
+process.stdout.write(String(v));
+' "$1"
 }
 
-fm_backend_t3code_dispatch() {  # <command-json>
-  local rc
-  printf '%s' "$1" | fm_backend_t3code_api POST /api/orchestration/dispatch && return 0
-  rc=$?
-  [ "$rc" -eq 5 ] || return "$rc"
-  # T3 deduplicates commandId. Reuse the exact body after an uncertain transport failure.
-  printf '%s' "$1" | fm_backend_t3code_api POST /api/orchestration/dispatch
-}
-
-fm_backend_t3code_uuid() {
-  node -e 'process.stdout.write(require("crypto").randomUUID())'
-}
-
+# The credential, the capability gate (required t3_* tools and the
+# environment id recorded at sign-in), and the telemetry warning, before any
+# spawn or control mutation. The helper prints its own one-line reason.
 fm_backend_t3code_runtime_check() {
   fm_backend_t3code_tool_check || return 1
-  local descriptor
-  descriptor=$(fm_backend_t3code_api GET /.well-known/t3/environment) || return 1
-  # shellcheck disable=SC2016  # Single quotes are deliberate: ${...} belongs to the Node snippet.
-  printf '%s' "$descriptor" | node -e '
-const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
-const min = process.argv[1];
-const version = String(data.serverVersion || "");
-const parse = (v) => {
-  const m = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(v);
-  if (!m) return null;
-  const pre = m[4] ? m[4].split(".") : [];
-  if (pre.some((id) => /^0[0-9]+$/.test(id))) return null;
-  return { core: m.slice(1, 4).map(BigInt), pre };
-};
-const compare = (a, b) => {
-  for (let i = 0; i < 3; i++) if (a.core[i] !== b.core[i]) return a.core[i] > b.core[i] ? 1 : -1;
-  if (!a.pre.length || !b.pre.length) return Number(!a.pre.length) - Number(!b.pre.length);
-  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i++) {
-    const x = a.pre[i], y = b.pre[i];
-    if (x === y) continue;
-    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
-    const xn = /^[0-9]+$/.test(x), yn = /^[0-9]+$/.test(y);
-    if (xn !== yn) return xn ? -1 : 1;
-    return (xn ? BigInt(x) > BigInt(y) : x > y) ? 1 : -1;
-  }
-  return 0;
-};
-const have = parse(version), want = parse(min);
-const ok = have && want && compare(have, want) >= 0;
-if (!ok) { console.error(`error: backend=t3code requires a T3 server >= ${min}; this one reports ${version || "no version"}; upgrade T3 Code`); process.exit(1); }
-if (data.orchestrationProtocolVersion !== undefined && data.orchestrationProtocolVersion !== 1) { console.error(`error: backend=t3code requires orchestration protocol V1; T3 ${version} reports ${data.orchestrationProtocolVersion}; V2 removes HTTP dispatch; to release a task already in flight, archive its thread in T3 Code, run bin/fm-t3code-codex-env.sh cleanup <worktree> and remove its CLAUDE.local.md and .claude/settings.local.json, return its slot with treehouse return --force <worktree> from its project, and remove its state/<id>.* task record files (docs/t3code-backend.md)`); process.exit(1); }
-if (!(data.capabilities && data.capabilities.threadAutoSettleOptOut === true)) { console.error(`error: backend=t3code requires threadAutoSettleOptOut; T3 ${version} does not report it; upgrade T3 Code`); process.exit(1); }
-' "$FM_BACKEND_T3CODE_MIN_VERSION" || return 1
-  fm_backend_t3code_api GET /api/orchestration/shell >/dev/null || return 1
+  fm_backend_t3code_mcp status >/dev/null
 }
 
 fm_backend_t3code_project_ensure() {  # <project-path> -> project id
-  local project=$1 real shell id title cmd
+  local project=$1 real
   real=$(cd "$project" 2>/dev/null && pwd -P) || { echo "error: project path $project is not a directory" >&2; return 1; }
-  shell=$(fm_backend_t3code_api GET /api/orchestration/shell) || return 1
-  id=$(printf '%s' "$shell" | node -e '
-const fs = require("fs");
-const want = process.argv[1];
-const data = JSON.parse(fs.readFileSync(0, "utf8"));
-const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
-const hit = (data.projects || []).find((p) => !p.deletedAt && real(p.workspaceRoot) === want);
-process.stdout.write(hit ? hit.id : "");
-' "$real") || return 1
-  if [ -n "$id" ]; then
-    printf '%s' "$id"
-    return 0
-  fi
-  id=$(fm_backend_t3code_uuid) || return 1
   # The fm- prefix keeps firstmate's projects apart from the owner's own T3
   # project names; matching stays by real path, so the title never binds.
-  title="fm-$(basename "$real")"
-  cmd=$(fm_backend_t3code_command project.create "projectId=$id" "title=$title" "workspaceRoot=$real" createdAt=@now) || return 1
-  fm_backend_t3code_dispatch "$cmd" >/dev/null || return $?
-  printf '%s' "$id"
+  fm_backend_t3code_mcp project-ensure --root "$real" --title "fm-$(basename "$real")" | fm_backend_t3code_json_get projectId
 }
 
 # The harness -> T3 provider-option id table. Codex takes reasoningEffort and
@@ -240,19 +118,18 @@ fm_backend_t3code_instance_id() {  # <harness>
 }
 
 fm_backend_t3code_model_selection() {  # <harness> <model> <effort> <project-id> -> JSON
-  local harness=$1 model=$2 effort=$3 project_id=$4 instance option='' shell
+  local harness=$1 model=$2 effort=$3 project_id=$4 instance option='' project
   instance=$(fm_backend_t3code_instance_id "$harness") || return 1
   if [ "$effort" != default ] && [ -n "$effort" ]; then
     option=$(fm_backend_t3code_effort_option "$harness" "$effort") || return 1
   fi
   if [ "$model" = default ] || [ -z "$model" ]; then
-    shell=$(fm_backend_t3code_api GET /api/orchestration/shell) || return 1
+    project=$(fm_backend_t3code_mcp project-read --project "$project_id") || return 1
     # shellcheck disable=SC2016  # Single quotes are deliberate: ${...} belongs to the Node snippet.
-    printf '%s' "$shell" | node -e '
+    printf '%s' "$project" | node -e '
 const [projectId, instanceId, option] = process.argv.slice(1);
 const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
-const project = (data.projects || []).find((p) => p.id === projectId);
-const selection = project && project.defaultModelSelection;
+const selection = data.project && data.project.defaultModelSelection;
 if (!selection) { console.error(`error: T3 project ${projectId} has no default model; pass --model with a slug from the T3 model catalog`); process.exit(1); }
 if (selection.instanceId !== instanceId) { console.error(`error: T3 project ${projectId} defaults to instance ${selection.instanceId}, but config/t3code-instances selects ${instanceId}; pass --model explicitly`); process.exit(1); }
 const out = { instanceId, model: selection.model };
@@ -270,120 +147,108 @@ process.stdout.write(JSON.stringify(out));
 ' "$instance" "$model" "$option"
 }
 
-# An empty worktree sends worktreePath null, which puts the agent in the
-# project's workspaceRoot (a secondmate home); an empty string is an HTTP 400.
-fm_backend_t3code_thread_create() {  # <project-id> <title> <branch> <worktree> <model-selection-json> <thread-id>
-  local project_id=$1 title=$2 branch=$3 worktree=$4 selection=$5 id=$6 cmd branch_field worktree_field
-  if [ -n "$branch" ]; then branch_field="branch=$branch"; else branch_field='branch:=null'; fi
-  if [ -n "$worktree" ]; then worktree_field="worktreePath=$worktree"; else worktree_field='worktreePath:=null'; fi
-  cmd=$(fm_backend_t3code_command thread.create "threadId=$id" "projectId=$project_id" "title=$title" \
-    "modelSelection:=$selection" runtimeMode=full-access interactionMode=default \
-    "$branch_field" "$worktree_field" createdAt=@now) || return 1
-  fm_backend_t3code_dispatch "$cmd" >/dev/null || return $?
-  cmd=$(fm_backend_t3code_command thread.auto-settle.set "threadId=$id" 'enabled:=false') || return 1
-  fm_backend_t3code_dispatch "$cmd" >/dev/null || return 1
+# fm_backend_t3code_thread_create: launch an idle thread at full access and
+# print the id T3 assigned. A worktree launches with the existing_worktree
+# strategy; an empty one launches at the project's own root, which is a
+# secondmate's home. The helper reads the binding back and archives a thread
+# T3 bound anywhere else. Exit 1 means the outcome is uncertain: a lost
+# response can leave a thread behind whose id never came back, because
+# t3_thread_launch has no idempotency key.
+fm_backend_t3code_thread_create() {  # <project-id> <title> <branch> <worktree> <model-selection-json> -> thread id
+  local project_id=$1 title=$2 branch=$3 worktree=$4 selection=$5 out rc
+  local -a args=(launch --project "$project_id" --title "$title" --model-selection "$selection")
+  [ -z "$branch" ] || args+=(--branch "$branch")
+  [ -z "$worktree" ] || args+=(--worktree "$worktree")
+  out=$(fm_backend_t3code_mcp "${args[@]}") && rc=0 || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf '%s' "$out" | fm_backend_t3code_json_get threadId || return 1
 }
 
 # fm_backend_t3code_thread_for_home <home>: the live T3 thread running the
-# firstmate whose home is <home>, for away-mode supervisor discovery. T3 puts
-# no thread id into the agent's environment, so the only self-discovery is a
-# cwd match: a project whose workspaceRoot is <home> by real path, and on it a
-# thread that is not archived, has no worktree of its own (worktreePath null),
-# and whose session is starting or running (the daemon is started from inside
-# the captain's own turn). Exactly one match prints its id (0); none prints
-# nothing (1); more than one is an error naming the ids (2); an unreadable
-# server is silent (1) so the caller falls through to its default.
+# firstmate whose home is <home>, for away-mode supervisor discovery
+# (bin/fm-t3-mcp.mjs thread-for-root owns the cwd match). Exactly one match
+# prints its id (0); none prints nothing (1); more than one is an error naming
+# the ids (2); an unreadable server is silent (1) so the caller falls through
+# to its default.
 fm_backend_t3code_thread_for_home() {  # <home> -> thread id
-  local home=$1 real shell out rc
+  local home=$1 real out rc
   real=$(cd "$home" 2>/dev/null && pwd -P) || return 1
-  shell=$(fm_backend_t3code_api GET /api/orchestration/shell 2>/dev/null) || return 1
-  # shellcheck disable=SC2016  # Single quotes are deliberate: ${...} belongs to the Node snippet.
-  out=$(printf '%s' "$shell" | node -e '
-const fs = require("fs");
-const want = process.argv[1];
-const data = JSON.parse(fs.readFileSync(0, "utf8"));
-const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
-const projects = new Set((data.projects || []).filter((p) => !p.deletedAt && real(p.workspaceRoot) === want).map((p) => p.id));
-const live = (data.threads || []).filter((t) => projects.has(t.projectId) && !t.archivedAt && t.worktreePath === null
-  && t.session && (t.session.status === "starting" || t.session.status === "running")).map((t) => t.id);
-if (live.length === 1) { process.stdout.write(live[0]); process.exit(0); }
-if (live.length === 0) process.exit(1);
-console.error(`error: ${live.length} live T3 threads run in ${want} (${live.join(", ")}); set FM_SUPERVISOR_TARGET to the captain thread id`);
-process.exit(2);
-' "$real") && rc=0 || rc=$?
-  [ "$rc" -ne 0 ] || printf '%s' "$out"
+  out=$(fm_backend_t3code_mcp thread-for-root --root "$real" 2>/dev/null) && rc=0 || rc=$?
+  case "$rc" in
+    0) printf '%s' "$out" | fm_backend_t3code_json_get threadId ;;
+    6)
+      printf '%s' "$out" | node -e '
+const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+console.error("error: " + d.error.message);
+'
+      return 2
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+fm_backend_t3code_request_id() {
+  printf 'fm-%s-%s-%s' "$(date +%s)" "${BASHPID:-$$}" "$RANDOM"
+}
+
+# One durable message: it starts an idle thread's next turn or steers the
+# running one (t3_thread_send mode auto). The model selection was fixed at
+# launch, so the optional third argument is accepted for the caller's
+# symmetry and not sent.
+fm_backend_t3code_turn_start() {  # <thread-id> <text> [model-selection-json]
+  local thread=$1 text=$2 file rc=0
+  # The brief rides a file: it is the one value too large to trust to argv.
+  file=$(mktemp "${TMPDIR:-/tmp}/fm-t3code-msg.XXXXXX") || return 1
+  printf '%s' "$text" > "$file" || { rm -f "$file"; return 1; }
+  fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" \
+    --client-request-id "$(fm_backend_t3code_request_id)" >/dev/null || rc=$?
+  rm -f "$file"
   return "$rc"
 }
 
-fm_backend_t3code_turn_start() {  # <thread-id> <text> [model-selection-json]
-  local thread=$1 text=$2 selection=${3:-} message cmd
-  # The brief rides stdin: it is the one value too large to trust to argv.
-  message=$(printf '%s' "$text" | node -e '
-const crypto = require("crypto");
-const text = require("fs").readFileSync(0, "utf8");
-process.stdout.write(JSON.stringify({ messageId: crypto.randomUUID(), role: "user", text, attachments: [] }));
-') || return 1
-  if [ -n "$selection" ]; then
-    cmd=$(fm_backend_t3code_command thread.turn.start "threadId=$thread" "message:=$message" "modelSelection:=$selection" \
-      runtimeMode=full-access interactionMode=default createdAt=@now) || return 1
-  else
-    cmd=$(fm_backend_t3code_command thread.turn.start "threadId=$thread" "message:=$message" \
-      runtimeMode=full-access interactionMode=default createdAt=@now) || return 1
-  fi
-  fm_backend_t3code_dispatch "$cmd" >/dev/null
-}
-
-fm_backend_t3code_thread_read() {  # <thread-id> <turn-limit>
-  fm_backend_t3code_api GET "/api/orchestration/threads/$1?turnLimit=$2"
-}
-
-# fm_backend_t3code_detail_word: the status word from thread detail alone,
-# `http-404`, or `http-failure`; enough for callers that only need to know
-# whether the thread is gone. A thread with no session yet reads `idle`.
-fm_backend_t3code_detail_word() {  # <thread-id>
-  local out rc
-  out=$(fm_backend_t3code_thread_read "$1" 1 2>/dev/null) && rc=0 || rc=$?
-  case "$rc" in
-    0) ;;
-    4) printf 'http-404'; return 0 ;;
-    *) printf 'http-failure'; return 0 ;;
-  esac
-  printf '%s' "$out" | node -e '
-const t = JSON.parse(require("fs").readFileSync(0, "utf8")).thread || {};
-process.stdout.write(require(process.argv[1])(t));
-' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/t3code-thread-status.cjs" 2>/dev/null || printf 'http-failure'
+fm_backend_t3code_thread_state() {  # <thread-id>
+  fm_backend_t3code_mcp state --thread "$1"
 }
 
 # fm_backend_t3code_probe: one word naming the thread's row in the status
-# table. Thread detail omits backgroundLiveness, which can change only a live,
-# idle session's word, so only those rows read the thread's shell row and
-# apply the shared rule (t3code-thread-status.cjs) to its background work.
-# A failed shell request preserves liveness but leaves busy state unknown.
+# table, from its V2 thread status: idle, starting (preparing, queued,
+# starting), running (running, or waiting while the run drains), ready
+# (completed), interrupted (interrupted, cancelled, rolled_back), error
+# (failed), archived, http-404 (the verified server has no such thread), or
+# http-failure (unreachable, refused, or unreadable).
 fm_backend_t3code_probe() {  # <thread-id>
-  local word shell
-  word=$(fm_backend_t3code_detail_word "$1")
-  case "$word" in
-    ready|idle|interrupted) ;;
-    *) printf '%s' "$word"; return 0 ;;
-  esac
-  shell=$(fm_backend_t3code_api GET /api/orchestration/shell 2>/dev/null) || { printf 'alive-unknown'; return 0; }
-  printf '%s' "$shell" | node -e '
-const [rule, id, status] = process.argv.slice(1);
-const row = (JSON.parse(require("fs").readFileSync(0, "utf8")).threads || []).find((t) => t.id === id);
-process.stdout.write(require(rule)({ session: { status }, backgroundLiveness: row && row.backgroundLiveness }));
-' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/t3code-thread-status.cjs" "$1" "$word" 2>/dev/null || printf 'alive-unknown'
+  local out
+  out=$(fm_backend_t3code_thread_state "$1" 2>/dev/null) || { printf 'http-failure'; return 0; }
+  printf '%s' "$out" | node -e '
+let d;
+try { d = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { d = null; }
+const word = () => {
+  if (!d || d.ok !== true) return "http-failure";
+  if (d.exists === false) return "http-404";
+  if (d.archived === true) return "archived";
+  switch (d.status) {
+    case "idle": return "idle";
+    case "preparing": case "queued": case "starting": return "starting";
+    case "running": case "waiting": return "running";
+    case "completed": return "ready";
+    case "interrupted": case "cancelled": case "rolled_back": return "interrupted";
+    case "failed": return "error";
+    default: return "http-failure";
+  }
+};
+process.stdout.write(word());
+' 2>/dev/null || printf 'http-failure'
 }
 
-# fm_backend_t3code_turn_age: whole seconds since the thread's latest turn
+# fm_backend_t3code_turn_age: whole seconds since the thread's latest run
 # boundary - its completion, or its start while it still runs. Fails when the
-# thread is unreadable or carries no parseable turn timestamp, so a caller that
+# thread is unreadable or carries no parseable run timestamp, so a caller that
 # bounds a deferral by this age never defers on missing evidence.
 fm_backend_t3code_turn_age() {  # <thread-id>
   local out
-  out=$(fm_backend_t3code_thread_read "$1" 1 2>/dev/null) || return 1
+  out=$(fm_backend_t3code_thread_state "$1" 2>/dev/null) || return 1
   printf '%s' "$out" | node -e '
-const turn = (JSON.parse(require("fs").readFileSync(0, "utf8")).thread || {}).latestTurn || {};
-const at = Date.parse(turn.completedAt || turn.startedAt || turn.requestedAt || "");
+const at = Date.parse(JSON.parse(require("fs").readFileSync(0, "utf8")).turnAt || "");
 if (!Number.isFinite(at)) process.exit(1);
 process.stdout.write(String(Math.max(0, Math.floor((Date.now() - at) / 1000))));
 ' 2>/dev/null
@@ -393,9 +258,7 @@ process.stdout.write(String(Math.max(0, Math.floor((Date.now() - at) / 1000))));
 fm_backend_t3code_state_row() {  # <probe-row>
   case "$1" in
     starting|running) printf 'busy alive' ;;
-    ready|idle|interrupted|settled-stopped) printf 'idle alive' ;;
-    alive-unknown) printf 'unknown alive' ;;
-    stopped) printf 'idle dead' ;;
+    ready|idle|interrupted) printf 'idle alive' ;;
     error) printf 'unknown dead' ;;
     archived|http-404) printf 'unknown missing' ;;
     *) printf 'unknown unreadable' ;;
@@ -423,23 +286,14 @@ fm_backend_t3code_target_exists() {  # <thread-id>
 
 # T3 has no composer to clear, so a live thread is always ready for a steer.
 fm_backend_t3code_composer_state() {  # <thread-id> [expected-label] -> empty|unknown
-  case "$(fm_backend_t3code_detail_word "$1")" in
+  case "$(fm_backend_t3code_probe "$1")" in
     archived|http-404|http-failure) printf 'unknown' ;;
     *) printf 'empty' ;;
   esac
 }
 
 fm_backend_t3code_capture() {  # <thread-id> <lines>
-  local thread=$1 lines=${2:-40} out
-  out=$(fm_backend_t3code_thread_read "$thread" 5) || return 1
-  # shellcheck disable=SC2016  # Single quotes are deliberate: ${...} belongs to the Node snippet.
-  printf '%s' "$out" | node -e '
-const t = JSON.parse(require("fs").readFileSync(0, "utf8")).thread || {};
-const lines = (t.messages || []).map((m) => `[${m.role}] ${m.text}`);
-const session = t.archivedAt ? "archived" : (t.session && t.session.status) || "none";
-lines.push(`t3code: session=${session} turn=${(t.latestTurn && t.latestTurn.state) || "none"}`);
-process.stdout.write(lines.join("\n"));
-' | tail -n "$lines"
+  fm_backend_t3code_mcp capture --thread "$1" --lines "${2:-40}"
 }
 
 fm_backend_t3code_send_text_submit() {  # <thread-id> <text> <retries> <enter-sleep> <settle>
@@ -450,13 +304,18 @@ fm_backend_t3code_send_text_submit() {  # <thread-id> <text> <retries> <enter-sl
   fi
 }
 
+# fm_backend_t3code_native_interrupt <thread-id>: interrupt the running turn
+# and print T3's own claim, confirmed by its run wait: confirmed,
+# not-running, or unconfirmed.
+fm_backend_t3code_native_interrupt() {  # <thread-id>
+  fm_backend_t3code_mcp interrupt --thread "$1" | fm_backend_t3code_json_get cancel
+}
+
 fm_backend_t3code_send_key() {  # <thread-id> <key>
-  local thread=$1 key=$2 cmd
-  fm_backend_t3code_runtime_check || return 1
+  local thread=$1 key=$2
   case "$key" in
     Escape|escape|Esc|esc|C-c|ctrl+c|Ctrl-c|Ctrl-C)
-      cmd=$(fm_backend_t3code_command thread.turn.interrupt "threadId=$thread" createdAt=@now) || return 1
-      fm_backend_t3code_dispatch "$cmd" >/dev/null
+      fm_backend_t3code_native_interrupt "$thread" >/dev/null
       ;;
     Enter|enter) return 0 ;;
     *)
@@ -466,120 +325,24 @@ fm_backend_t3code_send_key() {  # <thread-id> <key>
   esac
 }
 
-# Stop the session and leave the thread where it is: the control plane's
-# `exit`. T3 has no composer to type an exit command into, and an unsettled
-# stopped session reads `stopped` (dead) even while a background
-# job it started lives on, which is the proof the control plane waits for.
-# A later turn restarts the same agent with its transcript (verified live;
-# docs/verification/runtime-backends.md "T3 Code"). A failed stop dispatch
-# never counts as proof that the session stopped.
-fm_backend_t3code_agent_stop() {  # <thread-id>
-  local cmd rc
-  cmd=$(fm_backend_t3code_command thread.session.stop "threadId=$1" createdAt=@now) || return 1
-  fm_backend_t3code_dispatch "$cmd" >/dev/null && rc=0 || rc=$?
-  case "$rc" in 0) return 0 ;; *) return 1 ;; esac
-}
-
-# Stop the session, then archive the thread so it can never re-create its
-# worktree at a returned slot. Archiving keeps the transcript visible in T3.
-# Idempotent: an archived or deleted thread is already the end state.
+# Interrupt any running turn, then archive the thread so it can never act in
+# a returned slot, and succeed only on T3's read-back of archived:true with no
+# active run (the helper's archive owns that proof). Archiving keeps the
+# transcript visible in T3. Idempotent: an archived thread with no active run,
+# or one the verified server no longer has, is already the end state.
 fm_backend_t3code_kill() {  # <thread-id>
-  local thread=$1 cmd rc
-  fm_backend_t3code_runtime_check || return 1
-  case "$(fm_backend_t3code_detail_word "$thread")" in
-    archived|http-404) return 0 ;;
-  esac
-  fm_backend_t3code_agent_stop "$thread" || return 1
-  cmd=$(fm_backend_t3code_command thread.archive "threadId=$thread") || return 1
-  fm_backend_t3code_dispatch "$cmd" >/dev/null && rc=0 || rc=$?
-  case "$rc" in 0) return 0 ;; *) return 1 ;; esac
-}
-
-# Native shell stream, bounded by the watcher's existing poll budget. Node's
-# built-in WebSocket is optional: an older Node retains the HTTP poll path.
-fm_backend_t3code_events_capable() {  # [session]
-  node -e 'process.exit(typeof WebSocket === "function" ? 0 : 1)' 2>/dev/null || return 1
-  fm_backend_t3code_runtime_check >/dev/null 2>&1
-}
-
-fm_backend_t3code_event_reader_cmd() {
-  printf 'node\n%s/t3code-eventwait.cjs\n' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-}
-
-# The stream carries the same session row as HTTP plus explicit pending-human
-# flags. Only those flags add blocked; a stopped/error/absent thread cannot
-# become actionable merely because an old request flag survived.
-fm_backend_t3code_normalize_event() {  # <thread> <project> <session-status> <pending> <instance>
-  local state row
-  row=$(fm_backend_t3code_state_row "$3")
-  case "$row" in
-    'busy alive') state=working ;;
-    'idle alive') state=idle ;;
-    *) state=unknown ;;
-  esac
-  if [ "${row#* }" = alive ] && [ "$4" = true ]; then state=blocked; fi
-  fm_transition_record "$1" "$2" '' "$state" "$5"
-}
-
-fm_backend_t3code_escalation_marker() {  # <state-dir> <thread>
-  printf '%s/.t3code-escalated-%s' "$1" "$(printf '%s' "$2" | tr ':/.' '___')"
-}
-
-fm_backend_t3code_commit_transition() {  # <state-dir> <session> <record>
-  local thread
-  thread=$(fm_transition_pane_id "$3")
-  [ -n "$thread" ] || return 1
-  : > "$(fm_backend_t3code_escalation_marker "$1" "$thread")"
-}
-
-fm_backend_t3code_clear_transition() {  # <state-dir> <thread>
-  [ -n "$2" ] || return 0
-  rm -f "$(fm_backend_t3code_escalation_marker "$1" "$2")"
-}
-
-# Returns 0 with one normalized actionable record, 1 after a clean full-budget
-# wait, or 2 for polling fallback. Snapshot rows reconcile reconnect gaps;
-# dedupe is committed only after the watcher durably queues the wake.
-fm_backend_t3code_wait_transition() {  # <session> <timeout> <state-dir> <thread...>
-  local timeout=$2 state=$3
-  shift 3
-  [ "$#" -gt 0 ] || return 2
-  if [ "${FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED:-0}" != 1 ]; then
-    fm_backend_t3code_events_capable || return 2
+  local thread=$1 out
+  out=$(fm_backend_t3code_thread_state "$thread") || return 1
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get exists)" = true ] || return 0
+  if [ "$(printf '%s' "$out" | fm_backend_t3code_json_get archived)" = true ] \
+    && ! printf '%s' "$out" | fm_backend_t3code_json_get activeRunId >/dev/null; then
+    return 0
   fi
-  # shellcheck source=bin/fm-transition-lib.sh
-  . "$(dirname "${BASH_SOURCE[0]}")/../fm-transition-lib.sh"
-  local reader=() word dir pid line record marker action rc=1 reader_rc=0
-  while IFS= read -r word; do reader+=("$word"); done < <(fm_backend_t3code_event_reader_cmd)
-  dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-t3code-eventwait.XXXXXX") || return 2
-  mkfifo "$dir/events" || { rmdir "$dir"; return 2; }
-  FM_T3CODE_RUNTIME_FILE=$(fm_backend_t3code_runtime_file) \
-  FM_T3CODE_TOKEN_FILE="$(fm_backend_t3code_config_dir)/t3code-token" \
-    "${reader[@]}" "$timeout" "$@" > "$dir/events" 2>/dev/null &
-  pid=$!
-  exec 9< "$dir/events"
-  if ! IFS= read -r line <&9 || [ "$line" != subscribed ]; then rc=2; fi
-  while [ "$rc" -eq 1 ] && IFS= read -r line <&9; do
-    record=$(fm_backend_t3code_normalize_event \
-      "$(printf '%s' "$line" | cut -f1)" "$(printf '%s' "$line" | cut -f2)" \
-      "$(printf '%s' "$line" | cut -f3)" "$(printf '%s' "$line" | cut -f4)" \
-      "$(printf '%s' "$line" | cut -f5)")
-    marker=$(fm_backend_t3code_escalation_marker "$state" "$(fm_transition_pane_id "$record")")
-    action=$(fm_transition_policy "$(fm_transition_to_status "$record")")
-    case "$action" in
-      actionable)
-        if [ ! -e "$marker" ]; then printf '%s' "$record"; rc=0; fi
-        ;;
-      absorb) rm -f "$marker" ;;
-    esac
-  done
-  if [ "$rc" -ne 1 ]; then kill "$pid" 2>/dev/null || true; fi
-  wait "$pid" 2>/dev/null || reader_rc=$?
-  exec 9<&-
-  rm -rf "$dir"
-  [ "$rc" -ne 0 ] || return 0
-  [ "$rc" -ne 2 ] && [ "$reader_rc" -eq 0 ] && return 1
-  return 2
+  if printf '%s' "$out" | fm_backend_t3code_json_get activeRunId >/dev/null; then
+    fm_backend_t3code_native_interrupt "$thread" >/dev/null || return 1
+  fi
+  out=$(fm_backend_t3code_mcp archive --thread "$thread") || return 1
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get closed)" = true ]
 }
 
 fm_backend_t3code_validate_harness() {  # <harness>
