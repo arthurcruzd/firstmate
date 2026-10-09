@@ -37,8 +37,13 @@
 #     retrying until T3 accepts it; the durable wake queue holds the event in
 #     the meantime. The next arm names the closed one as its predecessor.
 #   fm-t3-host.sh install [--name <unit>]
-#     Writes and enables a systemd user unit that runs `relay` (Linux only).
-#     Default unit name: fm-t3-relay-<home basename>.service.
+#     Runs `relay` as a user service: a systemd user unit on Linux (default
+#     name fm-t3-relay-<home basename>.service), or an Aqua launch agent on
+#     macOS (default label dev.firstmate.t3-relay.<home basename>, plist in
+#     ~/Library/LaunchAgents, log in ~/Library/Logs). Rerunning it rewrites the
+#     service and restarts the relay.
+#   fm-t3-host.sh uninstall [--name <unit>]
+#     Stops and removes that service; an absent service is already the end state.
 #   fm-t3-host.sh status
 #     The recorded thread and its T3 state, and whether a live relay owns the
 #     home. Changes nothing.
@@ -196,13 +201,6 @@ deliver() {  # <request-id> <file>
   done
 }
 
-# The session lock (state/.lock) names the harness pid that ran session start.
-session_holder_alive() {
-  local pid
-  pid=$(head -1 "$STATE/.lock" 2>/dev/null | tr -dc '0-9')
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
-}
-
 fm_t3_relay_mine() {
   [ "$(record_get "$RELAY_RECORD" pid)" = "$$" ]
 }
@@ -243,9 +241,7 @@ cmd_relay() {
         grep -E '^(signal:|stale:|check:|heartbeat)' "$out" | head -8
         # T3 reopens an unloaded session without running its SessionStart
         # hooks, so a dead lock holder means this message starts a new session.
-        if ! session_holder_alive; then
-          printf '%s\n' 'Your session was reopened by T3 after it unloaded the idle one, so the session lock still names the dead process: run bin/fm-session-start.sh first, then drain.'
-        fi
+        fm_t3_session_holder_alive "$STATE" || printf '%s\n' "$FM_T3_REOPENED_SESSION_HINT"
         printf '%s\n' 'Run bin/fm-wake-drain.sh first and handle the wake. The relay owns watcher continuity; do not arm a watcher yourself.'
       } > "$msg"
       deliver "fm-t3-relay-$$-$arm_pid-$n" "$msg" || break
@@ -258,16 +254,75 @@ cmd_relay() {
   rm -f "$out" "$msg"
 }
 
-cmd_install() {
-  local name unit dir
-  name="fm-t3-relay-$(basename "$FM_HOME").service"
+service_name() {  # [--name <name>] -> the unit name or launchd label
+  local name=''
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --name) name=${2:?}; shift 2 ;;
-      *) die "unknown install argument: $1" ;;
+      *) die "unknown argument: $1" ;;
     esac
   done
+  if [ -z "$name" ]; then
+    if [ "$(uname -s)" = Darwin ]; then
+      name="dev.firstmate.t3-relay.$(basename "$FM_HOME")"
+    else
+      name="fm-t3-relay-$(basename "$FM_HOME").service"
+    fi
+  fi
+  case "$name" in ''|*[!A-Za-z0-9._@-]*) die "unsafe service name: $name" ;; esac
+  printf '%s' "$name"
+}
+
+launchd_plist() {  # <label>
+  printf '%s/Library/LaunchAgents/%s.plist' "$HOME" "$1"
+}
+
+# An Aqua launch agent in the login session, where this host's T3 server runs
+# too, so the relay lives exactly as long as the server it sends to can.
+install_launchd() {  # <label>
+  local label=$1 plist log value tmp
+  plist=$(launchd_plist "$label")
+  log="$HOME/Library/Logs/$label.log"
+  for value in "$FM_ROOT" "$FM_HOME" "$PATH" "$HOME"; do
+    case "$value" in *'&'*|*'<'*|*'>'*) die "cannot embed $value in a property list" ;; esac
+  done
+  mkdir -p "$(dirname "$plist")" "$(dirname "$log")"
+  tmp="$plist.tmp.$$"
+  {
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+    printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    printf '%s\n' '<plist version="1.0">' '<dict>'
+    printf '\t<key>Label</key>\n\t<string>%s</string>\n' "$label"
+    printf '\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>%s</string>\n\t\t<string>relay</string>\n\t</array>\n' "$FM_ROOT/bin/fm-t3-host.sh"
+    printf '\t<key>WorkingDirectory</key>\n\t<string>%s</string>\n' "$FM_ROOT"
+    printf '\t<key>EnvironmentVariables</key>\n\t<dict>\n'
+    printf '\t\t<key>FM_HOME</key>\n\t\t<string>%s</string>\n' "$FM_HOME"
+    printf '\t\t<key>HOME</key>\n\t\t<string>%s</string>\n' "$HOME"
+    printf '\t\t<key>PATH</key>\n\t\t<string>%s</string>\n' "$PATH"
+    printf '\t</dict>\n'
+    printf '\t<key>LimitLoadToSessionType</key>\n\t<string>Aqua</string>\n'
+    printf '\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>KeepAlive</key>\n\t<true/>\n'
+    printf '\t<key>StandardOutPath</key>\n\t<string>%s</string>\n' "$log"
+    printf '\t<key>StandardErrorPath</key>\n\t<string>%s</string>\n' "$log"
+    printf '%s\n' '</dict>' '</plist>'
+  } > "$tmp" || { rm -f "$tmp"; die "could not write $plist"; }
+  mv "$tmp" "$plist" || { rm -f "$tmp"; die "could not write $plist"; }
+  launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$plist" || die "could not load $label into gui/$(id -u); an Aqua login session is required"
+  printf 'installed %s\n' "$plist"
+}
+
+cmd_install() {
+  local name unit dir
+  name=$(service_name "$@") || exit 1
+  if [ "$(uname -s)" = Darwin ]; then
+    install_launchd "$name"
+    return
+  fi
   command -v systemctl >/dev/null 2>&1 || die "systemctl is not available; run '$0 relay' under this machine's own service manager"
+  # A caller outside a login shell, such as a remote job, still reaches the
+  # user manager through its runtime directory.
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
   dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
   unit="$dir/$name"
   mkdir -p "$dir"
@@ -287,10 +342,26 @@ RestartSec=10
 [Install]
 WantedBy=default.target
 EOF
-  if ! systemctl --user daemon-reload || ! systemctl --user enable --now "$name"; then
+  if ! systemctl --user daemon-reload || ! systemctl --user enable "$name" || ! systemctl --user restart "$name"; then
     die "could not enable $name"
   fi
   printf 'installed %s\n' "$unit"
+}
+
+cmd_uninstall() {
+  local name
+  name=$(service_name "$@") || exit 1
+  if [ "$(uname -s)" = Darwin ]; then
+    launchctl bootout "gui/$(id -u)/$name" >/dev/null 2>&1 || true
+    rm -f "$(launchd_plist "$name")"
+  else
+    command -v systemctl >/dev/null 2>&1 || die "systemctl is not available"
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    systemctl --user disable --now "$name" >/dev/null 2>&1 || true
+    rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$name"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
+  printf 'uninstalled %s\n' "$name"
 }
 
 cmd_status() {
@@ -312,6 +383,7 @@ case "${1:-}" in
   adopt) shift; cmd_adopt "$@" ;;
   relay) shift; cmd_relay ;;
   install) shift; cmd_install "$@" ;;
+  uninstall) shift; cmd_uninstall "$@" ;;
   status) shift; cmd_status ;;
   -h|--help) usage ;;
   *) usage >&2; exit 2 ;;

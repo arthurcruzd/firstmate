@@ -1421,6 +1421,34 @@ test_spawn_secondmate_runs_thread_in_home_with_env() {
   pass "fm-spawn.sh --backend t3code --secondmate: project on the home, root-strategy thread, charter message, launch prefix as settings env"
 }
 
+# A remote host launches a T3-hosted mate with the home's OWN config as the
+# launching config (bin/fm-remote-secondmate-control.sh): the home's credential
+# must survive the launch, and the mate's own workers go to the same server.
+test_spawn_remote_host_secondmate_keeps_home_credential() {
+  local id home out settings
+  id="t3smz3"
+  t3_case spawn-secondmate-remote-host
+  home="$CASE_DIR/sm-home-remote"
+  make_t3_secondmate_home "$home" "$id"
+  mkdir -p "$home/config"
+  cp "$CONFIG/t3code-token" "$home/config/t3code-token"
+  chmod 600 "$home/config/t3code-token"
+  CONFIG="$home/config"
+  out=$(FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code spawn_t3_secondmate "$id" "$home" claude claude-sonnet-5)
+  expect_code 0 $? "a host-local T3 mate launch from the home's own config should succeed"$'\n'"$out"
+  [ -f "$home/config/t3code-token" ] && [ ! -L "$home/config/t3code-token" ] \
+    || fail "the launch replaced the home's own credential with a link to itself"
+  node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$home/config/t3code-token" \
+    || fail "the home's own credential no longer reads back"
+  settings="$home/.claude/settings.local.json"
+  [ "$(t3_json_field "$settings" 'd.env.FM_BACKEND')" = t3code ] \
+    || fail "a T3-hosted remote mate must send its own workers to T3, got '$(t3_json_field "$settings" 'd.env.FM_BACKEND')'"
+  out=$(FM_SPAWN_SECONDMATE_CREW_BACKEND=herdr spawn_t3_secondmate "${id}b" "$home" claude claude-sonnet-5)
+  [ $? -ne 0 ] || fail "an unsupported crew backend must be refused"
+  rm -rf "/tmp/fm-$id" "/tmp/fm-${id}b"
+  pass "fm-spawn.sh --backend t3code --secondmate on its own host: keeps the home's credential and sends its crew to T3"
+}
+
 test_spawn_codex_secondmate_writes_toml_env() {
   local id home out thread toml
   t3_require_tomllib test_spawn_codex_secondmate_writes_toml_env || return 0
@@ -1750,6 +1778,7 @@ test_spawn_claude_refuses_worktree_symlink
 test_untracked_codex_config_is_preserved
 test_spawn_codex_scout_writes_toml_env_with_traceparent
 test_spawn_secondmate_runs_thread_in_home_with_env
+test_spawn_remote_host_secondmate_keeps_home_credential
 test_spawn_codex_secondmate_writes_toml_env
 test_spawn_refuses_t3code_when_token_rejected
 test_spawn_refuses_slot_of_another_clone

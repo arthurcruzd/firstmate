@@ -82,7 +82,11 @@
 # On macOS the worker is Firstmate's Aqua LaunchAgent
 # dev.firstmate.remote-job at ~/Library/LaunchAgents/dev.firstmate.remote-job.plist
 # with logs under ~/Library/Logs. Linux starts the same worker process without
-# an Aqua requirement. The launch-agent renderer and repair helpers here are
+# an Aqua requirement. A caller that overrides FM_REMOTE_JOB_STATE_ROOT runs an
+# isolated worker for a second code root on the same account, so its launch
+# agent label gains a suffix derived from that state root and its plist carries
+# the override; it can never rewrite or reload the account's own agent, whose
+# code root the account's ordinary entrypoint keeps selecting. The launch-agent renderer and repair helpers here are
 # shared by the entrypoint and remote doctor so their ownership cannot drift.
 #
 # The Linux start path puts the worker tree in its own process group, so
@@ -98,6 +102,9 @@
 # orphaned that way.
 
 FM_REMOTE_JOB_LABEL=dev.firstmate.remote-job
+if [ -n "${FM_REMOTE_JOB_STATE_ROOT:-}" ]; then
+  FM_REMOTE_JOB_LABEL="$FM_REMOTE_JOB_LABEL.$(printf '%s' "$FM_REMOTE_JOB_STATE_ROOT" | cksum | awk '{print $1}')"
+fi
 FM_REMOTE_JOB_MAX_BYTES=${FM_REMOTE_JOB_MAX_BYTES:-1048576}
 FM_REMOTE_JOB_QUEUE_TIMEOUT=${FM_REMOTE_JOB_QUEUE_TIMEOUT:-360}
 FM_REMOTE_JOB_TIMEOUT=${FM_REMOTE_JOB_TIMEOUT:-360}
@@ -899,12 +906,20 @@ fm_remote_job_plist_safe_path() {
   case "$1" in *'&'*|*'<'*|*'>'*|*'"'*|*"'"*) return 1 ;; esac
 }
 
+# The isolated state root rides into the worker's environment, so the worker
+# serves the same queue and derives the same label as the caller that wrote it.
+fm_remote_job_launchagent_state_env() {
+  [ -n "${FM_REMOTE_JOB_STATE_ROOT:-}" ] || return 0
+  printf '\n\t\t<key>FM_REMOTE_JOB_STATE_ROOT</key>\n\t\t<string>%s</string>' "$FM_REMOTE_JOB_STATE_ROOT"
+}
+
 fm_remote_job_render_launchagent() { # <remote-root> <account-home>
   local root=$1 account_home=$2 worker
   worker="$root/bin/fm-remote-job-worker.sh"
   fm_remote_job_launchagent_paths "$account_home"
   fm_remote_job_plist_safe_path "$worker" && fm_remote_job_plist_safe_path "$account_home" &&
-    fm_remote_job_plist_safe_path "$FM_REMOTE_JOB_LAUNCH_AGENT_LOG" || return 1
+    fm_remote_job_plist_safe_path "$FM_REMOTE_JOB_LAUNCH_AGENT_LOG" &&
+    fm_remote_job_plist_safe_path "${FM_REMOTE_JOB_STATE_ROOT:-}" || return 1
   cat <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -921,7 +936,7 @@ fm_remote_job_render_launchagent() { # <remote-root> <account-home>
 		<key>HOME</key>
 		<string>$account_home</string>
 		<key>FM_ROOT_OVERRIDE</key>
-		<string>$root</string>
+		<string>$root</string>$(fm_remote_job_launchagent_state_env)
 	</dict>
 	<key>LimitLoadToSessionType</key>
 	<string>Aqua</string>

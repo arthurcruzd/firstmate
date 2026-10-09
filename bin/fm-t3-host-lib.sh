@@ -1,5 +1,6 @@
 # shellcheck shell=bash
-# Shared predicate for a Firstmate home whose primary runs as a T3 Code thread.
+# Shared predicates for a Firstmate home whose primary or second mate runs as a
+# T3 Code thread.
 # Usage: . bin/fm-t3-host-lib.sh
 #
 # bin/fm-t3-host.sh owns the relay and its record; this file only answers
@@ -32,4 +33,20 @@ fm_t3_relay_owns_home() {
   cmd=$(ps -o command= -p "$pid" 2>/dev/null) || return 1
   case "$cmd" in *fm-t3-host.sh*relay*) return 0 ;; esac
   return 1
+}
+
+# A T3 session that T3 reopened after unloading the idle one runs none of its
+# SessionStart hooks, so its session lock (state/.lock) still names the process
+# that ran session start. bin/fm-t3-host.sh's relay and the T3 doorbell in
+# bin/fm-remote-secondmate-control.sh both add this hint to the message that
+# reopens such a session.
+# shellcheck disable=SC2034 # Consumed by the sourcing callers.
+FM_T3_REOPENED_SESSION_HINT='Your session was reopened by T3 after it unloaded the idle one, so the session lock still names the dead process: run bin/fm-session-start.sh first, then continue.'
+
+# fm_t3_session_holder_alive <state-dir>
+# Exit 0 when the session lock names a live process.
+fm_t3_session_holder_alive() {
+  local pid
+  pid=$(head -1 "$1/.lock" 2>/dev/null | tr -dc '0-9')
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
