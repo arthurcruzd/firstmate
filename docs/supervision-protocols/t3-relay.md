@@ -8,6 +8,7 @@ When this session owns supervision and away mode is not active:
 3. A wake arrives as an ordinary thread message that starts with `Firstmate wake from the T3 wake relay:` and carries the watcher's reason lines (`signal:`, `stale:`, `check:`, or `heartbeat`).
    Run `bin/fm-wake-drain.sh` first and handle the wake, exactly as for any other wake.
    Do not run `bin/fm-watch-arm.sh` after a wake; the relay re-arms as soon as it has delivered one.
+   When the wake says T3 reopened the session, run `bin/fm-session-start.sh` before draining: T3 reopens an unloaded session without its SessionStart hooks, so the session lock still names the dead process until session start runs.
 4. Ending a turn with work in flight is safe while the relay is live: the turn-end guard accepts the relay's fresh watcher beacon.
    If the guard reports supervision off, check `bin/fm-t3-host.sh status` and the relay's service, and report a dead relay rather than arming a watcher from this session.
 5. Waiting on the relay is silent: do not send idle progress while the watcher is parked.

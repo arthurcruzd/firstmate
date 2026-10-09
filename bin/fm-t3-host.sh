@@ -31,7 +31,9 @@
 #     the home needs supervision and is not in away or quiet mode (the away
 #     daemon owns the watcher then) it runs bin/fm-watch-arm.sh in the foreground,
 #     and on an actionable close (signal:, stale:, check:, heartbeat) sends the
-#     reason lines to the recorded thread under an idempotent request id,
+#     reason lines to the recorded thread under an idempotent request id
+#     (telling a session T3 reopened without its SessionStart hooks, found by a
+#     dead session-lock holder, to run session start first),
 #     retrying until T3 accepts it; the durable wake queue holds the event in
 #     the meantime. The next arm names the closed one as its predecessor.
 #   fm-t3-host.sh install [--name <unit>]
@@ -188,6 +190,13 @@ deliver() {  # <request-id> <file>
   done
 }
 
+# The session lock (state/.lock) names the harness pid that ran session start.
+session_holder_alive() {
+  local pid
+  pid=$(head -1 "$STATE/.lock" 2>/dev/null | tr -dc '0-9')
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
 fm_t3_relay_mine() {
   [ "$(record_get "$RELAY_RECORD" pid)" = "$$" ]
 }
@@ -226,6 +235,11 @@ cmd_relay() {
       {
         printf '%s\n' 'Firstmate wake from the T3 wake relay:'
         grep -E '^(signal:|stale:|check:|heartbeat)' "$out" | head -8
+        # T3 reopens an unloaded session without running its SessionStart
+        # hooks, so a dead lock holder means this message starts a new session.
+        if ! session_holder_alive; then
+          printf '%s\n' 'Your session was reopened by T3 after it unloaded the idle one, so the session lock still names the dead process: run bin/fm-session-start.sh first, then drain.'
+        fi
         printf '%s\n' 'Run bin/fm-wake-drain.sh first and handle the wake. The relay owns watcher continuity; do not arm a watcher yourself.'
       } > "$msg"
       deliver "fm-t3-relay-$$-$arm_pid-$n" "$msg" || break
