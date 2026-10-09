@@ -16,7 +16,7 @@
 #   fm-t3-host.sh launch [--model <id>] [--effort <level>] [--title <title>] [--message-file <file>]
 #     Registers this script's Firstmate checkout (the code root, which is also
 #     the home when FM_HOME is unset) as a T3 project, writes FM_HOME into the
-#     checkout's git-ignored .claude/settings.local.json (a T3 thread gets the
+#     checkout's git-excluded .claude/settings.local.json (a T3 thread gets the
 #     T3 server's environment, not a per-thread one), launches the primary as a
 #     full-access Claude thread on the project root (the instance comes from
 #     config/t3code-instances, default claudeAgent), pins it, and records it in
@@ -79,7 +79,7 @@ mcp() {
 }
 
 ensure_home_env_setting() {
-  local file="$FM_ROOT/.claude/settings.local.json" tmp
+  local file="$FM_ROOT/.claude/settings.local.json" tmp exclude
   mkdir -p "$FM_ROOT/.claude"
   tmp=$(mktemp "$FM_ROOT/.claude/.settings.local.XXXXXX") || return 1
   # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions.
@@ -91,6 +91,12 @@ try { s = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { if (e.code !=
 s.env = { ...(s.env ?? {}), FM_HOME: home };
 fs.writeFileSync(out, JSON.stringify(s, null, 2) + "\n");' "$file" "$FM_HOME" "$tmp" || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$file"
+  # Keep the checkout clean: the file is local state, never project content.
+  if ! git -C "$FM_ROOT" check-ignore -q .claude/settings.local.json 2>/dev/null; then
+    exclude=$(git -C "$FM_ROOT" rev-parse --git-path info/exclude 2>/dev/null) || return 0
+    case "$exclude" in /*) ;; *) exclude="$FM_ROOT/$exclude" ;; esac
+    mkdir -p "$(dirname "$exclude")" && printf '%s\n' '/.claude/settings.local.json' >> "$exclude"
+  fi
 }
 
 cmd_launch() {

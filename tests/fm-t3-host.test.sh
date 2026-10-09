@@ -91,7 +91,9 @@ test_launch_and_adopt() {
   mkdir -p "$root/.claude"
   cp "$TMP_ROOT/settings.seed" "$root/.claude/settings.local.json"
   t3_fake_credential "$home/config/t3code-token"
-  out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" launch --model claude-sonnet-5-5 --effort low --title "Firstmate (test)" 2>&1)
+  # No global excludes, so only the script's own exclusion can hide the file.
+  out=$(XDG_CONFIG_HOME="$TMP_ROOT/no-xdg" GIT_CONFIG_GLOBAL=/dev/null FM_ROOT_OVERRIDE="$root" FM_HOME="$home" \
+    "$ROOT/bin/fm-t3-host.sh" launch --model claude-sonnet-5-5 --effort low --title "Firstmate (test)" 2>&1)
   rc=$?
   [ "$rc" -eq 0 ] || fail "launch should succeed against the fake server: $out"
   thread=$(sed -n 's/^thread=//p' "$home/state/.t3-host")
@@ -105,6 +107,7 @@ test_launch_and_adopt() {
     "launch writes the home into the checkout's local Claude settings"
   assert_equals 1 "$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).env.KEEP)' "$root/.claude/settings.local.json")" \
     "existing local settings are kept"
+  assert_equals "" "$(XDG_CONFIG_HOME="$TMP_ROOT/no-xdg" GIT_CONFIG_GLOBAL=/dev/null git -C "$root" status --porcelain -- .claude/settings.local.json)" "the local settings file is git-excluded, leaving the checkout clean"
   out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" launch 2>&1) && rc=0 || rc=$?
   [ "$rc" -ne 0 ] || fail "a second launch while the recorded thread lives must be refused"
   assert_contains "$out" "already runs as T3 thread $thread" "the refusal names the live primary"
