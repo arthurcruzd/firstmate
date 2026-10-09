@@ -41,7 +41,7 @@ test_login_writes_private_credential_and_never_prints_token() {
   assert_equals env-fake-1 "$(field "$OUT" environmentId)" "login should record the server's environment id"
   assert_not_contains "$OUT$ERR" "tok-" "login must never print the access token"
   assert_not_contains "$OUT$ERR" "PAIR-OK" "login must never print the pairing code"
-  [ "$(stat -f %Lp "$CRED" 2>/dev/null || stat -c %a "$CRED")" = 600 ] || fail "credential file must be mode 0600"
+  [ "$(stat -c %a "$CRED" 2>/dev/null || stat -f %Lp "$CRED")" = 600 ] || fail "credential file must be mode 0600"
   assert_grep '"environment_id":"env-fake-1"' "$CRED" "credential must record the environment id"
   assert_grep '"origin":"'"$T3_FAKE_URL"'"' "$CRED" "credential must record the origin"
   assert_grep "auth pairing create --base-dir $TMP_ROOT/t3home --scope orchestration:read --scope orchestration:operate --ttl 2m" "$TMP_ROOT/cli/t3-cli.log" \
@@ -207,6 +207,17 @@ test_send_capture_interrupt_archive() {
   expect_code 0 "$RC" "capture: $ERR"
   assert_contains "$OUT" "[t3 thread $thread status=running" "capture starts with the thread state"
   assert_contains "$OUT" "user_message/completed: hello worker" "capture renders activity items"
+  local n
+  for n in 1 2 3 4 5 6; do
+    printf 'steer %s' "$n" > "$msg"
+    mcp send --thread "$thread" --message-file "$msg" --client-request-id "tail-$n"
+  done
+  printf 'hello worker' > "$msg"
+  mcp capture --thread "$thread" --lines 3
+  expect_code 0 "$RC" "capture of a long thread: $ERR"
+  assert_contains "$OUT" "[t3 thread $thread status=running" "a tail capture keeps the thread state line"
+  assert_contains "$OUT" "user_message/completed: steer 6" "capture shows the newest item of a timeline T3 pages oldest first"
+  assert_not_contains "$OUT" "hello worker" "capture of a long thread leaves out the oldest items"
   mcp interrupt --thread "$thread"
   assert_equals confirmed "$(field "$OUT" cancel)" "interrupting a running turn is confirmed by the wait"
   mcp interrupt --thread "$thread"

@@ -26,6 +26,10 @@ T3CODE_TELEMETRY_ENABLED=false t3 serve --host 127.0.0.1 --port <port> --no-brow
 Every spawn reports the server's telemetry state and warns unless the listening loopback server's own process proves it off.
 Stop the server through its own service or its native process id, never by pattern: a SIGTERM to the npm launcher leaves the native server running.
 
+T3 binds a thread only to a linked worktree of the project clone it registered, and Treehouse keys its pools by repository identity, so two homes on one machine that clone the same remote share one pool by default.
+A spawn refuses, and returns the lease of, a slot that belongs to another clone.
+Give each extra home's clones their own pool with a git-excluded `treehouse.toml` whose `root =` names a directory only that home uses.
+
 Select the backend with local `config/backend` containing `t3`, `FM_BACKEND=t3`, or an explicit per-task `--backend t3`.
 It is never auto-detected.
 

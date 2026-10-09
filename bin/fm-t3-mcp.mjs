@@ -18,8 +18,9 @@
 //     token file (mode 0600). The token and pairing code are never printed.
 //     P0 accepts only the full-access ceiling.
 //   fm-t3-mcp.mjs status
-//     Credential expiry, the capability gate, and whether a loopback server's
-//     own process runs with telemetry off (telemetry: off|on|unknown; anything
+//     Credential expiry, the capability gate, and whether a server on this
+//     machine (loopback or one of its own interface addresses) runs with
+//     telemetry off in its own process (telemetry: off|on|unknown; anything
 //     but off adds a stderr warning). Changes nothing.
 //   fm-t3-mcp.mjs project-ensure --root <abs-path> [--title <title>]
 //     The T3 project registered for <root>, created when absent.
@@ -40,8 +41,10 @@
 //   fm-t3-mcp.mjs read --thread <id> [--limit <n>]
 //     t3_thread_read: the thread record and its latest run, unchanged.
 //   fm-t3-mcp.mjs capture --thread <id> [--lines <n>]
-//     The activity view rendered as a bounded plain-text tail; the one verb
-//     whose stdout is text rather than JSON.
+//     The activity view's newest items rendered as a bounded plain-text tail;
+//     the one verb whose stdout is text rather than JSON. T3 pages the
+//     timeline oldest first, so capture reads the thread's itemCount and then
+//     the page after itemCount-<n>-1.
 //   fm-t3-mcp.mjs wait --thread <id> [--timeout-ms <n>]
 //     t3_thread_wait until the latest run is terminal or the timeout passes.
 //   fm-t3-mcp.mjs interrupt --thread <id> [--timeout-ms <n>]
@@ -76,6 +79,7 @@
 // `credentialWarning` field on status.
 
 import { createHash, randomBytes } from "node:crypto";
+import { networkInterfaces } from "node:os";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -392,21 +396,29 @@ function isNotFound(err) {
 
 // T3 product telemetry is on unless the server process runs with
 // T3CODE_TELEMETRY_ENABLED false (apps/server's AnalyticsService config).
-// Only a loopback server's own process environment can show that, read from
-// the listening process on this machine; anything else reads `unknown`.
-export function telemetryState(origin, probe = probeListenerEnv) {
+// Only the environment of a server listening on this machine can show that -
+// a loopback origin or one of this machine's own interface addresses, such as
+// its tailnet address - read from the listening process; anything else reads
+// `unknown`.
+export function telemetryState(origin, probe = probeListenerEnv, localAddresses = interfaceAddresses) {
   let url;
   try {
     url = new URL(origin);
   } catch {
     return "unknown";
   }
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return "unknown";
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (!["127.0.0.1", "localhost", "::1"].includes(host) && !localAddresses().includes(host)) return "unknown";
   const env = probe(url.port || (url.protocol === "https:" ? "443" : "80"));
   if (env === null) return "unknown";
-  const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=(\S*)/);
+  // /proc/<pid>/environ separates entries with NUL, which \S would run across.
+  const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=([^\s\0]*)/);
   if (!m) return "on";
   return /^(false|0|no|off)$/i.test(m[1]) ? "off" : "on";
+}
+
+function interfaceAddresses() {
+  return Object.values(networkInterfaces()).flat().filter(Boolean).map((a) => a.address);
 }
 
 function probeListenerEnv(port) {
@@ -680,13 +692,18 @@ export function renderCapture(out, lines) {
     const st = it?.status ? `/${it.status}` : "";
     return `${kind}${st}: ${itemText(it)}`.slice(0, 600);
   });
-  return [head, ...body].slice(-lines).join("\n");
+  return [head, ...body.slice(-Math.max(lines - 1, 1))].join("\n");
 }
 
 async function capture(flags) {
   const lines = positiveInt(flags, "lines", 40, 500);
+  const threadId = need(flags, "thread");
   const { session } = await verifiedSession(flags);
-  const out = await session.call("t3_thread_read", { threadId: need(flags, "thread"), view: "activity", limit: Math.min(lines, 100), maxCharsPerItem: 600, runLimit: 1 });
+  const limit = Math.min(lines, 100);
+  const probe = await session.call("t3_thread_read", { threadId, view: "activity", limit: 1, maxCharsPerItem: 1, runLimit: 1 });
+  const count = Number(probe?.thread?.itemCount);
+  const after = Number.isInteger(count) && count > limit ? { afterPosition: count - limit - 1 } : {};
+  const out = await session.call("t3_thread_read", { threadId, view: "activity", limit, maxCharsPerItem: 600, runLimit: 1, ...after });
   return { text: renderCapture(out, lines) };
 }
 

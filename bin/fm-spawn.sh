@@ -4087,6 +4087,15 @@ EOF
       fi
       SPAWN_SLOT_CLAIMED=1
     fi
+    # T3 binds a thread only to a linked worktree of the project root it was
+    # registered with. Treehouse keys pools by repository identity, so two
+    # homes cloning the same remote can share one pool whose slots belong to
+    # the other home's clone; never bind this task to another home's clone.
+    T3_SLOT_ROOT=$(git -C "$WT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+    if [ -z "$T3_SLOT_ROOT" ] || [ "$(cd "$T3_SLOT_ROOT" 2>/dev/null && pwd -P)" != "$(cd "$PROJ_ABS" && pwd -P)" ]; then
+      echo "error: Treehouse slot $WT belongs to ${T3_SLOT_ROOT:-an unknown repository}, not $PROJ_ABS; T3 would refuse it, and it may be another home's pool. Give this home's clone its own pool root (root= in a git-excluded treehouse.toml, docs/t3-backend.md)" >&2
+      exit 1
+    fi
     T3_PROJECT_ID=$(fm_backend_t3_project_ensure "$PROJ_ABS") || {
       echo "error: could not find or register $PROJ_ABS as a T3 project for $ID" >&2
       exit 1

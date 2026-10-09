@@ -81,7 +81,7 @@ const ok = (data) => ({ structuredContent: data, content: [{ type: "text", text:
 
 function threadView(t) {
   const { messages, ...rest } = t;
-  return rest;
+  return { ...rest, itemCount: messages.length };
 }
 
 function callTool(name, a) {
@@ -138,8 +138,11 @@ function callTool(name, a) {
     case "t3_thread_read": {
       const t = threads.get(a.threadId);
       if (!t) return err("thread_not_found", `Thread ${a.threadId} is no longer available.`);
-      const items = t.messages.map((m) => ({ type: "user_message", status: "completed", text: m }));
-      return ok({ thread: threadView(t), recentRuns: [], items: items.slice(-(a.limit ?? 100)) });
+      // Like T3, the activity timeline pages oldest first from afterPosition.
+      const items = t.messages.map((m, position) => ({ position, type: "user_message", status: "completed", text: m }));
+      const page = items.filter((it) => a.afterPosition == null || it.position > a.afterPosition).slice(0, a.limit ?? 100);
+      const last = page.at(-1)?.position ?? null;
+      return ok({ thread: threadView(t), recentRuns: [], items: page, nextPosition: last, hasMore: last !== null && last < items.length - 1 });
     }
     case "t3_thread_wait": {
       const t = threads.get(a.threadId);

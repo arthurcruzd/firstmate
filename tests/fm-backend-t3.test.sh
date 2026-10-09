@@ -72,7 +72,7 @@ run_spawn() {  # <id> <args...> -> OUT, RC
   local id=$1
   shift
   OUT=$( HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' PATH="$FB:$PATH" FAKE_TH_WT="$WT" T3_FAKE_LOG="$T3_FAKE_LOG" \
-    FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" FM_CONFIG_OVERRIDE="$CONFIG" \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" FM_CONFIG_OVERRIDE="$CONFIG" \
     FM_PROJECTS_OVERRIDE="$CASE/unused-projects" FM_SPAWN_NO_GUARD=1 \
     "$ROOT/bin/fm-spawn.sh" "$id" "$PROJ" "$@" 2>&1 )
   RC=$?
@@ -238,6 +238,23 @@ test_spawn_abort_archives_thread_and_returns_lease() {
   pass "fm-spawn.sh backend=t3: an aborted launch archives its thread, then returns the lease"
 }
 
+test_spawn_refuses_slot_of_another_clone() {
+  local id=t3foreignslot other
+  new_case "$id"
+  other="$CASE/other-home-clone"
+  fm_git_worktree "$other" "$CASE/other-wt" "fm/other"
+  git -C "$CASE/other-wt" checkout --quiet --detach
+  WT="$CASE/other-wt"
+  run_spawn "$id" --scout --harness claude
+  [ "$RC" -ne 0 ] || fail "a leased slot that belongs to another clone must be refused"
+  assert_contains "$OUT" "belongs to $(cd "$other" && pwd -P), not" "the refusal names the clone that owns the slot"
+  assert_absent "$STATE/$id.meta" "a refused slot leaves no task record"
+  assert_not_contains "$(t3_fake_calls t3_thread_launch)" "t3_thread_launch" "no thread is created for another clone's slot"
+  assert_contains "$(cat "$T3_FAKE_LOG")" "{\"treehouse\":[\"return\",\"--force\",\"--if-lease-holder\",\"$id\",\"$WT\"]}" \
+    "the foreign slot's lease is handed back"
+  pass "fm-spawn.sh backend=t3: refuses a leased slot that belongs to another home's clone and returns it"
+}
+
 test_peek_send_interrupt_and_control_refusals() {
   local id=t3ioz4 send rec
   new_case "$id"
@@ -341,6 +358,7 @@ test_spawn_claude_scout_into_leased_worktree
 test_spawn_codex_ship_sends_encoded_brief
 test_spawn_refusals_leave_nothing
 test_spawn_abort_archives_thread_and_returns_lease
+test_spawn_refuses_slot_of_another_clone
 test_peek_send_interrupt_and_control_refusals
 test_teardown_archives_before_returning_slot
 test_teardown_refuses_unproven_close_and_unreachable_t3
