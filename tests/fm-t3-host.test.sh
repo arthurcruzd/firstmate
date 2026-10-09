@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # tests/fm-t3-host.test.sh - bin/fm-t3-host.sh and bin/fm-t3-host-lib.sh: the
 # relay-ownership predicate the Stop auto-arm, turn-end guard, and protocol
-# renderer stand aside for, the protocol block a relay-owned home renders, and
-# launch/adopt of a primary thread against tests/t3-fake-server.mjs.
+# renderer stand aside for, the protocol block a relay-owned home renders,
+# launch/adopt of a primary thread against tests/t3-fake-server.mjs, and the
+# relay hosting the away daemon in away or quiet mode.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -124,6 +125,150 @@ test_launch_and_adopt() {
   pass "fm-t3-host.sh: launch runs a full-access thread on the checkout's project root and records it in the home; adopt and status read it back"
 }
 
+# until <seconds> <command...>: poll every 0.2s until the command succeeds.
+until_true() {
+  local n=$(( $1 * 5 ))
+  shift
+  while [ "$n" -gt 0 ]; do
+    "$@" 2>/dev/null && return 0
+    sleep 0.2
+    n=$((n - 1))
+  done
+  return 1
+}
+
+starts_arm_at_least() {  # <log> <n>
+  local c
+  c=$(grep -c '^arm ' "$1" 2>/dev/null)
+  [ "${c:-0}" -ge "$2" ]
+}
+
+starts_at_least() {  # <log> <n>
+  local c
+  c=$(grep -c '^start ' "$1" 2>/dev/null)
+  [ "${c:-0}" -ge "$2" ]
+}
+
+# In away or quiet mode the relay runs the away daemon itself, aimed at the
+# recorded thread, because T3 can end the session whose background job would
+# otherwise host it: it restarts the daemon while the flag stands, never starts
+# one under an away-mode launch or beside a live daemon, and stops it once the
+# flag clears or the relay itself is stopped.
+test_relay_hosts_away_daemon() {
+  local home="$TMP_ROOT/hosted" entry log relay lockholder pid
+  mkdir -p "$home/state"
+  log="$home/daemon.log"
+  entry="$TMP_ROOT/fake-daemon.sh"
+  cat > "$entry" <<'SH'
+#!/usr/bin/env bash
+printf 'start %s home=%s backend=%s target=%s prepared=%s harness=%s\n' "$$" "$FM_HOME" \
+  "${FM_SUPERVISOR_BACKEND:-}" "${FM_SUPERVISOR_TARGET:-}" "${FM_AFK_STATE_PREPARED:-}" \
+  "${FM_DAEMON_PRIMARY_HARNESS:-}" >> "$FAKE_DAEMON_LOG"
+trap 'printf "term %s\n" "$$" >> "$FAKE_DAEMON_LOG"; exit 0' TERM
+while :; do sleep 0.1; done
+SH
+  chmod +x "$entry"
+  printf 'thread=mcp:primary\n' > "$home/state/.t3-host"
+  printf 'quiet\n%s\n' "$(date +%s)" > "$home/state/.afk"
+  FM_HOME="$home" FAKE_DAEMON_LOG="$log" FM_T3_RELAY_DAEMON_ENTRY="$entry" \
+    FM_T3_RELAY_IDLE_POLL=1 FM_T3_RELAY_MODE_POLL=1 "$ROOT/bin/fm-t3-host.sh" relay > "$home/relay.out" 2>&1 &
+  relay=$!
+  FAKE_PIDS+=("$relay")
+  until_true 10 starts_at_least "$log" 1 || fail "the relay did not start the away daemon while state/.afk stood: $(cat "$home/relay.out")"
+  assert_contains "$(head -1 "$log")" "home=$home backend=t3code target=mcp:primary prepared=1 harness=claude" \
+    "the hosted daemon must be aimed at the recorded thread with launcher-prepared state"
+  pid=$(awk 'NR==1 {print $2}' "$log")
+  kill -KILL "$pid" 2>/dev/null
+  until_true 10 starts_at_least "$log" 2 || fail "the relay did not restart a daemon that died while the flag stood"
+  # An away-mode launch or stop in progress, or a daemon another owner runs,
+  # keeps the relay from starting one.
+  sleep 60 &
+  lockholder=$!
+  FAKE_PIDS+=("$lockholder")
+  mkdir -p "$home/state/.afk-launch.lock"
+  printf '%s' "$lockholder" > "$home/state/.afk-launch.lock/pid"
+  pid=$(awk '/^start / {p=$2} END {print p}' "$log")
+  kill -KILL "$pid" 2>/dev/null
+  sleep 3
+  starts_at_least "$log" 3 && fail "the relay started a daemon under a live away-mode launch lock"
+  rm -rf "$home/state/.afk-launch.lock"
+  until_true 10 starts_at_least "$log" 3 || fail "the relay did not resume hosting once the launch lock cleared"
+  pid=$(awk '/^start / {p=$2} END {print p}' "$log")
+  rm -f "$home/state/.afk"
+  until_true 10 grep -q "^term $pid$" "$log" || fail "the relay did not stop its daemon when state/.afk cleared"
+  sleep 2
+  starts_at_least "$log" 4 && fail "the relay restarted the daemon after the flag cleared"
+  kill -0 "$relay" 2>/dev/null || fail "the relay must keep running in attended mode after the flag clears"
+  printf 'away\n%s\n' "$(date +%s)" > "$home/state/.afk"
+  until_true 10 starts_at_least "$log" 4 || fail "the relay did not host the daemon again on a new away entry"
+  pid=$(awk '/^start / {p=$2} END {print p}' "$log")
+  kill -TERM "$relay"
+  wait "$relay" 2>/dev/null
+  until_true 5 grep -q "^term $pid$" "$log" || fail "stopping the relay did not stop the daemon it hosts"
+  [ ! -e "$home/state/.t3-relay" ] || fail "a stopped relay must remove its record"
+  pass "fm-t3-host.sh relay: hosts the away daemon while state/.afk stands, restarts it, defers to a launch in progress, and stops it with the flag or the relay"
+}
+
+# An attended wake reaches the recorded thread under a request id naming the
+# relay and the closed cycle. Entering away or quiet mode while the relay waits
+# on a watcher cycle ends that cycle at once and delivers nothing: the watcher
+# queued the wake durably, and the daemon the relay then runs drains it, so no
+# routine wake reaches the thread after the mode began.
+test_relay_hands_open_watcher_cycle_to_daemon() {
+  local home="$TMP_ROOT/handoff" arm entry log relay sends
+  mkdir -p "$home/state" "$home/config"
+  log="$home/events.log"
+  [ -n "$T3_FAKE_PID" ] || t3_fake_start "$TMP_ROOT/server" T3CODE_TELEMETRY_ENABLED=false
+  t3_fake_case "$TMP_ROOT/case-handoff"
+  t3_fake_set 'w.threads = { "mcp:primary": { threadId: "mcp:primary", projectId: "p", status: "completed", activeRunId: null, archived: false, worktreePath: null, pendingRequestCount: 0, items: [], runs: [] } }'
+  t3_fake_credential "$home/config/t3code-token"
+  arm="$TMP_ROOT/fake-arm.sh"
+  # The first cycle closes on a wake at once (attended delivery); later cycles
+  # stay open until stopped, then report the wake that closed them.
+  cat > "$arm" <<'SH'
+#!/usr/bin/env bash
+printf 'arm %s\n' "$$" >> "$FAKE_LOG"
+if [ "$(grep -c '^arm ' "$FAKE_LOG")" -eq 1 ]; then
+  printf 'signal: %s/state/early.status\n' "$FM_HOME"
+  exit 0
+fi
+trap 'printf "arm-term %s\n" "$$" >> "$FAKE_LOG"; printf "signal: %s/state/late.status\n" "$FM_HOME"; exit 0' TERM
+while :; do sleep 0.1; done
+SH
+  entry="$TMP_ROOT/fake-daemon-2.sh"
+  cat > "$entry" <<'SH'
+#!/usr/bin/env bash
+printf 'start %s\n' "$$" >> "$FAKE_LOG"
+trap 'exit 0' TERM
+while :; do sleep 0.1; done
+SH
+  chmod +x "$arm" "$entry"
+  printf 'thread=mcp:primary\n' > "$home/state/.t3-host"
+  printf 'window=fm-w\nbackend=t3code\n' > "$home/state/w.meta"
+  FM_HOME="$home" FAKE_LOG="$log" FM_T3_RELAY_ARM_ENTRY="$arm" FM_T3_RELAY_DAEMON_ENTRY="$entry" \
+    FM_T3_RELAY_IDLE_POLL=1 FM_T3_RELAY_MODE_POLL=1 "$ROOT/bin/fm-t3-host.sh" relay > "$home/relay.out" 2>&1 &
+  relay=$!
+  FAKE_PIDS+=("$relay")
+  until_true 15 grep -q 'delivered fm-t3-relay-' "$home/relay.out" || fail "the relay did not deliver an attended wake: $(cat "$home/relay.out")"
+  sends=$(t3_fake_calls t3_thread_send)
+  assert_contains "$sends" '"threadId":"mcp:primary"' "the attended wake goes to the recorded thread"
+  assert_contains "$sends" "Firstmate wake from the T3 wake relay:" "the attended wake carries the relay's header"
+  assert_contains "$sends" "early.status" "the attended wake carries the watcher's reason line"
+  assert_contains "$sends" "\"clientRequestId\":\"fm-t3-relay-$relay-$(awk '/^arm / {print $2; exit}' "$log")-1\"" \
+    "the delivery request id names the relay and the cycle that closed"
+  until_true 10 starts_arm_at_least "$log" 2 || fail "the relay did not open a second watcher cycle after delivering"
+  printf 'quiet\n%s\n' "$(date +%s)" > "$home/state/.afk"
+  until_true 10 grep -q '^arm-term ' "$log" || fail "entering quiet mode did not end the relay's open watcher cycle"
+  until_true 10 starts_at_least "$log" 1 || fail "the relay did not run the daemon after handing over the watcher"
+  assert_not_contains "$(t3_fake_calls t3_thread_send)" "late.status" "a wake closing after the mode began must not be delivered"
+  assert_not_contains "$(cat "$home/relay.out")" "delivery of" "a wake closing after the mode began must not be attempted"
+  kill -TERM "$relay"
+  wait "$relay" 2>/dev/null
+  pass "fm-t3-host.sh relay: delivers an attended wake to the recorded thread, and entering away or quiet mode mid-cycle hands the watcher to the daemon without posting the closing wake"
+}
+
 test_relay_ownership_predicate
 test_protocol_renders_relay_mode
 test_launch_and_adopt
+test_relay_hosts_away_daemon
+test_relay_hands_open_watcher_cycle_to_daemon

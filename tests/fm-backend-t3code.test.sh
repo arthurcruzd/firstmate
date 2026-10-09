@@ -539,6 +539,52 @@ test_unreadable_thread_defers_like_busy() {
   pass "t3code: a failed thread read reports unknown busy state, submits no away-mode injection, and keeps stale rechecks uncertain"
 }
 
+# T3 reopens an unloaded session on the daemon's message without its
+# SessionStart hooks, so while the session lock names a dead process the
+# escalation carries the hint to run session start first, in the typed envelope
+# and in a Claude primary's record alike; a live session gets none.
+test_away_injection_hints_session_start_after_unload() {
+  local state send got holder
+  t3_case inject-hint completed
+  state="$CASE_DIR/state"
+  mkdir -p "$state"
+  got=$(t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=codex
+    afk_enter "$1"
+    inject_msg "worker needs attention" "$1"; printf "%s" "$?"
+  ' "$state")
+  [ "$got" = 0 ] || fail "away injection into an idle T3 thread should submit, got $got"
+  send=$(t3_log_line_of 'r.tool === "t3_thread_send"')
+  assert_contains "$(t3_request "$send" 'r.arguments.message')" "worker needs attention" "the escalation must reach the thread"
+  assert_contains "$(t3_request "$send" 'r.arguments.message')" "run bin/fm-session-start.sh first" \
+    "an escalation that reopens an unloaded session must say to run session start"
+  sleep 60 &
+  holder=$!
+  printf '%s\n' "$holder" > "$state/.lock"
+  t3_world "$(t3_thread_json thread-live completed false)"
+  : > "$LOG"
+  t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=codex
+    inject_msg "worker done" "$1"
+  ' "$state" || fail "away injection with a live session should submit"
+  send=$(t3_log_line_of 'r.tool === "t3_thread_send"')
+  assert_not_contains "$(t3_request "$send" 'r.arguments.message')" "fm-session-start" \
+    "a live session must not be told to rerun session start"
+  kill "$holder" 2>/dev/null
+  wait "$holder" 2>/dev/null
+  t3_world "$(t3_thread_json thread-live completed false)"
+  t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=claude
+    inject_msg "reviewer finished" "$1"
+  ' "$state" || fail "away injection into a Claude primary should submit its doorbell"
+  grep -rl "reviewer finished" "$state/operational-inbox" | xargs grep -l "run bin/fm-session-start.sh first" >/dev/null \
+    || fail "a Claude primary's record must carry the session-start hint"
+  pass "t3code away injection: an escalation into an unloaded session says to run session start; a live session's does not"
+}
+
 test_kill_interrupts_then_archives_and_tolerates_gone() {
   local archive down
   t3_case kill
@@ -1784,6 +1830,7 @@ test_native_restart_rearms_undelivered_stale_warning
 test_housekeeping_preserves_unknown_stale_recheck
 test_t3_stale_watcher failed dead codex fresh
 test_unreadable_thread_defers_like_busy
+test_away_injection_hints_session_start_after_unload
 test_stale_classifier_resolves_t3_thread
 test_t3_stale_watcher running absorb
 test_t3_stale_watcher running absorb claude

@@ -48,6 +48,9 @@
 # daemon to park a present captain's main.
 # On backend=t3code there is no terminal for `start` to create, so only a
 # harness with a tracked native background job can run `start-native` there.
+# Where a T3 wake relay owns the home (bin/fm-t3-host.sh), `start-native`
+# records the daemon as the relay's and says so: the relay's service runs it,
+# because T3 can end the session whose background job would otherwise host it.
 # `stop` (the return, driven by bin/fm-afk-return.sh) shuts the daemon down,
 # clears state/.afk last, and archives the record under state/afk-contracts/.
 #
@@ -83,7 +86,8 @@
 #                              terminal is reconciled (closed by id) first.
 #   fm-afk-launch.sh start-native
 #                              Prepare lifecycle state for a harness-native
-#                              background job and record that no terminal exists.
+#                              background job and record that no terminal exists;
+#                              on a T3 relay-owned home, for the relay instead.
 #   fm-afk-launch.sh stop      Correct-ordered exit: SIGTERM the daemon so its
 #                              cleanup flushes WHILE state/.afk is still present,
 #                              wait for it, close a recorded non-native terminal
@@ -101,9 +105,9 @@
 #                              line naming a live away record on that home.
 #
 # Supported backends: herdr and tmux for `start`; t3code only through
-# `start-native` (T3 hosts no terminal to create, so the daemon runs as the
-# captain's own tracked background job, which means a Codex captain on t3code
-# has no away mode). Others (zellij, orca, cmux) have no verified
+# `start-native` (T3 hosts no terminal to create, so the daemon runs under the
+# home's T3 wake relay service or, without one, as the captain's own tracked
+# background job). Others (zellij, orca, cmux) have no verified
 # non-visible-launch primitive here yet and refuse loudly.
 #
 # Test seam: FM_AFK_LAUNCH_ENTRY overrides the command run in the created
@@ -165,6 +169,9 @@ FM_AFK_CONTRACT_CMD="$FM_AFK_LAUNCH_DIR/fm-afk-contract.sh"
 # The supervision host's home gate and attended readiness check.
 # shellcheck source=bin/fm-supervision-engine-lib.sh
 . "$FM_AFK_LAUNCH_DIR/fm-supervision-engine-lib.sh"
+# Whether a T3 wake relay owns this home and so runs the daemon itself.
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$FM_AFK_LAUNCH_DIR/fm-t3-host-lib.sh"
 
 fm_afk_launch_log() { printf 'fm-afk-launch: %s\n' "$*" >&2; }
 
@@ -435,7 +442,7 @@ fm_afk_launch_record_read() {
   case "$FM_AFK_REC_BACKEND" in
     herdr) [ -n "$extra" ] ;;
     tmux) : ;;
-    none) [ "$FM_AFK_REC_TARGET" = - ] && [ "$extra" = native ] ;;
+    none) [ "$FM_AFK_REC_TARGET" = - ] && { [ "$extra" = native ] || [ "$extra" = relay ]; } ;;
     *) return 2 ;;
   esac || { fm_afk_launch_log "daemon terminal record is malformed; refusing to act on it"; return 2; }
 }
@@ -720,7 +727,7 @@ fm_afk_launch_start() {
     fm_afk_launch_log "could not resolve the captain supervisor backend (set FM_SUPERVISOR_BACKEND)"
     return 1; }
   if [ "$captain_backend" = t3code ]; then
-    fm_afk_launch_log "backend t3code hosts no terminal to launch the daemon in; use 'fm-afk-launch.sh start-native' and run bin/fm-afk-start.sh through the harness's tracked background tool"
+    fm_afk_launch_log "backend t3code hosts no terminal to launch the daemon in; use 'fm-afk-launch.sh start-native', which hands the daemon to a T3 wake relay that owns this home, or else run bin/fm-afk-start.sh through the harness's tracked background tool"
     return 1
   fi
 
@@ -815,12 +822,19 @@ fm_afk_launch_start_native() {
     fi
   fi
   if [ "$result" -eq 0 ]; then
-    fm_afk_launch_record_write none - native || result=1
+    if fm_t3_relay_owns_home "$FM_AFK_LAUNCH_STATE"; then
+      fm_afk_launch_record_write none - relay || result=1
+    else
+      fm_afk_launch_record_write none - native || result=1
+    fi
   fi
   if [ "$result" -ne 0 ]; then
     fm_afk_launch_restore_backup "$backup" "$had_afk" || result=1
   else
     rm -rf "$backup" || result=1
+    if fm_t3_relay_owns_home "$FM_AFK_LAUNCH_STATE"; then
+      fm_afk_launch_log "the T3 wake relay's service runs the daemon for this home within seconds; do not start bin/fm-afk-start.sh in this session"
+    fi
   fi
   return "$result"
 }
