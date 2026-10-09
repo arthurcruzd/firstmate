@@ -9,7 +9,10 @@
 # (docs/supervision-protocols/supervision-host.md, whose lines tagged
 # "{<harness>,...} " render only for the listed harnesses), and Grok's arm
 # command becomes the host; on a home that does not run it the output is
-# unchanged.
+# unchanged. A home whose primary runs as a T3 Code thread under a live wake
+# relay (fm_t3_relay_owns_home in bin/fm-t3-host-lib.sh) renders
+# docs/supervision-protocols/t3-relay.md in place of the harness protocol, and
+# its repair line names the relay.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,6 +20,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$REPO_ROOT}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DOC_DIR="$REPO_ROOT/docs/supervision-protocols"
 
 HARNESS=
@@ -106,13 +110,20 @@ case "$HARNESS" in
   *) HARNESS=unknown; SNIPPET="$DOC_DIR/unknown.md" ;;
 esac
 [ -f "$SNIPPET" ] || SNIPPET="$DOC_DIR/unknown.md"
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$SCRIPT_DIR/fm-t3-host-lib.sh"
+T3_RELAY=0
+if fm_t3_relay_owns_home "$STATE"; then
+  T3_RELAY=1
+  SNIPPET="$DOC_DIR/t3-relay.md"
+fi
 HOST_SNIPPET=
 grok_arm='bin/fm-watch-arm.sh'
 case "$HARNESS" in
   claude|cursor|opencode|omp|grok|codex)
     # shellcheck source=bin/fm-supervision-engine-lib.sh
     . "$SCRIPT_DIR/fm-supervision-engine-lib.sh"
-    if fm_supervision_host_enabled "$CONFIG" "$HARNESS"; then
+    if [ "$T3_RELAY" -eq 0 ] && fm_supervision_host_enabled "$CONFIG" "$HARNESS"; then
       HOST_SNIPPET="$DOC_DIR/supervision-host.md"
       grok_arm='bin/fm-supervision-host.sh park'
     fi
@@ -174,6 +185,11 @@ repair_line() {
     return 0
   fi
 
+  if [ "$T3_RELAY" -eq 1 ]; then
+    printf '%s\n' 'the T3 wake relay owns watcher supervision for this home; check bin/fm-t3-host.sh status and its service instead of arming a watcher yourself.'
+    return 0
+  fi
+
   prefix=
   if [ "$QUEUE_PENDING" -eq 1 ]; then
     prefix='After draining queued wakes, '
@@ -211,6 +227,10 @@ repair_line() {
 }
 
 ordinary_wake_line() {
+  if [ "$T3_RELAY" -eq 1 ]; then
+    printf '%s\n' '- Ordinary wake: the T3 wake relay (bin/fm-t3-host.sh relay) already owns watcher continuity and delivers wakes as thread messages; drain and handle the wake, and do not arm another cycle yourself.'
+    return 0
+  fi
   case "$HARNESS" in
     claude)
       printf '%s\n' '- Ordinary wake: the Stop-owned auto-arm (bin/fm-claude-stop-autoarm.sh) already owns watcher continuity; drain and handle the wake, and do not arm another cycle yourself.'

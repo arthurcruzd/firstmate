@@ -171,6 +171,8 @@ fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 # --- the actual predicate ----------------------------------------------------
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$SCRIPT_DIR/fm-t3-host-lib.sh"
 if [ "$CLAUDE_MODE" -eq 1 ]; then
   # shellcheck source=bin/fm-session-lock-lib.sh
   . "$SCRIPT_DIR/fm-session-lock-lib.sh"
@@ -221,6 +223,13 @@ fi
 AFK_GRACE=${FM_GUARD_GRACE:-$(fm_poll_derived_grace)}
 if [ "$(fm_path_age "$STATE/.last-watcher-beat")" -lt "$AFK_GRACE" ] \
   && fm_afk_daemon_owns_supervision "$STATE"; then
+  allow_supervised_stop
+fi
+# A T3 wake relay (bin/fm-t3-host.sh) owns this home's watcher outside the
+# session and re-arms after each delivered wake, so the same fresh-beacon test
+# proves supervision across its brief re-arm gap.
+if [ "$(fm_path_age "$STATE/.last-watcher-beat")" -lt "$AFK_GRACE" ] \
+  && fm_t3_relay_owns_home "$STATE"; then
   allow_supervised_stop
 fi
 
