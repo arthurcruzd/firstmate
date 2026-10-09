@@ -37,7 +37,7 @@
 # firstmate itself runs directly inside a Rex block (TERM_PROGRAM=rex with
 # REX_BLOCK); see docs/rex-backend.md.
 # marker is not a selection; see docs/paseo-backend.md.
-# The experimental T3 Code adapter owns agent sessions over HTTP while
+# The experimental T3 Code adapter owns agent sessions over T3's /mcp while
 # Treehouse owns task worktrees. It is selected explicitly only.
 # Codex App is intentionally not in the known set yet.
 # docs/codex-app-backend.md owns that blocked backend contract.
@@ -84,7 +84,7 @@ FM_BACKEND_CONFIG_DIR="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # rex is EXPERIMENTAL and spawn-capable, session-provider-only like herdr -
 # verified against the real Rex server at API revision 5 (docs/rex-backend.md).
 # t3code is EXPERIMENTAL and spawn-capable: T3 Code owns the
-# agent session over HTTP while Treehouse keeps the worktree
+# agent session over T3's /mcp endpoint while Treehouse keeps the worktree
 # (docs/t3code-backend.md).
 # codex-app remains deliberately absent; see docs/codex-app-backend.md.
 FM_BACKEND_KNOWN="tmux herdr zellij orca cmux paseo rex t3code"
@@ -351,7 +351,8 @@ fm_backend_validate_spawn() {  # <name>
 #   - the treehouse worktree provider for every session-provider-only backend
 #     (tmux, herdr, zellij, cmux, paseo, rex, t3code); orca owns its own task worktree and
 #     terminal, so it drops both treehouse and any other backend's session CLI;
-#   - node for t3code, whose adapter speaks HTTP to the T3 server from node.
+#   - node for t3code, whose adapter speaks MCP to the T3 server through
+#     bin/fm-t3-mcp.mjs.
 # Prints a single space-separated line and returns 0 for a known backend; returns
 # 1 and prints nothing for an unknown backend.
 fm_backend_required_tools() {  # <backend>
@@ -653,7 +654,8 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
         echo "REFUSED: missing t3_thread_id in $meta; cannot stop the T3 thread; preserving task state." >&2
         return 1
       }
-      case "$thread" in *[!0-9a-fA-F-]*) thread= ;; esac
+      # T3 assigns the id (an MCP-launched thread reads mcp:<uuid>).
+      case "$thread" in *[!0-9a-zA-Z:_-]*) thread= ;; esac
       if [ "$window" != "fm-$id" ] || [ -z "$thread" ]; then
         echo "REFUSED: T3 endpoint metadata for task $id is malformed or inconsistent; preserving task state." >&2
         return 1
@@ -776,7 +778,7 @@ fm_backend_source() {  # <name>
       set -- fm-backend-hometag-lib.sh fm-composer-lib.sh fm-agent-process-lib.sh fm-session-lock-lib.sh fm-gemini-lib.sh
       ;;
     t3code)
-      set -- fm-transition-lib.sh
+      set -- fm-composer-lib.sh fm-transition-lib.sh
       ;;
     *)
       return 1
@@ -1050,22 +1052,6 @@ fm_backend_kill() {  # <backend> <target>
   esac
 }
 
-# fm_backend_agent_stop: stop the agent and keep its endpoint, on a backend
-# whose session is stopped through the backend itself rather than through the
-# harness's exit command typed into a composer (bin/fm-control-lib.sh's
-# fm_control_backend_native_exit names them). Every other backend refuses
-# here: its exit is the typed command the control plane owns.
-fm_backend_agent_stop() {  # <backend> <target>
-  local backend=$1
-  shift
-  [ -n "${1:-}" ] || { echo "error: refusing empty backend agent-stop target" >&2; return 1; }
-  fm_backend_source "$backend" || return 1
-  case "$backend" in
-    t3code) fm_backend_t3code_agent_stop "$1" ;;
-    *) echo "error: backend '$backend' stops an agent through its harness exit command, not a native stop" >&2; return 1 ;;
-  esac
-}
-
 fm_backend_remove_worktree() {  # <backend> <worktree-id>
   local backend=$1
   shift
@@ -1222,9 +1208,8 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # remains unverified because
 # its secondmate ghost-tab and agent-process recovery path has not been
 # empirically validated. Orca, cmux, and paseo do not support secondmate spawns. The
-# t3code adapter uses its shared thread classification and status table
-# (bin/backends/t3code-thread-status.cjs and bin/backends/t3code.sh); there is
-# no process to attribute locally.
+# t3code adapter maps the thread's V2 status through its one status table
+# (bin/backends/t3code.sh); there is no process to attribute locally.
 fm_backend_agent_state() {  # <backend> <target>
   local backend=$1 target=$2
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }
@@ -1256,8 +1241,9 @@ fm_backend_agent_alive() {  # <backend> <target>
 # fm_backend_wait_transition. Every push-capable backend reuses the shared
 # normalized-transition shape, policy table, and dedupe (bin/fm-transition-lib.sh);
 # herdr (docs/herdr-backend.md "Push events and polling fallback") and rex
-# (docs/rex-backend.md "Push events") implement the surface, and T3 Code
-# implements it over T3's WebSocket shell stream (see its backend guide).
+# (docs/rex-backend.md "Push events") implement the surface. T3 Code has no
+# push here: its `/mcp` credential is refused on T3's WebSocket stream, so T3
+# windows stay on the poll loop.
 # A backend with no native push
 # reports has-push false and returns 2 from the dispatchers below, so the
 # watcher falls back to its poll loop - the permanent fail-closed backstop.
@@ -1265,7 +1251,7 @@ fm_backend_agent_alive() {  # <backend> <target>
 # fm_backend_has_push: 0 if <backend> exposes a native transition push stream.
 fm_backend_has_push() {  # <backend>
   case "$1" in
-    herdr|rex|t3code) return 0 ;;
+    herdr|rex) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1282,7 +1268,6 @@ fm_backend_events_capable() {  # <backend> <session>
   case "$backend" in
     herdr) fm_backend_herdr_events_capable "$@" ;;
     rex) fm_backend_rex_events_capable "$@" ;;
-    t3code) fm_backend_t3code_events_capable "$@" ;;
     *) return 1 ;;
   esac
 }
@@ -1301,7 +1286,6 @@ fm_backend_wait_transition() {  # <backend> <session> <timeout_secs> <state_dir>
   case "$backend" in
     herdr) fm_backend_herdr_wait_transition "$@" ;;
     rex) fm_backend_rex_wait_transition "$@" ;;
-    t3code) fm_backend_t3code_wait_transition "$@" ;;
     *) return 2 ;;
   esac
 }
@@ -1314,7 +1298,6 @@ fm_backend_commit_transition() {  # <backend> <state_dir> <session> <record>
   case "$backend" in
     herdr) fm_backend_herdr_commit_transition "$@" ;;
     rex) fm_backend_rex_commit_transition "$@" ;;
-    t3code) fm_backend_t3code_commit_transition "$@" ;;
     *) return 1 ;;
   esac
 }
@@ -1327,19 +1310,17 @@ fm_backend_clear_transition() {  # <backend> <state_dir> <window>
   case "$backend" in
     herdr) fm_backend_herdr_clear_transition "$@" ;;
     rex) fm_backend_rex_clear_transition "$@" ;;
-    t3code) fm_backend_t3code_clear_transition "$@" ;;
     *) return 0 ;;
   esac
 }
 
-# Event connection grouping and record identity differ from pane target syntax.
-# T3 uses one configured server for all threads; pane backends retain session:id.
+# Event connection grouping and record identity: pane backends use session:id.
 fm_backend_event_session() {  # <backend> <target>
-  case "$1" in t3code) printf 'server' ;; *) printf '%s' "${2%%:*}" ;; esac
+  printf '%s' "${2%%:*}"
 }
 
 fm_backend_transition_target() {  # <backend> <session> <endpoint-id>
-  case "$1" in t3code) printf '%s' "$3" ;; *) printf '%s:%s' "$2" "$3" ;; esac
+  printf '%s:%s' "$2" "$3"
 }
 
 # Early spawn checks for API-owned sessions. Other backends keep their

@@ -229,7 +229,7 @@ Firstmate's skills live in two separate places with different audiences:
 - [docs/cmux-backend.md](docs/cmux-backend.md) - current setup, socket security, and limits for the experimental cmux backend.
 - [docs/paseo-backend.md](docs/paseo-backend.md) - current setup, terminal-name routing, and limits for the experimental Paseo backend.
 - [docs/rex-backend.md](docs/rex-backend.md) - current setup, auto-detection, block-id routing, the absence proof, and limits for the experimental Rex backend.
-- [docs/t3code-backend.md](docs/t3code-backend.md) - current setup, token minting, and limits for the experimental T3 Code backend.
+- [docs/t3code-backend.md](docs/t3code-backend.md) - current setup, sign-in, and limits for the experimental T3 Code backend.
 - [docs/codex-app-backend.md](docs/codex-app-backend.md) - the current blocked Codex App backend boundary and rollout contract.
 - [docs/verification/runtime-backends.md](docs/verification/runtime-backends.md) - active maintainer verification for runtime backend guarantees.
 - [docs/gerrit-forge-integration.md](docs/gerrit-forge-integration.md) - maintainer architecture for the forge axis: why change-shaped review is not a forge variant, the mode/forge/shape composition test, and where responsibility for forge mechanics sits.
