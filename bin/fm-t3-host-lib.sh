@@ -14,7 +14,18 @@
 # start stamp matches, so a reused pid never counts), and runs fm-t3-host.sh
 # relay.
 
+# A process's start identity. On Linux it is the kernel's start time in clock
+# ticks since boot (/proc/<pid>/stat field 22), which never moves; `ps -o
+# lstart` derives wall time from a boot time that drifts under WSL2 when the
+# host clock is unsynchronized, which would make a live relay look replaced.
 fm_t3_relay_proc_started() {  # <pid>
+  local stat rest
+  if [ -r "/proc/$1/stat" ] && stat=$(cat "/proc/$1/stat" 2>/dev/null) && [ -n "$stat" ]; then
+    # The command name in field 2 may contain spaces, so count from its close.
+    rest=${stat##*) }
+    printf 'ticks:%s\n' "$(printf '%s' "$rest" | awk '{print $20}')"
+    return 0
+  fi
   ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'
 }
 
@@ -29,7 +40,10 @@ fm_t3_relay_owns_home() {
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   [ -n "$started" ] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
-  [ "$(fm_t3_relay_proc_started "$pid")" = "$started" ] || return 1
+  # A relay started before the tick form existed recorded `ps -o lstart`, so
+  # either spelling of the same live process still owns the home.
+  [ "$(fm_t3_relay_proc_started "$pid")" = "$started" ] \
+    || [ "$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//; s/ *$//')" = "$started" ] || return 1
   cmd=$(ps -o command= -p "$pid" 2>/dev/null) || return 1
   case "$cmd" in *fm-t3-host.sh*relay*) return 0 ;; esac
   return 1

@@ -44,6 +44,8 @@ test_relay_ownership_predicate() {
   sleep 0.2
   printf 'pid=%s\nstarted=%s\n' "$relay" "$(started_of "$relay")" > "$state/.t3-relay"
   owns "$state" || fail "a live relay process with a matching start stamp must own the home"
+  printf 'pid=%s\nstarted=%s\n' "$relay" "$(ps -o lstart= -p "$relay" | sed 's/^ *//; s/ *$//')" > "$state/.t3-relay"
+  owns "$state" || fail "a relay record written in the older ps lstart spelling must still own the home"
   printf 'pid=%s\nstarted=%s\n' "$relay" "Thu Jan  1 00:00:00 1970" > "$state/.t3-relay"
   owns "$state" && fail "a reused pid whose start stamp differs must not own the home"
   printf 'pid=%s\nstarted=%s\n' "$other" "$(started_of "$other")" > "$state/.t3-relay"

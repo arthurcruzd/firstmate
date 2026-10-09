@@ -30,11 +30,14 @@ A whole-home remote route uses:
 - <id> - <one-sentence charter summary> (host: <ssh-alias>; root: <absolute-remote-code-root>; home: <absolute-remote-home>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
 ```
 
+A remote route may add `endpoint: t3code` after `root:` to host the second-mate agent on that host's own T3 Code server; an absent field means `herdr`.
+
 Each registry entry stays concise and single-line: the summary is one sentence naming the durable charter, `scope:` is the natural-language intake responsibility, `projects:` is the non-exclusive clone list, and any extra prose is limited to genuinely domain-specific hard rules that change routing or safety for that secondmate.
 Natural-language summary and `scope:` text may contain parentheses and semicolons; keep the generated `(home: ...; scope: ...; projects: ...; added ...)` suffix intact so operational consumers resolve its explicit field markers.
 The `home:` path points to the seeded home containing `data/charter.md`; no extra registry pointer field is needed.
 For a remote route, `host:` is an OpenSSH config alias and `root:` is that host's separate tracked Firstmate code root.
-A remote second-mate agent always runs on the Herdr backend and every seed, launch, and liveness relaunch first gates its host on `bin/fm-remote-doctor.sh` readiness, so an unready host refuses with that doctor's own gap text rather than half-creating a route; the workers that second mate supervises keep the home's ordinary backend selection.
+A remote second-mate agent runs on its route's endpoint - the Herdr backend by default, or the host's own T3 Code server for `endpoint: t3code` - and every seed, launch, and liveness relaunch first gates its host on `bin/fm-remote-doctor.sh` readiness for that endpoint, so an unready host refuses with that doctor's own gap text rather than half-creating a route; a Herdr-hosted mate's workers keep the home's ordinary backend selection, while a T3-hosted mate's workers run on the same T3 server.
+Seed a T3-hosted route with `--endpoint t3code`, and move a live mate between endpoints, or back, with `bin/fm-remote-secondmate-move.sh`; [`docs/remote-secondmates.md`](../../../docs/remote-secondmates.md#t3-code-endpoint) owns both.
 This release places whole secondmate homes remotely and never individual workers.
 [`docs/remote-secondmates.md`](../../../docs/remote-secondmates.md) owns current operator setup and transport behavior.
 The home-seeded `data/charter.md` is the sole owner of boilerplate idle-by-default behavior, the normal delegation lifecycle, and standard escalation contracts, so point to that charter rather than restating those contracts in the registry entry.

@@ -130,7 +130,7 @@ That deferral is itself bounded by `FM_BUSY_TURN_MAX_SECS`, measured from the la
 T3 launches Claude with the `user,project,local` setting sources, so the worktree `.claude/settings.local.json` busy hooks fire as on every other backend.
 T3 starts every agent with the T3 server's own environment, not a login shell's.
 Codex runs each command through `/bin/zsh -lc` in that environment, so the Firstmate toolchain must survive the login shell's startup files, and a startup file that rebuilds `PATH` when a marker variable is missing hides it from every Codex worker; Claude's shell tool restores its own login-shell snapshot and is unaffected.
-A remote secondmate is unaffected by this backend: it always runs on the remote host's Herdr, and `--backend t3code` on one is refused.
+A remote secondmate runs on this backend only when its route names `endpoint: t3code`, as a thread on its own host's T3 server signed in with the home's own credential; [`remote-secondmates.md`](remote-secondmates.md#t3-code-endpoint) owns that route, and `--backend t3code` on any other remote route is refused.
 
 Cleanup keeps all shared Firstmate safety checks.
 Before the slot returns to the pool, or before a secondmate home is removed, teardown interrupts any active run, archives the thread with `t3_thread_organize`, and requires T3 to read back `archived:true` with no active run, so no live thread can act in a slot another task may lease.
@@ -171,7 +171,8 @@ A home's own primary session can run as a pinned T3 thread, so the captain talks
 The checkout's tracked Claude hooks run inside the thread, so session start, the session lock, and the turn-end guard work as in a terminal.
 
 T3 releases an idle provider session after 30 minutes, or after at most four hours while background work pins it, and a Stop-hook-owned watcher would die with it.
-The home therefore runs the wake relay, `bin/fm-t3-host.sh relay`, as a user service (`bin/fm-t3-host.sh install` writes the systemd unit).
+The home therefore runs the wake relay, `bin/fm-t3-host.sh relay`, as a user service: `bin/fm-t3-host.sh install` writes a systemd user unit on Linux or an Aqua launch agent on macOS, and `uninstall` removes it.
+A [T3-hosted remote second mate](remote-secondmates.md#t3-code-endpoint) runs the same relay in its own home on its own host.
 The relay owns the watcher outside the session and sends each actionable wake to the primary's thread as an ordinary message, which also reopens an unloaded session.
 While a live relay owns the home the Claude Stop auto-arm stands aside, the turn-end guard accepts the relay's fresh beacon, and session start renders [`supervision-protocols/t3-relay.md`](supervision-protocols/t3-relay.md); in away or quiet mode the relay idles and the [away daemon](#away-mode) owns the watcher.
 A T3 server restart ends the primary's session and cancels any running worker turn; the relay's next wake reopens the session, whose session start runs again, and a cancelled worker is recovered with one steer.
