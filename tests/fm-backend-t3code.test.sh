@@ -1449,6 +1449,48 @@ test_spawn_remote_host_secondmate_keeps_home_credential() {
   pass "fm-spawn.sh --backend t3code --secondmate on its own host: keeps the home's credential and sends its crew to T3"
 }
 
+# Releasing a host-local T3 mate for a move (bin/fm-remote-secondmate-control.sh
+# release) archives its thread, removes the home's relay service, and strips the
+# launch environment from the home, so an agent later launched there on Herdr
+# never reads FM_BACKEND=t3code or a dead thread as its supervisor.
+test_remote_host_release_removes_t3_env() {
+  local id=t3smz4 home out meta thread svc
+  t3_case remote-release
+  home="$CASE_DIR/sm-home-release"
+  make_t3_secondmate_home "$home" "$id"
+  mkdir -p "$home/config" "$home/state/parent-route" "$home/data/.parent-route"
+  cp "$CONFIG/t3code-token" "$home/config/t3code-token"
+  chmod 600 "$home/config/t3code-token"
+  touch "$CASE_DIR/home/state/.last-watcher-beat" 2>/dev/null || true
+  out=$(HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$ROOT" FM_STATE_OVERRIDE="$home/state/parent-route" FM_DATA_OVERRIDE="$home/data/.parent-route" \
+    FM_CONFIG_OVERRIDE="$home/config" FM_SKIP_SECONDMATE_INHERIT=1 FM_SKIP_SECONDMATE_SYNC=1 FM_SPAWN_NO_GUARD=1 \
+    "$ROOT/bin/fm-spawn.sh" "$id" "$home" claude --model claude-sonnet-5 --backend t3code --secondmate 2>&1)
+  expect_code 0 $? "a host-local T3 mate launch should succeed"$'\n'"$out"
+  meta="$home/state/parent-route/$id.meta"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$meta")
+  FM_T3_ID="$thread" t3_fake_set 'w.threads[process.env.FM_T3_ID].status = "idle"; w.threads[process.env.FM_T3_ID].activeRunId = null;'
+  node -e 'const fs=require("fs"),f=process.argv[1],d=JSON.parse(fs.readFileSync(f,"utf8"));d.permissions={allow:["Bash(ls)"]};fs.writeFileSync(f,JSON.stringify(d))' "$home/.claude/settings.local.json"
+  printf 'thread=%s\n' "$thread" > "$home/state/.t3-host"
+  svc="$CASE_DIR/svc.log"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$svc" > "$FAKEBIN/systemctl"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$svc" > "$FAKEBIN/launchctl"
+  chmod +x "$FAKEBIN/systemctl" "$FAKEBIN/launchctl"
+  out=$(HOME="$SPAWN_HOME" FM_HOME="$home" "$ROOT/bin/fm-remote-secondmate-control.sh" release "$id" 2>&1)
+  expect_code 0 $? "releasing an idle T3 mate should succeed"$'\n'"$out"
+  rm -f "$FAKEBIN/systemctl" "$FAKEBIN/launchctl"
+  assert_contains "$out" "released: $id backend=t3code target=$thread" "release must name the closed endpoint"
+  [ "$(t3_json_field "$T3_FAKE_WORLD" "d.threads[\"$thread\"].archived")" = true ] || fail "release must archive the mate's thread"
+  assert_absent "$meta" "release must set the endpoint record aside"
+  ls "$meta".released-* >/dev/null 2>&1 || fail "release must keep the endpoint record as a released-<stamp> file"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env')" = undefined ] || fail "release must strip the T3 launch environment from the home"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.permissions.allow[0]')" = 'Bash(ls)' ] || fail "release must keep the home's other local settings"
+  assert_absent "$home/state/.t3-host" "release must drop the home's T3 host record"
+  assert_grep "disable --now fm-t3-relay-sm-home-release.service" "$svc" "release must remove the home's relay service"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-remote-secondmate-control.sh release: archives the T3 mate, removes its relay, and strips its launch environment from the home"
+}
+
 test_spawn_codex_secondmate_writes_toml_env() {
   local id home out thread toml
   t3_require_tomllib test_spawn_codex_secondmate_writes_toml_env || return 0
@@ -1779,6 +1821,7 @@ test_untracked_codex_config_is_preserved
 test_spawn_codex_scout_writes_toml_env_with_traceparent
 test_spawn_secondmate_runs_thread_in_home_with_env
 test_spawn_remote_host_secondmate_keeps_home_credential
+test_remote_host_release_removes_t3_env
 test_spawn_codex_secondmate_writes_toml_env
 test_spawn_refuses_t3code_when_token_rejected
 test_spawn_refuses_slot_of_another_clone

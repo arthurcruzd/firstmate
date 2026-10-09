@@ -287,6 +287,28 @@ t3_host_attach() { # <id>
     || die "remote secondmate $id launched as T3 thread $REMOTE_ENDPOINT_TARGET, but its wake relay service could not be installed"
 }
 
+# A T3 launch writes the mate's environment into the home itself (the env block
+# of .claude/settings.local.json, or the Codex overlay), because T3 sets no
+# per-thread environment. An agent launched in the home on another endpoint
+# would read it too - FM_BACKEND=t3code and a dead thread as its supervisor -
+# so release removes exactly that and keeps every other local setting, and the
+# home's T3 host record goes with the thread it named.
+t3_env_remove() {
+  local settings="$TARGET_HOME/.claude/settings.local.json"
+  if [ -f "$settings" ]; then
+    node -e '
+const fs = require("fs");
+const file = process.argv[1];
+const data = JSON.parse(fs.readFileSync(file, "utf8"));
+delete data.env;
+if (Object.keys(data).length === 0) fs.unlinkSync(file);
+else fs.writeFileSync(file, JSON.stringify(data) + "\n");
+' "$settings" || return 1
+  fi
+  "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$TARGET_HOME" || return 1
+  rm -f "$TARGET_HOME/state/.t3-host"
+}
+
 # The T3 relay service a home installs is named for the home, so the code
 # root's own copy can remove it even after retirement removed the home.
 t3_relay_uninstall() {
@@ -443,7 +465,10 @@ cmd_release() {
   esac
   fm_backend_kill "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" \
     || die "remote secondmate $id endpoint $REMOTE_ENDPOINT_TARGET could not be closed on $REMOTE_ENDPOINT_BACKEND"
-  [ "$REMOTE_ENDPOINT_BACKEND" != t3code ] || t3_relay_uninstall || true
+  if [ "$REMOTE_ENDPOINT_BACKEND" = t3code ]; then
+    t3_relay_uninstall || true
+    t3_env_remove || die "remote secondmate $id's T3 thread is archived, but its home still carries the T3 launch environment; remove the env block from $TARGET_HOME/.claude/settings.local.json and run $SCRIPT_DIR/fm-t3code-codex-env.sh cleanup $TARGET_HOME before launching it elsewhere"
+  fi
   stamp=$(date +%s)
   mv -f -- "$meta" "$meta.released-$stamp" || die "could not set the released endpoint record aside"
   printf 'released: %s backend=%s target=%s record=%s\n' "$id" "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$meta.released-$stamp"
