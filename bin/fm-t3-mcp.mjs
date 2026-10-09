@@ -21,8 +21,9 @@
 //     $FM_T3CODE_ORIGIN, else the `origin` in
 //     ~/.t3/userdata/server-runtime.json.
 //   fm-t3-mcp.mjs status
-//     Credential expiry, the capability gate, and whether a loopback server's
-//     own process runs with telemetry off (telemetry: off|on|unknown; anything
+//     Credential expiry, the capability gate, and whether a server on this
+//     machine (loopback or one of its own interface addresses) runs with
+//     telemetry off in its own process (telemetry: off|on|unknown; anything
 //     but off adds a stderr warning). Changes nothing.
 //   fm-t3-mcp.mjs project-ensure --root <abs-path> [--title <title>]
 //     The live T3 project whose workspaceRoot is <root> by real path, created
@@ -49,8 +50,8 @@
 //   fm-t3-mcp.mjs read --thread <id> [--limit <n>]
 //     t3_thread_read: the thread record and its latest run, unchanged.
 //   fm-t3-mcp.mjs capture --thread <id> [--lines <n>]
-//     The activity view rendered as a bounded plain-text tail; the one verb
-//     whose stdout is text rather than JSON.
+//     The activity view's newest items rendered as a bounded plain-text tail;
+//     the one verb whose stdout is text rather than JSON.
 //   fm-t3-mcp.mjs wait --thread <id> [--timeout-ms <n>]
 //     t3_thread_wait until the latest run is terminal or the timeout passes.
 //   fm-t3-mcp.mjs interrupt --thread <id> [--timeout-ms <n>]
@@ -60,6 +61,9 @@
 //     t3_thread_organize archive, then read back until the thread reports
 //     archived:true and activeRunId:null (closed=true). A thread the verified
 //     server no longer has is already closed (missing=true).
+//   fm-t3-mcp.mjs pin --thread <id> [--action pin|unpin]
+//     t3_thread_organize pin (or unpin): keeps a home's own primary thread at
+//     the top of every T3 client's sidebar (bin/fm-t3-host.sh).
 //   fm-t3-mcp.mjs thread-for-root --root <abs-path>
 //     The one unarchived, worktree-less thread with an active run on the live
 //     project rooted at <root>: exit 0 with threadId; exit 5 when there is
@@ -410,19 +414,27 @@ function isNotFound(err) {
 // T3CODE_TELEMETRY_ENABLED false (apps/server's AnalyticsService config).
 // Only a loopback server's own process environment can show that, read from
 // the listening process on this machine; anything else reads `unknown`.
-export function telemetryState(origin, probe = probeListenerEnv) {
+export function telemetryState(origin, probe = probeListenerEnv, localAddresses = interfaceAddresses) {
   let url;
   try {
     url = new URL(origin);
   } catch {
     return "unknown";
   }
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return "unknown";
+  // A loopback origin or one of this machine's own interface addresses, such
+  // as its tailnet address, is a server whose process this machine can read.
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (!["127.0.0.1", "localhost", "::1"].includes(host) && !localAddresses().includes(host)) return "unknown";
   const env = probe(url.port || (url.protocol === "https:" ? "443" : "80"));
   if (env === null) return "unknown";
-  const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=(\S*)/);
+  // /proc/<pid>/environ separates entries with NUL, which \S would run across.
+  const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=([^\s\0]*)/);
   if (!m) return "on";
   return /^(false|0|no|off)$/i.test(m[1]) ? "off" : "on";
+}
+
+function interfaceAddresses() {
+  return Object.values(os.networkInterfaces()).flat().filter(Boolean).map((a) => a.address);
 }
 
 function probeListenerEnv(port) {
@@ -717,8 +729,15 @@ export function renderCapture(out, lines) {
 
 async function capture(flags) {
   const lines = positiveInt(flags, "lines", 40, 500);
+  const threadId = need(flags, "thread");
   const { session } = await verifiedSession(flags);
-  const out = await session.call("t3_thread_read", { threadId: need(flags, "thread"), view: "activity", limit: Math.min(lines, 100), maxCharsPerItem: 600, runLimit: 1 });
+  // T3 pages the activity timeline oldest first, so read its item count and
+  // then the page after count-limit-1, or a long thread shows its beginning.
+  const limit = Math.min(lines, 100);
+  const probe = await session.call("t3_thread_read", { threadId, view: "activity", limit: 1, maxCharsPerItem: 1, runLimit: 1 });
+  const count = Number(probe?.thread?.itemCount);
+  const after = Number.isInteger(count) && count > limit ? { afterPosition: count - limit - 1 } : {};
+  const out = await session.call("t3_thread_read", { threadId, view: "activity", limit, maxCharsPerItem: 600, runLimit: 1, ...after });
   return { text: renderCapture(out, lines) };
 }
 
@@ -794,6 +813,15 @@ async function threadForRoot(flags) {
   throw new Refusal("ambiguous_thread", `${live.length} live T3 threads run in ${rootPath} (${live.join(", ")}); set FM_SUPERVISOR_TARGET to the captain thread id`, 6, { threadIds: live });
 }
 
+async function pin(flags) {
+  const threadId = need(flags, "thread");
+  const action = flags.action ?? "pin";
+  if (!["pin", "unpin"].includes(action)) usage(`--action ${action} is not pin or unpin`);
+  const { session } = await verifiedSession(flags);
+  await session.call("t3_thread_organize", { threadId, action });
+  return { ok: true, threadId, action };
+}
+
 const VERBS = {
   login,
   status,
@@ -807,6 +835,7 @@ const VERBS = {
   wait,
   interrupt,
   archive,
+  pin,
   "thread-for-root": threadForRoot,
 };
 

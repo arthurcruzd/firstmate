@@ -81,6 +81,7 @@ test_protocol_renders_relay_mode() {
 test_launch_and_adopt() {
   local root="$TMP_ROOT/checkout" home="$TMP_ROOT/home" out thread rc
   t3_fake_start "$TMP_ROOT/server" T3CODE_TELEMETRY_ENABLED=false
+  t3_fake_case "$TMP_ROOT/case-launch"
   mkdir -p "$root/bin" "$home/config" "$home/state"
   git init -q "$root"
   printf '# fake\n' > "$root/AGENTS.md"
@@ -89,31 +90,33 @@ test_launch_and_adopt() {
   printf '{"env":{"KEEP":"1"},"permissions":{"allow":[]}}\n' > "$TMP_ROOT/settings.seed"
   mkdir -p "$root/.claude"
   cp "$TMP_ROOT/settings.seed" "$root/.claude/settings.local.json"
-  t3_fake_credential "$home/config/t3-token"
+  t3_fake_credential "$home/config/t3code-token"
   out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" launch --model claude-sonnet-5-5 --effort low --title "Firstmate (test)" 2>&1)
   rc=$?
   [ "$rc" -eq 0 ] || fail "launch should succeed against the fake server: $out"
   thread=$(sed -n 's/^thread=//p' "$home/state/.t3-host")
   [ -n "$thread" ] || fail "launch must record the thread in the home's state/.t3-host"
-  assert_contains "$(t3_fake_calls t3_thread_launch)" "\"worktreePath\":\"$root\"" "the thread is bound to the code checkout, not the home"
+  assert_contains "$(t3_fake_calls t3_thread_launch)" '"workspaceStrategy":{"type":"root"' "the thread runs on the project root"
+  assert_contains "$(t3_fake_calls t3_project_create)" "\"workspaceRoot\":\"$root\"" "the project is the code checkout, not the home"
+  assert_contains "$(t3_fake_calls t3_thread_launch)" '"instanceId":"claudeAgent","model":"claude-sonnet-5-5","options":[{"id":"effort","value":"low"}]' "the model selection carries the instance, model, and effort"
   assert_contains "$(t3_fake_calls t3_thread_launch)" '"runtimeMode":"full-access"' "the primary runs at full access"
   assert_contains "$(t3_fake_calls t3_thread_organize)" "\"threadId\":\"$thread\",\"action\":\"pin\"" "launch pins the primary thread"
   assert_equals "$home" "$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).env.FM_HOME)' "$root/.claude/settings.local.json")" \
     "launch writes the home into the checkout's local Claude settings"
   assert_equals 1 "$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).env.KEEP)' "$root/.claude/settings.local.json")" \
     "existing local settings are kept"
-  out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" launch 2>&1)
-  [ $? -ne 0 ] || fail "a second launch while the recorded thread lives must be refused"
+  out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" launch 2>&1) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "a second launch while the recorded thread lives must be refused"
   assert_contains "$out" "already runs as T3 thread $thread" "the refusal names the live primary"
   rm -f "$home/state/.t3-host"
-  out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" adopt --thread "$thread" 2>&1)
-  [ $? -eq 0 ] || fail "adopting the live thread bound to the checkout should succeed: $out"
+  out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" adopt --thread "$thread" 2>&1) && rc=0 || rc=$?
+  [ "$rc" -eq 0 ] || fail "adopting the live thread bound to the checkout should succeed: $out"
   assert_equals "$thread" "$(sed -n 's/^thread=//p' "$home/state/.t3-host")" "adopt records the thread"
-  out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" adopt --thread mcp:gone 2>&1)
-  [ $? -ne 0 ] || fail "adopting a thread T3 does not have must be refused"
+  out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" adopt --thread mcp:gone 2>&1) && rc=0 || rc=$?
+  [ "$rc" -ne 0 ] || fail "adopting a thread T3 does not have must be refused"
   out=$(FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" status 2>&1)
   assert_contains "$out" "relay=none" "status reports no relay"
-  pass "fm-t3-host.sh: launch binds a full-access thread to the checkout and records it in the home; adopt and status read it back"
+  pass "fm-t3-host.sh: launch runs a full-access thread on the checkout's project root and records it in the home; adopt and status read it back"
 }
 
 test_relay_ownership_predicate

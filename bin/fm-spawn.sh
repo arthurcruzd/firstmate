@@ -4130,6 +4130,15 @@ EOF
       [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
       T3CODE_LEASED=1
       validate_spawn_worktree "treehouse get --lease" "$W"
+      # T3 binds a thread only to a linked worktree of the project root it was
+      # registered with. Treehouse keys pools by repository identity, so two
+      # homes cloning the same remote can share one pool whose slots belong to
+      # the other home's clone; never bind this task to another home's clone.
+      T3CODE_SLOT_ROOT=$(git -C "$WT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+      if [ -z "$T3CODE_SLOT_ROOT" ] || [ "$(cd "$T3CODE_SLOT_ROOT" 2>/dev/null && pwd -P)" != "$(cd "$PROJ_ABS" && pwd -P)" ]; then
+        echo "error: Treehouse slot $WT belongs to ${T3CODE_SLOT_ROOT:-an unknown repository}, not $PROJ_ABS; T3 would refuse it, and it may be another home's pool. Give this home's clone its own pool root (root= in a git-excluded treehouse.toml, docs/t3code-backend.md)" >&2
+        exit 1
+      fi
       T3CODE_CREATE_UNCERTAIN=1
       T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
         "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$WT" "$T3CODE_MODEL_SELECTION") || {

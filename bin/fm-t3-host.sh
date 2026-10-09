@@ -8,7 +8,7 @@
 # is a long-running process outside the session - normally a user service -
 # that owns this home's watcher and delivers each actionable close to the
 # primary's thread as an ordinary T3 message, which also reloads an unloaded
-# session. docs/t3-backend.md "Firstmate itself in T3" owns the operator
+# session. docs/t3code-backend.md "Firstmate itself in T3" owns the operator
 # contract; bin/fm-t3-host-lib.sh owns the ownership predicate the Stop hook,
 # the turn-end guard, and the protocol renderer read.
 #
@@ -18,8 +18,9 @@
 #     the home when FM_HOME is unset) as a T3 project, writes FM_HOME into the
 #     checkout's git-ignored .claude/settings.local.json (a T3 thread gets the
 #     T3 server's environment, not a per-thread one), launches the primary as a
-#     full-access Claude thread bound to the checkout, pins it, and records it
-#     in the home's state/.t3-host. Refuses when the record names a thread that still exists
+#     full-access Claude thread on the project root (the instance comes from
+#     config/t3code-instances, default claudeAgent), pins it, and records it in
+#     the home's state/.t3-host. Refuses when the record names a thread that still exists
 #     and is not archived; that thread is the primary.
 #   fm-t3-host.sh adopt --thread <id>
 #     Records an existing T3 thread, bound to the checkout and not archived,
@@ -27,7 +28,8 @@
 #   fm-t3-host.sh relay
 #     The wake relay loop, for a service manager. It records itself in
 #     state/.t3-relay and exits when another live relay owns the home. While
-#     the home needs supervision it runs bin/fm-watch-arm.sh in the foreground,
+#     the home needs supervision and is not in away or quiet mode (the away
+#     daemon owns the watcher then) it runs bin/fm-watch-arm.sh in the foreground,
 #     and on an actionable close (signal:, stale:, check:, heartbeat) sends the
 #     reason lines to the recorded thread under an idempotent request id,
 #     retrying until T3 accepts it; the durable wake queue holds the event in
@@ -90,7 +92,7 @@ fs.writeFileSync(out, JSON.stringify(s, null, 2) + "\n");' "$file" "$FM_HOME" "$
 }
 
 cmd_launch() {
-  local model=claude-opus-5-5 effort=high title msg='' existing out project thread branch
+  local model=claude-opus-5-5 effort=high title msg='' existing out project thread branch instance selection
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --model) model=${2:?}; shift 2 ;;
@@ -118,8 +120,13 @@ cmd_launch() {
     msg=$(mktemp) || die "mktemp failed"
     printf '%s\n' 'Session open. Run your session start and report the digest outcome briefly.' > "$msg"
   fi
-  out=$(mcp launch --project "$project" --title "$title" --harness claude --model "$model" --effort "$effort" \
-    --worktree "$FM_ROOT" ${branch:+--branch "$branch"} --message-file "$msg") || die "T3 did not launch the primary: $out"
+  instance=$(sed -n 's/^claude=//p' "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/t3code-instances" 2>/dev/null | head -1)
+  selection=$(node -e 'process.stdout.write(JSON.stringify({instanceId: process.argv[1], model: process.argv[2], options: [{id: "effort", value: process.argv[3]}]}))' \
+    "${instance:-claudeAgent}" "$model" "$effort")
+  # The root workspace strategy runs the thread in the project's own checkout,
+  # which is how the away daemon's thread-for-root discovery finds a captain.
+  out=$(mcp launch --project "$project" --title "$title" --model-selection "$selection" \
+    ${branch:+--branch "$branch"} --message-file "$msg") || die "T3 did not launch the primary: $out"
   thread=$(printf '%s' "$out" | json_get threadId)
   [ -n "$thread" ] || die "T3 did not report a thread id: $out"
   mcp pin --thread "$thread" >/dev/null || echo "fm-t3-host: warning: could not pin thread $thread; pin it in T3's sidebar" >&2
@@ -134,7 +141,7 @@ cmd_launch() {
 }
 
 cmd_adopt() {
-  local thread='' out wt
+  local thread='' out wt project tproject
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --thread) thread=${2:?}; shift 2 ;;
@@ -146,7 +153,14 @@ cmd_adopt() {
   [ "$(printf '%s' "$out" | json_get exists)" = true ] || die "T3 has no thread $thread"
   [ "$(printf '%s' "$out" | json_get archived)" != true ] || die "T3 thread $thread is archived"
   wt=$(printf '%s' "$out" | json_get worktreePath)
-  [ "$(cd "${wt:-/nonexistent}" 2>/dev/null && pwd -P)" = "$(cd "$FM_ROOT" && pwd -P)" ] || die "T3 thread $thread is bound to ${wt:-no worktree}, not this checkout $FM_ROOT"
+  if [ -n "$wt" ]; then
+    [ "$(cd "$wt" 2>/dev/null && pwd -P)" = "$(cd "$FM_ROOT" && pwd -P)" ] || die "T3 thread $thread is bound to $wt, not this checkout $FM_ROOT"
+  else
+    # A root-strategy thread runs in its project's own checkout.
+    project=$(mcp project-ensure --root "$FM_ROOT" | json_get projectId) || die "could not resolve the T3 project for $FM_ROOT"
+    tproject=$(mcp read --thread "$thread" --limit 1 | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);process.stdout.write(String((o.thread??o).projectId??""))})')
+    [ -n "$project" ] && [ "$tproject" = "$project" ] || die "T3 thread $thread belongs to project ${tproject:-unknown}, not this checkout's $project"
+  fi
   ensure_home_env_setting || die "could not write FM_HOME into $FM_ROOT/.claude/settings.local.json"
   mkdir -p "$STATE"
   { printf 'thread=%s\n' "$thread"; printf 'adopted=%s\n' "$(date +%s)"; } > "$HOST_RECORD.tmp" && mv "$HOST_RECORD.tmp" "$HOST_RECORD"
@@ -194,7 +208,9 @@ cmd_relay() {
   msg=$(mktemp) || die "mktemp failed"
   echo "fm-t3-host relay: owning watcher for $FM_HOME (pid $$)"
   while fm_t3_relay_mine; do
-    if ! fm_supervision_needed "$STATE"; then
+    # While state/.afk exists the away daemon owns the watcher and triage
+    # (docs/t3code-backend.md "Away-mode supervisor support").
+    if [ -e "$STATE/.afk" ] || ! fm_supervision_needed "$STATE"; then
       pred=''
       sleep "$IDLE_POLL"
       continue

@@ -164,6 +164,21 @@ T3 accepts an `mcp-client` session only on `/mcp`, so its WebSocket event stream
 Pending approvals on a running thread therefore read busy rather than `blocked`.
 An event-driven turn-end wait through `t3_thread_wait` is follow-up work.
 
+## Firstmate itself in T3
+
+A home's own primary session can run as a pinned T3 thread, so the captain talks to Firstmate in T3's UI, including T3's mobile app, while workers stay ordinary T3 threads.
+`bin/fm-t3-host.sh` owns this: `launch` registers the Firstmate checkout as a T3 project, writes the home into the checkout's git-ignored `.claude/settings.local.json` as `FM_HOME`, and starts a full-access Claude thread on the project root, pinned; `adopt` records a thread started from T3's UI instead.
+The checkout's tracked Claude hooks run inside the thread, so session start, the session lock, and the turn-end guard work as in a terminal.
+
+T3 releases an idle provider session after 30 minutes, or after at most four hours while background work pins it, and a Stop-hook-owned watcher would die with it.
+The home therefore runs the wake relay, `bin/fm-t3-host.sh relay`, as a user service (`bin/fm-t3-host.sh install` writes the systemd unit).
+The relay owns the watcher outside the session and sends each actionable wake to the primary's thread as an ordinary message, which also reopens an unloaded session.
+While a live relay owns the home the Claude Stop auto-arm stands aside, the turn-end guard accepts the relay's fresh beacon, and session start renders [`supervision-protocols/t3-relay.md`](supervision-protocols/t3-relay.md); in away or quiet mode the relay idles and the [away daemon](#away-mode) owns the watcher.
+A T3 server restart ends the primary's session and cancels any running worker turn; the relay's next wake reopens the session, whose session start runs again, and a cancelled worker is recovered with one steer.
+
+Treehouse keys its pools by repository identity, so two homes on one machine that clone the same remote share one pool by default, and T3 binds a thread only to a linked worktree of the clone it registered.
+A spawn refuses, and returns the lease of, a slot that belongs to another clone; give each extra home's clones their own pool with a git-excluded `treehouse.toml` whose `root =` names a directory only that home uses.
+
 <a id="away-mode"></a>
 
 ## Away-mode supervisor support

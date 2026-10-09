@@ -1528,6 +1528,22 @@ test_spawn_abort_returns_lease_only_after_archive() {  # <ok|fail>
   fi
 }
 
+test_spawn_refuses_slot_of_another_clone() {
+  local id=t3foreignslot out rc other
+  t3_case spawn-foreign-slot
+  t3_worker_setup "$id"
+  other="$CASE_DIR/other-home-clone"
+  fm_git_worktree "$other" "$CASE_DIR/other-wt" "fm/other"
+  WORKER_WT="$CASE_DIR/other-wt"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "a leased slot that belongs to another clone must be refused"$'\n'"$out"
+  assert_contains "$out" "belongs to $(cd "$other" && pwd -P), not" "the refusal names the clone that owns the slot"
+  case " $(t3_dispatch_types) " in *" t3_thread_launch "*) fail "no thread may be created for another clone's slot" ;; esac
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt 0 ] || fail "the foreign slot's lease must be handed back"
+  assert_absent "$CASE_DIR/state/$id.meta" "a refused slot leaves no task record"
+  pass "fm-spawn.sh --backend t3code: refuses a leased slot that belongs to another home's clone and returns it"
+}
+
 test_uncertain_thread_launch_keeps_lease() {
   local id out rc
   id=t3uncertain
@@ -1735,6 +1751,7 @@ test_spawn_codex_scout_writes_toml_env_with_traceparent
 test_spawn_secondmate_runs_thread_in_home_with_env
 test_spawn_codex_secondmate_writes_toml_env
 test_spawn_refuses_t3code_when_token_rejected
+test_spawn_refuses_slot_of_another_clone
 test_scout_teardown_stops_and_archives_before_slot_return
 test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete
 test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete codex
