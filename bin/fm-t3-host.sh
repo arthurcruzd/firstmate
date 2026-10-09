@@ -77,6 +77,7 @@ ensure_home_env_setting() {
   local file="$FM_HOME/.claude/settings.local.json" tmp
   mkdir -p "$FM_HOME/.claude"
   tmp=$(mktemp "$FM_HOME/.claude/.settings.local.XXXXXX") || return 1
+  # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions.
   node -e '
 const fs = require("fs");
 const [file, home, out] = process.argv.slice(1);
@@ -248,7 +249,9 @@ RestartSec=10
 [Install]
 WantedBy=default.target
 EOF
-  systemctl --user daemon-reload && systemctl --user enable --now "$name" || die "could not enable $name"
+  if ! systemctl --user daemon-reload || ! systemctl --user enable --now "$name"; then
+    die "could not enable $name"
+  fi
   printf 'installed %s\n' "$unit"
 }
 
