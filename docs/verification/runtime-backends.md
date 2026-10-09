@@ -362,6 +362,7 @@ The refusal is reached only through a close that could not do its job, and each 
 | zellij | 0, silent | 0, not yet distinguishable |
 | cmux | 0, silent | 0, not yet distinguishable |
 | herdr | 0, silent | 0 from this arm; `bin/fm-teardown.sh` gates every Herdr record removal on `fm_backend_herdr_endpoint_confirmed_gone` instead |
+| t3 | 0, silent, only when the verified environment no longer has the thread | 1 unless T3 reads back `archived:true` with no active run; an unreachable server or a failed gate is also 1, and teardown refuses even under `--force` ([T3 Code](#t3-code)) |
 
 The three arms that still report 0 need a presence re-read taken after their own close, and the close-then-read timing that re-read depends on cannot be established without the real Zellij, Orca, and cmux binaries.
 Guessing it is what a refusal must never rest on: a gate that refused an already-exited session would break ordinary cleanup on every task, which is a worse failure than the stranded endpoint it would be trying to prevent.
@@ -1981,6 +1982,66 @@ FM_CMUX_CLAUDE_COMPOSER_LIVE=1 bin/fm-test-run.sh tests/fm-cmux-claude-composer-
 
 That guard still addresses the worker by task selector, so it no longer reaches the typed submit path and is not a current refresh entry point for this guarantee.
 The portable classifier regression is `tests/fm-backend-cmux.test.sh`.
+
+## T3 Code
+
+Verified on 2026-10-08 against `t3 v0.0.46-nightly.20261008.2833` (npm launcher plus native `@t3code/t3-darwin-arm64`), run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295, codex-cli 0.160.1, node 26.8.2, and treehouse 2.3.0 on macOS arm64.
+The lab drove a scratch Firstmate home cloned from the branch, a scratch project with its own origin, and a private Treehouse pool root.
+
+```sh
+bin/fm-t3-mcp.mjs login --url http://127.0.0.1:<port> --access full-access --t3 <t3> --base-dir <t3-base-dir>
+tests/fm-t3-live-e2e.test.sh
+bin/fm-brief.sh lab4 labproj --scout
+bin/fm-spawn.sh lab4 projects/labproj --scout --harness claude --model claude-sonnet-5-5 --effort low
+bin/fm-send.sh lab4 '<steer>'
+bin/fm-control.sh lab4 interrupt
+bin/fm-teardown.sh lab4
+t3 auth session revoke <id> --base-dir <t3-base-dir>
+```
+
+Bounded output:
+
+```text
+{"ok":true,...,"environmentId":"<id>","serverVersion":"0.0.46-nightly.20261008.2833",...,"telemetry":"off"}
+ok - t3 live transport: T3 0.0.46-nightly.20261008.2833 environment <id> passes the gate (telemetry=off)
+spawned lab4 harness=claude kind=scout window=fm-lab4 worktree=<pool slot>
+done [at=<epoch>]: README.md holds only the heading '# lab project'; report written
+working [at=<epoch>]: steer one received
+interrupt-delivered lab4 harness=claude backend=t3 verified=endpoint cancel=confirmed
+teardown lab4 complete (window mcp:<uuid>@<id>, worktree <pool slot>)
+{"ok":true,...,"exists":true,"archived":true,"status":"interrupted","activeRunId":null,...}
+{"ok":false,"error":{"code":"unauthorized",...}}
+```
+
+Measured on that run:
+
+| Step | Result |
+| --- | --- |
+| Spawn, including the Treehouse lease and idle-thread creation | 18.3 s |
+| Spawn return to the worker's `done` line, report, and captain-hold gate | 20.7 s |
+| Inbox steer send to the worker's `handled/` acknowledgement | 8.2 s |
+| `fm-control.sh interrupt` | 3.2 s; the running `python3` child was gone 2 s later |
+| Teardown, including the archive read-back and slot return | 12.5 s; the slot read `available` afterwards |
+| A Codex `gpt-5.6-luna` scout from spawn to `done` | 43 s; teardown completed |
+
+Live facts the backend relies on:
+
+- `t3_thread_launch` without a message creates an idle thread whose `worktreePath`, `providerInstanceId`, and `runtimeMode` read back exactly as requested.
+- A launch on a path that is not one of the project's git worktrees is refused with `invalid_request`, which is what stopped a lab spawn whose pooled slot belonged to another clone; that spawn returned its lease and created no thread.
+- `t3_thread_send` with a repeated `clientRequestId` returns the same run instead of a second turn.
+- `t3_thread_interrupt` on an idle thread returns `no_active_run`; on a running turn, `t3_thread_wait` then reports `interrupted`.
+- `t3_thread_organize archive` reads back `archived:true` with `activeRunId:null`, and a later send is refused with `thread_not_sendable`.
+- T3's Claude reads the worktree's `.claude/settings.local.json`: Firstmate's busy and turn-end hooks fired, and a lab commit carried no agent co-author trailer.
+- The listening server's process environment showed `T3CODE_TELEMETRY_ENABLED=false`, so status reported `telemetry: off`.
+- After `t3 auth session revoke`, `t3 auth session list` reported no active sessions and the next helper call was refused as unauthorized.
+
+```sh
+tests/fm-t3-mcp.test.sh
+tests/fm-backend-t3.test.sh
+tests/fm-t3-live-e2e.test.sh
+```
+
+The fake-server suites cover the sign-in, every gate and credential refusal, the spawn refusals, the spawn abort, the doorbell, the interrupt claims, and teardown's ordering and refusals; the live guard refreshes the transport facts above without spending model tokens.
 
 ## Codex App host tools
 

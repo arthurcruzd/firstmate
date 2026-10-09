@@ -9,7 +9,7 @@ T3_FAKE_PID=
 # t3_fake_start <dir> [VAR=value...]: start a server under <dir>, with the
 # extra environment given. Sets T3_FAKE_URL, T3_FAKE_CFG, T3_FAKE_LOG.
 t3_fake_start() {
-  local dir=$1 i
+  local dir=$1
   shift
   mkdir -p "$dir"
   T3_FAKE_CFG="$dir/config.json"
@@ -20,7 +20,7 @@ t3_fake_start() {
   env -u T3CODE_TELEMETRY_ENABLED "$@" node "$T3_FAKE_SERVER" --config "$T3_FAKE_CFG" --log "$T3_FAKE_LOG" \
     --port-file "$dir/port" --parent-pid "$$" >"$dir/server.out" 2>&1 &
   T3_FAKE_PID=$!
-  for i in $(seq 1 100); do
+  for _ in $(seq 1 100); do
     [ -s "$dir/port" ] && break
     sleep 0.05
   done
