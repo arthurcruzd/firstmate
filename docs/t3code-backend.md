@@ -120,7 +120,9 @@ T3 derives the message id from the client request id and commits a send before i
 An accepted delivery's outcome (its request id, `messageId`, `runId`, and `delivery`) is kept for a day as `state/t3code-sends/<request-id>.accepted`, so it can be reconciled against T3's own message and run.
 The submit primitive reports `empty` when T3 accepts the message, so the daemon can clear its delivery buffer; `unconfirmed` when the reply was lost after the request went out, which `fm-send.sh` reports as delivered-unconfirmed (exit 3) with any reply expectation kept armed; and `send-failed` only for a proven refusal.
 After `unconfirmed`, only an unmarked send is safe to resend with identical text; a marked secondmate request is not resent, because a rerun mints a new reply correlation and so a new message.
-The away daemon freezes an unconfirmed digest and retries its exact text, so it keeps its request id, while events that arrive meanwhile wait for the next digest.
+A retry of an unconfirmed delivery that fails for any reason other than T3 refusing the send, including an unreachable server, stays `unconfirmed` and keeps the request id.
+The away daemon mints a request id for each T3 digest.
+It freezes an unconfirmed digest and retries its exact text under that id, with no expiry, until T3 accepts or refuses it, while events that arrive meanwhile wait for the next digest.
 Task completion remains a separate worker status event.
 Escape and Ctrl-C are both a `t3_thread_interrupt`; Enter is a no-op and Ctrl-U is unsupported.
 

@@ -165,7 +165,9 @@ console.error("error: " + d.error.message);
 
 # One logical delivery keeps one client request id across retries and
 # restarts: T3 derives the message id from it, so a resend after a lost reply
-# lands on the message T3 already committed instead of a second one. The id is
+# lands on the message T3 already committed instead of a second one. A caller
+# that holds its own logical delivery (the away daemon's frozen digest) passes
+# its id in FM_T3CODE_CLIENT_REQUEST_ID, with no expiry. Otherwise the id is
 # recorded under state/t3code-sends, keyed by thread and text, until an
 # outcome is proven; a record older than an hour starts a new delivery, so
 # deliberately repeated text later (a constant doorbell) is not swallowed.
@@ -181,41 +183,47 @@ process.stdout.write(require("crypto").createHash("sha256").update(require("fs")
   printf '%s/%s' "$dir" "$key"
 }
 
-fm_backend_t3code_send_request_id() {  # <record> -> client request id
-  local record=$1 id tmp
-  if [ -n "$(find "$record" -mmin -60 2>/dev/null)" ] && id=$(cat "$record" 2>/dev/null) && [ -n "$id" ]; then
-    printf '%s' "$id"
-    return 0
-  fi
-  id=$(printf 'fm-%s-%s-%s' "$(date +%s)" "${BASHPID:-$$}" "$RANDOM")
-  mkdir -p "${record%/*}" || return 1
-  tmp="$record.$$.tmp"
-  { printf '%s' "$id" > "$tmp" && mv -f "$tmp" "$record"; } || { rm -f "$tmp"; return 1; }
-  printf '%s' "$id"
-}
-
 # One durable message: it starts an idle thread's next turn or steers the
 # running one (t3_thread_send mode auto). The model selection was fixed at
 # launch, so the optional third argument is accepted for the caller's
-# symmetry and not sent. Exit 0 delivered (its outcome retained); 7 the reply
-# was lost after the request went out (the record keeps its request id for a
-# safe retry); any other status is proven non-delivery.
+# symmetry and not sent. Exit 0 delivered (its outcome retained); 7 the
+# outcome is unproven (the record keeps its request id for a safe retry); any
+# other status is proven non-delivery. A request id that may already be in
+# flight (the caller's own, or a fresh record from an earlier attempt) ends
+# only on acceptance or T3's typed refusal of the send: any other failure,
+# including one before the request went out, leaves the earlier attempt
+# unproven and reads 7.
 fm_backend_t3code_turn_start() {  # <thread-id> <text> [model-selection-json]
-  local thread=$1 text=$2 file record id out rc=0
-  record=$(fm_backend_t3code_send_record "$thread" "$text") || return 1
-  find "${record%/*}" -maxdepth 1 -name '*.accepted' -mmin +1440 -delete 2>/dev/null
-  id=$(fm_backend_t3code_send_request_id "$record") || return 1
+  local thread=$1 text=$2 file dir record='' id out rc=0 held=0
+  dir="${FM_STATE_OVERRIDE:-$FM_HOME/state}/t3code-sends"
+  mkdir -p "$dir" || return 1
+  find "$dir" -maxdepth 1 -name '*.accepted' -mmin +1440 -delete 2>/dev/null
+  if [ -n "${FM_T3CODE_CLIENT_REQUEST_ID:-}" ]; then
+    id=$FM_T3CODE_CLIENT_REQUEST_ID
+    held=1
+  else
+    record=$(fm_backend_t3code_send_record "$thread" "$text") || return 1
+    if [ -n "$(find "$record" -mmin -60 2>/dev/null)" ] && id=$(cat "$record" 2>/dev/null) && [ -n "$id" ]; then
+      held=1
+    else
+      id=$(printf 'fm-%s-%s-%s' "$(date +%s)" "${BASHPID:-$$}" "$RANDOM")
+      { printf '%s' "$id" > "$record.$$.tmp" && mv -f "$record.$$.tmp" "$record"; } || { rm -f "$record.$$.tmp"; return 1; }
+    fi
+  fi
   # The brief rides a file: it is the one value too large to trust to argv.
   file=$(mktemp "${TMPDIR:-/tmp}/fm-t3code-msg.XXXXXX") || return 1
   printf '%s' "$text" > "$file" || { rm -f "$file"; return 1; }
   out=$(fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" \
     --client-request-id "$id") || rc=$?
   rm -f "$file"
-  if [ "$rc" -eq 0 ] && { ! printf '%s\n' "$out" > "${record%/*}/$id.accepted.$$.tmp" \
-    || ! mv -f "${record%/*}/$id.accepted.$$.tmp" "${record%/*}/$id.accepted"; }; then
-    rm -f "${record%/*}/$id.accepted.$$.tmp"
+  if [ "$rc" -eq 0 ] && { ! printf '%s\n' "$out" > "$dir/$id.accepted.$$.tmp" \
+    || ! mv -f "$dir/$id.accepted.$$.tmp" "$dir/$id.accepted"; }; then
+    rm -f "$dir/$id.accepted.$$.tmp"
   fi
-  [ "$rc" -eq 7 ] || rm -f "$record"
+  if [ "$held" = 1 ] && [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+    rc=7
+  fi
+  [ -z "$record" ] || [ "$rc" -eq 7 ] || rm -f "$record"
   return "$rc"
 }
 
@@ -315,10 +323,9 @@ fm_backend_t3code_capture() {  # <thread-id> <lines>
   fm_backend_t3code_mcp capture --thread "$1" --lines "${2:-40}"
 }
 
-# empty: T3 accepted the message; unconfirmed: the reply was lost after the
-# request went out, so the message may have landed and only a resend of the
-# same text (which reuses its request id) is safe; send-failed: proven not
-# delivered.
+# empty: T3 accepted the message; unconfirmed: the message may have landed
+# (a lost reply, or a failed retry of one) and only a resend of the same text
+# (which reuses its request id) is safe; send-failed: proven not delivered.
 fm_backend_t3code_send_text_submit() {  # <thread-id> <text> <retries> <enter-sleep> <settle>
   local rc=0
   fm_backend_t3code_turn_start "$1" "$2" || rc=$?

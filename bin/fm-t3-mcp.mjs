@@ -58,7 +58,9 @@
 //     a send before it replies, so a reply lost after the request went out
 //     exits 7 (delivery_unconfirmed): the message may have landed, and only a
 //     retry with the same client request id is safe. A refusal before the
-//     request went out, or T3's own typed refusal, is proven non-delivery.
+//     request went out, or T3's own typed refusal, is proven non-delivery for
+//     this attempt; exit 3 is only T3's refusal of the send itself, so a
+//     typed failure of the gate's reads exits 1.
 //   fm-t3-mcp.mjs state --thread <id>
 //     exists, archived, status, activeRunId, pendingRequestCount,
 //     worktreePath, and turnAt (the latest run's completion, else its start or
@@ -824,7 +826,15 @@ async function launch(flags) {
 
 async function send(flags) {
   const args = { threadId: need(flags, "thread"), message: readMessage(flags), mode: "auto", clientRequestId: need(flags, "client-request-id") };
-  const { session } = await verifiedSession(flags);
+  let session;
+  try {
+    ({ session } = await verifiedSession(flags));
+  } catch (err) {
+    // Exit 3 means T3 refused this send; a typed failure of the gate's own
+    // reads is a failure before the request went out.
+    if (err instanceof Refusal && err.exit === 3) throw new Refusal(err.code, err.message, 1, err.extra);
+    throw err;
+  }
   let out;
   try {
     out = await session.call("t3_thread_send", args);

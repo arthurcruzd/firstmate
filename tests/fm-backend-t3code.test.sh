@@ -565,8 +565,9 @@ test_unreadable_thread_defers_like_busy() {
 }
 
 # A digest whose T3 reply was lost may already be delivered. Its generation is
-# frozen and retried verbatim (one request id), and an event arriving meanwhile
-# goes out in the next digest, so every event lands exactly once.
+# frozen and retried verbatim under its own request id, even after an outage
+# longer than an hour, and an event arriving meanwhile goes out in the next
+# digest, so every event lands exactly once.
 test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim() {
   local state got
   t3_case daemon-digest-freeze completed
@@ -580,6 +581,7 @@ test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim() {
     escalate_add "$1" "event-one"
     escalate_add "$1" "event-two"
     escalate_flush "$1"; printf "first=%s\n" "$?"
+    find "$1" -type f -exec touch -d "2 hours ago" {} +
     escalate_add "$1" "event-three"
     node -e "
 const fs = require(\"fs\"), f = process.argv[1], w = JSON.parse(fs.readFileSync(f, \"utf8\"));
@@ -1791,12 +1793,21 @@ t3_item_count() {
 # must read unconfirmed, through the adapter and through fm-send, and a resend
 # must reuse the request id so the message lands once.
 test_lost_send_reply_is_unconfirmed_and_resend_is_idempotent() {
-  local id out rc sends accepted thread=mcp:5c6d7e8f-0a1b-4c2d-9e3f-23456789abcd
+  local id out rc sends accepted down thread=mcp:5c6d7e8f-0a1b-4c2d-9e3f-23456789abcd
   t3_case send-lost-reply
   t3_world "$(t3_thread_json "$thread" completed false)"
   t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
   out=$(t3_run 'fm_backend_t3code_send_text_submit "$1" "deliver once" 3 0.01 0.01' "$thread" 2>/dev/null)
   [ "$out" = unconfirmed ] || fail "a reply lost after commit must read unconfirmed, not a proven failure, got '$out'"
+  # A retry that fails before its request goes out proves nothing about the
+  # committed attempt: it stays unconfirmed and keeps the request id.
+  down=$(t3_down_config)
+  out=$(FM_CONFIG_OVERRIDE="$down" FM_STATE_OVERRIDE="$CASE_DIR/state" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source t3code; fm_backend_t3code_send_text_submit "$1" "deliver once" 3 0.01 0.01' "$ROOT" "$thread" 2>/dev/null)
+  [ "$out" = unconfirmed ] || fail "a retry against an unreachable server must stay unconfirmed, got '$out'"
+  t3_world_set 'w.failTools = { t3_environment_read: { code: "unavailable", message: "starting up" } }'
+  out=$(t3_run 'fm_backend_t3code_send_text_submit "$1" "deliver once" 3 0.01 0.01' "$thread" 2>/dev/null)
+  [ "$out" = unconfirmed ] || fail "a retry whose gate read fails must stay unconfirmed, got '$out'"
+  t3_world_set 'w.failTools = {}'
   out=$(t3_run 'fm_backend_t3code_send_text_submit "$1" "deliver once" 3 0.01 0.01' "$thread" 2>/dev/null)
   [ "$out" = empty ] || fail "the resend must succeed, got '$out'"
   [ "$(t3_item_count "$thread" "deliver once")" = 1 ] || fail "the committed send and its resend must be one delivery"
