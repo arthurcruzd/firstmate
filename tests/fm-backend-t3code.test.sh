@@ -446,8 +446,13 @@ test_capture_renders_activity_and_status() {
     || fail "capture should render [type/status] text then the status line, got '$out'"
   out=$(t3_run 'fm_backend_t3code_capture thread-live 1')
   [ "$out" = 't3code: status=running run=run-1' ] || fail "capture must honour the line bound, got '$out'"
-  read=$(t3_log_line_of 'r.tool === "t3_thread_read"')
-  [ "$(t3_request "$read" 'r.arguments.view')" = activity ] || fail "capture must read the activity view"
+  read=$(t3_log_line_of 'r.tool === "t3_thread_read" && r.arguments.view === "activity"')
+  [ -n "$read" ] || fail "capture must read the activity view"
+  # T3 pages oldest-first, so a thread longer than one page must still show its newest items.
+  t3_fake_set 'w.threads["thread-live"].items = Array.from({ length: 250 }, (_, i) => ({ type: "assistant_message", status: "completed", text: `item ${i}` }));'
+  out=$(t3_run 'fm_backend_t3code_capture thread-live 3')
+  [ "$out" = $'[assistant_message/completed] item 248\n[assistant_message/completed] item 249\nt3code: status=running run=run-1' ] \
+    || fail "capture must show the newest items of a long thread, got '$out'"
   t3_run 'fm_backend_t3code_capture thread-gone 40' >/dev/null 2>&1 && fail "capture of a missing thread must fail"
   pass "fm_backend_t3code_capture: renders the activity tail and the thread's status line"
 }
@@ -992,6 +997,7 @@ test_control_exit_refused_before_any_call() {
   out=$(run_t3_control "$id" interrupt); rc=$?
   expect_code 0 "$rc" "interrupt on a t3code task should succeed"$'\n'"$out"
   case "$(t3_dispatch_types)" in t3_thread_interrupt*) ;; *) fail "interrupt must call t3_thread_interrupt, got '$(t3_dispatch_types)'" ;; esac
+  assert_contains "$out" "cancel=confirmed" "T3's own confirmation of the run's end must reach the interrupt verdict"
   [ "$(t3_run 'fm_backend_busy_state t3code "$1"' "$thread"):$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = idle:alive ] \
     || fail "an interrupted thread is idle and alive"
   pass "fm-control.sh backend=t3code: exit refuses before any call (V2 has no session stop); interrupt ends the turn natively"

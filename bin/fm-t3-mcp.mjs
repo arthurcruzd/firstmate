@@ -420,7 +420,7 @@ export function telemetryState(origin, probe = probeListenerEnv) {
   if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return "unknown";
   const env = probe(url.port || (url.protocol === "https:" ? "443" : "80"));
   if (env === null) return "unknown";
-  const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=(\S*)/);
+  const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=([^\s\0]*)/);
   if (!m) return "on";
   return /^(false|0|no|off)$/i.test(m[1]) ? "off" : "on";
 }
@@ -715,11 +715,27 @@ export function renderCapture(out, lines) {
   return [...body, tail].slice(-lines).join("\n");
 }
 
+// t3_thread_read pages forward from the oldest item, so the tail starts from
+// the thread's itemCount and widens backwards if that undercounts the visible
+// timeline (forked or handed-off threads).
 async function capture(flags) {
+  const threadId = need(flags, "thread");
   const lines = positiveInt(flags, "lines", 40, 500);
   const { session } = await verifiedSession(flags);
-  const out = await session.call("t3_thread_read", { threadId: need(flags, "thread"), view: "activity", limit: Math.min(lines, 100), maxCharsPerItem: 600, runLimit: 1 });
-  return { text: renderCapture(out, lines) };
+  const read = (afterPosition) =>
+    session.call("t3_thread_read", { threadId, view: "activity", limit: 100, maxCharsPerItem: 600, runLimit: 1, ...(afterPosition >= 0 ? { afterPosition } : {}) });
+  const head = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+  let start = Math.max(0, (head.itemCount ?? 0) - lines);
+  for (;;) {
+    let out = await read(start - 1);
+    const items = [...(out?.items ?? [])];
+    for (let page = 0; out?.hasMore && out.nextPosition !== null && page < 50; page++) {
+      out = await read(out.nextPosition);
+      items.push(...(out?.items ?? []));
+    }
+    if (items.length >= lines || start === 0) return { text: renderCapture({ ...out, items: items.slice(-lines) }, lines) };
+    start = Math.max(0, start - lines);
+  }
 }
 
 async function wait(flags) {

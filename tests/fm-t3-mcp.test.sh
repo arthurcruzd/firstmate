@@ -47,7 +47,7 @@ test_login_writes_private_credential_and_never_prints_token() {
   assert_equals env-fake-1 "$(field "$OUT" environmentId)" "login should record the server's environment id"
   assert_not_contains "$OUT$ERR" "tok-" "login must never print the access token"
   assert_not_contains "$OUT$ERR" "PAIR-OK" "login must never print the pairing code"
-  [ "$(stat -f %Lp "$CRED" 2>/dev/null || stat -c %a "$CRED")" = 600 ] || fail "credential file must be mode 0600"
+  [ "$(stat -c %a "$CRED" 2>/dev/null || stat -f %Lp "$CRED")" = 600 ] || fail "credential file must be mode 0600"
   assert_grep '"environment_id":"env-fake-1"' "$CRED" "credential must record the environment id"
   assert_grep '"origin":"'"$T3_FAKE_URL"'"' "$CRED" "credential must record the origin"
   assert_grep "auth pairing create --base-dir $TMP_ROOT/t3home --scope orchestration:read --scope orchestration:operate --ttl 2m" "$TMP_ROOT/cli/t3-cli.log" \

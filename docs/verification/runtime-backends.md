@@ -2450,7 +2450,7 @@ Use the [Rex regression entry points](../rex-backend.md#regression-entry-points)
 ### Orchestrator V2 transport
 
 The `/mcp` transport was verified live on 2026-10-08 against `t3 v0.0.46-nightly.20261008.2833` (npm launcher plus native `@t3code/t3-darwin-arm64`), run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295, codex-cli 0.160.1, node 26.8.2, and treehouse 2.3.0 on macOS arm64.
-That run drove `bin/fm-t3-mcp.mjs` through an earlier standalone wiring of the same helper in a scratch Firstmate home, scratch project, and private Treehouse pool root; this backend's adapter calls the same tools with the same arguments, but its own wiring has fake-server coverage only and no live run yet.
+That run drove `bin/fm-t3-mcp.mjs` through an earlier standalone wiring of the same helper in a scratch Firstmate home, scratch project, and private Treehouse pool root.
 T3 stable 0.0.45 lacks the `t3_thread_*` tools, and 0.0.46 nightly answers 404 for the pre-V2 `POST /api/orchestration/dispatch` route.
 
 ```sh
@@ -2487,6 +2487,39 @@ Live facts the backend relies on:
 - The listening server's process environment showed `T3CODE_TELEMETRY_ENABLED=false`, so status reported `telemetry: off`.
 - After `t3 auth session revoke`, `t3 auth session list` reported no active sessions and the next helper call was refused as unauthorized.
 - The 0.0.46 nightly binary's schemas offer the `root`, `existing_worktree`, and `worktree` launch workspace strategies, `t3_thread_list` filtered by status per project, and no session-stop tool, which is why a secondmate launches at `root` and `fm-control.sh exit` refuses.
+
+### Adapter wiring on Linux
+
+This backend's own wiring was verified live on 2026-10-10 against `t3 v0.0.46-nightly.20261010.2935` running as the service-managed server on Linux x86_64 (kernel 7.0.0), with Claude Code 2.1.296, codex-cli 0.162.1, node v24.21.0, and treehouse 2.1.0.
+The server ran with telemetry on, so every verb printed the telemetry warning.
+The run used a scratch Firstmate home (`config/backend` `t3code`, a fresh `login` credential, and `config/t3code-instances`), a scratch project with a bare origin, and the default Treehouse pool root.
+
+```sh
+bin/fm-t3-mcp.mjs login --access full-access
+bin/fm-brief.sh lab-scout-1 lab --scout
+bin/fm-spawn.sh lab-scout-1 <home>/projects/lab --scout --model claude-haiku-5-5 --effort low
+bin/fm-send.sh lab-scout-1 "<steer>"
+bin/fm-control.sh lab-scout-3 interrupt
+bin/fm-teardown.sh lab-scout-1
+bin/fm-spawn.sh lab-scout-2 <home>/projects/lab --scout --harness codex --model gpt-6-luna --effort low
+```
+
+| Step | Result |
+| --- | --- |
+| Spawn of a Claude scout, including the Treehouse lease and the launch turn | 2.2 s |
+| Claude scout from spawn to its report | under 30 s |
+| Inbox steer during a running turn | delivered as `steered`; the worker moved `001.msg` to `handled/` and applied it before its `done` line |
+| `fm-control.sh interrupt` during a running `python3` tool call | `interrupt-delivered lab-scout-3 harness=claude backend=t3code verified=agent-alive cancel=confirmed`; the child process was gone 2 s later |
+| Teardown | 2.1 s; the thread read `archived:true` with no active run and the slot read `available` |
+| Codex `gpt-6-luna` scout from spawn to `done` | about 30 s; teardown completed |
+
+Live facts this run added:
+
+- Threads created before the V2 switch keep their plain UUID ids and read through `t3_thread_read` as ordinary idle threads, so a task recorded before the switch keeps a readable endpoint.
+- `t3_thread_read` pages the activity view oldest first from `afterPosition`, and `thread.itemCount` is the visible item count, which is how `capture` reads the tail.
+- `thread-for-root` on the Firstmate home resolved the captain's own T3 thread, whose id is a plain UUID.
+- On Linux the listener's environment is NUL-separated `/proc/<pid>/environ`, which the telemetry probe parses.
+- T3 detaches the provider session after the archive asynchronously, so its Claude or Codex process can still be running in the slot when the archive reads back; teardown's worktree-process reaper ended it for both harnesses before the slot returned.
 
 ### Live transport guard
 

@@ -581,6 +581,13 @@ deliver_interrupt() {
   if [ "$HARNESS" = devin ]; then
     devin_gen=$(fm_busy_current_gen "$STATE" "$ID" 2>/dev/null || true)
   fi
+  # T3 Code has no keys: its native interrupt confirms the run's end itself.
+  if [ "$BACKEND" = t3code ]; then
+    cancel=$(fm_backend_t3code_native_interrupt "$T") \
+      || die "interrupt was not delivered to task $ID on $BACKEND"
+    printf '%s' "${cancel:-unconfirmed}"
+    return 0
+  fi
   prepare_interrupt_ack
   send_interrupt_keys
   if [ "$INTERRUPT_ARMED" = no ]; then

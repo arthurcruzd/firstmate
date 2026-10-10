@@ -149,8 +149,11 @@ function callTool(w, name, a) {
     }
     case "t3_thread_read": {
       if (!t) return [notFound(a.threadId), false];
-      const items = (t.items ?? []).slice(-(a.limit ?? 100));
-      return [ok({ thread: detail(t), recentRuns: (t.runs ?? []).slice(0, a.runLimit ?? 5), items, nextPosition: null, hasMore: false }), false];
+      // T3 pages forward from afterPosition (exclusive), oldest first.
+      const matching = (t.items ?? []).map((it, position) => ({ ...it, position })).filter((it) => it.position > (a.afterPosition ?? -1));
+      const items = matching.slice(0, a.limit ?? 50);
+      const thread = { ...detail(t), itemCount: (t.items ?? []).length };
+      return [ok({ thread, recentRuns: (t.runs ?? []).slice(0, a.runLimit ?? 5), items, nextPosition: items.at(-1)?.position ?? null, hasMore: matching.length > items.length }), false];
     }
     case "t3_thread_list": {
       const wanted = a.statuses ? new Set(a.statuses) : null;

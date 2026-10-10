@@ -110,13 +110,14 @@ It then launches an idle thread with `t3_thread_launch` (the workspace strategy 
 It installs the harness hooks, records metadata, installs the [per-directory harness environment](#per-directory-harness-environment), and sends the encoded brief (the charter, for a secondmate) as the thread's first message with `t3_thread_send`.
 Exact call payloads are owned by `bin/fm-t3-mcp.mjs` and `bin/backends/t3code.sh`.
 
-`fm-peek.sh` renders the thread's activity view as `[type/status] text` lines followed by a `t3code: status=<status> run=<active run>` line.
+`fm-peek.sh` renders the newest items of the thread's activity view as `[type/status] text` lines followed by a `t3code: status=<status> run=<active run>` line.
+T3 pages that view oldest first, so the helper starts from the thread's visible item count to read the tail.
 An ordinary metadata-routed `fm-send.sh` text steer becomes a durable steering-inbox record, and its doorbell is a `t3_thread_send` in `auto` mode under a fresh request id, which starts an idle thread's next turn or steers the running one.
 The submit primitive reports `empty` when T3 accepts the message, so the daemon can clear its delivery buffer; task completion remains a separate worker status event.
 Escape and Ctrl-C are both a `t3_thread_interrupt` confirmed by T3's own `t3_thread_wait` on the run; Enter is a no-op and Ctrl-U is unsupported.
 
 The control plane ([`agent-control.md`](agent-control.md)) reads the same status table.
-`interrupt` is a `t3_thread_interrupt` proven by the thread still reading alive afterwards.
+`interrupt` is a `t3_thread_interrupt` proven by the thread still reading alive afterwards, and its `cancel=` verdict is T3's own: `confirmed` when the run reached a terminal status, `not-running` when there was no active run, else `unconfirmed`.
 `exit` is refused before anything is sent: the V2 `/mcp` tools have no session stop, and an interrupt leaves the thread idle and alive, so no stop could be proven.
 `relaunch` is refused before anything is stopped: a T3 thread is bound to the driver that first ran it, and a new turn continues the same agent, so no replacement agent can be launched into the endpoint.
 
