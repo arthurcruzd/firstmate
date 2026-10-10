@@ -401,7 +401,10 @@ cmd_relay() {
         kill -TERM "$arm_pid" 2>/dev/null
         break
       fi
-      [ "$host" -eq 0 ] || relay_flush_outbox "$msg" || break
+      if [ "$host" -eq 1 ] && ! relay_flush_outbox "$msg"; then
+        kill -TERM "$arm_pid" 2>/dev/null
+        break
+      fi
       sleep "$MODE_POLL"
     done
     wait "$arm_pid"
