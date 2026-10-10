@@ -108,9 +108,10 @@ test_gate_refuses_missing_tools() {
   expect_code 4 "$RC" "a server without t3_thread_launch must be refused"
   assert_equals capability_gate "$(field "$OUT" error.code)" "the refusal should be the capability gate"
   assert_contains "$ERR" "t3_thread_launch" "the refusal should name the missing tool"
-  t3_fake_set 'w.tools = ["t3_thread_launch","t3_thread_send","t3_thread_read","t3_thread_wait","t3_thread_interrupt","t3_thread_organize","t3_project_list","t3_project_create"]'
+  t3_fake_set 'w.tools = ["t3_thread_launch","t3_thread_send","t3_thread_read","t3_thread_wait","t3_thread_interrupt","t3_thread_organize","t3_thread_list","t3_project_list","t3_project_create"]'
   mcp status
   expect_code 4 "$RC" "a server without t3_environment_read cannot prove its identity"
+  assert_contains "$ERR" "lacks t3_environment_read" "the refusal should name the missing identity tool"
   pass "fm-t3-mcp gate: refuses a server missing a required tool or its identity tool"
 }
 
