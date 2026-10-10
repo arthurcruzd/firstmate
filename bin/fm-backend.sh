@@ -1241,9 +1241,10 @@ fm_backend_agent_alive() {  # <backend> <target>
 # fm_backend_wait_transition. Every push-capable backend reuses the shared
 # normalized-transition shape, policy table, and dedupe (bin/fm-transition-lib.sh);
 # herdr (docs/herdr-backend.md "Push events and polling fallback") and rex
-# (docs/rex-backend.md "Push events") implement the surface. T3 Code has no
-# push here: its `/mcp` credential is refused on T3's WebSocket stream, so T3
-# windows stay on the poll loop.
+# (docs/rex-backend.md "Push events") implement the surface, and T3 Code
+# implements it over t3_thread_wait and its pending-request count
+# (bin/backends/t3code.sh "native event wait"), since its `/mcp` credential is
+# refused on T3's WebSocket stream.
 # A backend with no native push
 # reports has-push false and returns 2 from the dispatchers below, so the
 # watcher falls back to its poll loop - the permanent fail-closed backstop.
@@ -1251,7 +1252,7 @@ fm_backend_agent_alive() {  # <backend> <target>
 # fm_backend_has_push: 0 if <backend> exposes a native transition push stream.
 fm_backend_has_push() {  # <backend>
   case "$1" in
-    herdr|rex) return 0 ;;
+    herdr|rex|t3code) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1268,6 +1269,7 @@ fm_backend_events_capable() {  # <backend> <session>
   case "$backend" in
     herdr) fm_backend_herdr_events_capable "$@" ;;
     rex) fm_backend_rex_events_capable "$@" ;;
+    t3code) fm_backend_t3code_events_capable "$@" ;;
     *) return 1 ;;
   esac
 }
@@ -1286,6 +1288,7 @@ fm_backend_wait_transition() {  # <backend> <session> <timeout_secs> <state_dir>
   case "$backend" in
     herdr) fm_backend_herdr_wait_transition "$@" ;;
     rex) fm_backend_rex_wait_transition "$@" ;;
+    t3code) fm_backend_t3code_wait_transition "$@" ;;
     *) return 2 ;;
   esac
 }
@@ -1298,6 +1301,7 @@ fm_backend_commit_transition() {  # <backend> <state_dir> <session> <record>
   case "$backend" in
     herdr) fm_backend_herdr_commit_transition "$@" ;;
     rex) fm_backend_rex_commit_transition "$@" ;;
+    t3code) fm_backend_t3code_commit_transition "$@" ;;
     *) return 1 ;;
   esac
 }
@@ -1310,17 +1314,34 @@ fm_backend_clear_transition() {  # <backend> <state_dir> <window>
   case "$backend" in
     herdr) fm_backend_herdr_clear_transition "$@" ;;
     rex) fm_backend_rex_clear_transition "$@" ;;
+    t3code) fm_backend_t3code_clear_transition "$@" ;;
     *) return 0 ;;
   esac
 }
 
-# Event connection grouping and record identity: pane backends use session:id.
+# Event connection grouping and record identity: pane backends use session:id;
+# every T3 thread shares the home's one server, and its record names the
+# thread id itself.
 fm_backend_event_session() {  # <backend> <target>
-  printf '%s' "${2%%:*}"
+  case "$1" in
+    t3code) printf 't3code' ;;
+    *) printf '%s' "${2%%:*}" ;;
+  esac
 }
 
 fm_backend_transition_target() {  # <backend> <session> <endpoint-id>
-  printf '%s:%s' "$2" "$3"
+  case "$1" in
+    t3code) printf '%s' "$3" ;;
+    *) printf '%s:%s' "$2" "$3" ;;
+  esac
+}
+
+# fm_backend_transition_note: optional backend detail appended to an
+# escalated transition's wake reason; empty for backends with nothing to add.
+fm_backend_transition_note() {  # <backend> <record>
+  case "$1" in
+    t3code) fm_backend_source t3code && fm_backend_t3code_transition_note "$2" ;;
+  esac
 }
 
 # Early spawn checks for API-owned sessions. Other backends keep their

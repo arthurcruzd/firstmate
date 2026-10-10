@@ -366,12 +366,13 @@ fm_control_backend_exit_supported() {  # <backend>
 }
 
 # Whether <backend> can launch a REPLACEMENT agent into an existing task's
-# endpoint. A T3 thread is bound to the driver that first ran it (the server
-# answers "is bound to driver 'codex' and cannot switch to 'claudeAgent'"),
-# and a new turn on the thread continues the same agent with its transcript
-# rather than a fresh one, so t3code has no replacement to launch and a
-# relaunch is refused before anything is stopped (docs/t3code-backend.md
-# "Active limits"). zellij, orca, and cmux never reach this table: they fail
+# endpoint. A T3 thread keeps its conversation: a new turn continues the same
+# agent with its transcript, and a provider or model change through
+# t3_thread_configure is a context handoff on the same thread (T3 main; older
+# nightlies refused a driver change outright), never the fresh agent a
+# relaunch promises. So t3code has no replacement to launch and a relaunch
+# is refused before anything is stopped (docs/t3code-backend.md "Active
+# limits"). zellij, orca, and cmux never reach this table: they fail
 # fm_control_backend_state_verified first.
 fm_control_backend_relaunch_supported() {  # <backend>
   case "${1-}" in

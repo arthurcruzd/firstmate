@@ -64,7 +64,7 @@ Removing a worktree, closing an endpoint, or discarding work stays with [`bin/fm
 **`resume` is not a verb.**
 It is not deterministic across the verified adapters: codex, grok, gemini, devin, and commandcode resume only from a session id printed at exit, polytoken resumes only from a session id held in its own sessions registry, opencode continues the most recent session for the cwd, and claude, pi, pi-signed, omp, kimi, and agy have no verified general pane-resume contract.
 `relaunch` uses the brief on disk - not a harness-private session - as the durable instruction when the backend can prove the old agent stopped and the composer is empty; Devin on Herdr currently fails that composer check and refuses.
-T3 Code cannot host a replacement agent in a thread, so `relaunch` refuses before stopping anything.
+T3 Code cannot host a fresh replacement agent in a thread, so `relaunch` refuses before stopping anything.
 A relaunch does take one session reference when the endpoint's own runtime recorded it - see [the relaunch transaction](#transactional-relaunch) - but that is a relaunch input, not a caller-facing verb.
 
 ## Transactional relaunch
@@ -124,7 +124,7 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
   A different but running server would answer "not anywhere" about a window it was never able to see, so a server-wide read cannot tell a destroyed window from one on a server this process cannot address.
   There is no read available that closes that gap, so tmux always refuses - for a renamed session, a moved window, a foreign socket, and a dead server alike.
 - **T3 Code refuses `exit` before this proof.** Its adapter reports `missing` only for an archived thread or one the verified server does not have, while an unreachable server reports `unreadable`.
-  T3 Code still cannot reclaim the task because a thread remains bound to its original driver, so `relaunch` refuses before this proof can authorize a replacement.
+  T3 Code still cannot reclaim the task because a thread keeps its conversation, so no fresh agent can replace it and `relaunch` refuses before this proof can authorize a replacement.
 
 Every transient or self-contradicting read stays `unreadable` or `ambiguous` and still refuses, so a momentary backend failure can never be mistaken for absence.
 
@@ -184,7 +184,7 @@ The worktree and the task's records are unaffected either way.
   zellij, orca, cmux, and paseo are refused rather than reported as successful blind.
 - On t3code, `exit` refuses before anything is sent: a T3 thread has no composer for a typed exit command, and T3's `/mcp` tools offer no session stop.
 - `relaunch` additionally requires a backend that can host a replacement agent - tmux and herdr.
-  t3code is refused before anything is stopped: a T3 thread is bound to the driver that first ran it, and a new turn continues the same agent rather than launching a new one.
+  t3code is refused before anything is stopped: a T3 thread keeps its conversation, so a new turn or a provider change on it continues the same agent rather than launching a fresh one.
 - An ambiguous or unreadable endpoint state refuses.
   Only a positively classified state acts; a Rex `unreadable` acts only once the absence proof above settles it.
 - `exit`'s composer-empty check, above, is itself a fail-closed boundary that `relaunch` inherits by stopping the old agent through `exit`.

@@ -2521,6 +2521,59 @@ Live facts this run added:
 - On Linux the listener's environment is NUL-separated `/proc/<pid>/environ`, which the telemetry probe parses.
 - T3 detaches the provider session after the archive asynchronously, so its Claude or Codex process can still be running in the slot when the archive reads back; teardown's worktree-process reaper ended it for both harnesses before the slot returned.
 
+### Run identity, pending requests, and secondmate retirement
+
+The behavior added after the Orchestrator V2 review was verified live on 2026-10-10 against the same `t3 v0.0.46-nightly.20261010.2935` service-managed server on Linux x86_64, with Claude Code 2.1.296, node v24.21.0, and treehouse 2.1.0.
+It used a fresh scratch `login` credential, a scratch Firstmate home with `config/backend` `t3code`, a scratch project with a bare origin, and a scratch standalone secondmate home; every scratch thread was archived afterwards.
+
+```sh
+bin/fm-t3-mcp.mjs login --access full-access --label fm-review-fixes-scratch
+bin/fm-spawn.sh lab-v2-scout-1 <home>/projects/lab --scout --harness claude --model claude-haiku-5-5 --effort low
+bin/fm-t3-answer.sh lab-v2-scout-1
+bin/fm-t3-answer.sh lab-v2-scout-1 <request-id> '{"Which label should the report use?":"beta"}'
+bin/fm-send.sh lab-v2-scout-1 "<steer starting a 240 s python3 tool call>"
+bin/fm-control.sh lab-v2-scout-1 interrupt
+bin/fm-teardown.sh lab-v2-scout-1
+bin/fm-spawn.sh lab-v2-sm <sm-home> claude --model claude-haiku-5-5 --effort low --backend t3code --secondmate
+bin/fm-teardown.sh lab-v2-sm
+```
+
+The watcher's event wait ran from a scratch script that sources the real watcher for the scratch home and calls `event_wait_or_sleep` with a 10 s interval.
+
+| Step | Result |
+| --- | --- |
+| Spawn of a Claude scout, including the catalog-resolved selection and the `t3_thread_configuration` read-back | 5.6 s; the worktree's `CLAUDE.local.md` carried no pull-request-tool clause |
+| The scout's question through Claude's question tool | the first event-wait cycle returned in 1 s with `stale: <thread> (t3code: agent blocked - waiting on human: T3 question <request-id> pending - read and answer with bin/fm-t3-answer.sh, ...)` |
+| `fm-t3-answer.sh` list, then answer | `pendingRequestCount:1`, `approvals:0`, the question and its `alpha`/`beta` options; the answer landed, the escalation marker cleared, and the next cycle raised no wake |
+| The scout's report | `Report label chosen: beta.` and `done` |
+| Inbox steer starting a 240 s `python3` tool call | sent in 3.7 s; the tool call started |
+| `fm-control.sh interrupt` | `interrupt-delivered lab-v2-scout-1 harness=claude backend=t3code verified=agent-alive cancel=confirmed` in 3.8 s, confirmed on the interrupted run itself; the child was gone 2 s later |
+| Scout teardown | 13.4 s; the reaper ended the late-detaching provider process, the thread read `archived:true` with no active run, and the slot read `available` |
+| Secondmate spawn in a standalone home, charter turn | 4.8 s; the charter turn completed, and an idle Claude provider process stayed rooted in the home |
+| Secondmate retirement | 8.2 s; `teardown: reaping leaked secondmate home process(es) for lab-v2-sm: <pid>` ran after the proven archive and before the home was removed; the provider process was gone and the thread read `archived:true` |
+
+Live facts this run added:
+
+- Claude's question tool in a T3 thread is a `user_input` runtime request: it raises `pendingRequestCount` and is listed, read, and answered through the `t3_pending_request_*` tools, keyed by question text.
+- Every tool in the capability gate, including `orchestrator_capabilities`, `t3_thread_configuration`, and the pending-request tools, is offered to an OAuth `mcp-client`, and the catalog reports `driverKind` per instance (`claudeAgent`, `codex`).
+- A launch's `t3_thread_configuration` reads back the requested instance, model, and options.
+- The provider process of an idle secondmate thread stays running in its home until after the archive reads back.
+
+### Claude pull-request tools
+
+T3's `link_pull_request`, `list_thread_pull_requests`, and `unlink_pull_request` tools crashed a Claude session on a pre-V2 T3 build, so Claude workers were told not to call them.
+On 2026-10-10, against `t3 v0.0.46-nightly.20261010.2935` with Claude Code 2.1.296, a scratch Claude thread (`claudeAgent`, `claude-haiku-5-5`) called all three, linking and unlinking the merged `https://github.com/kunchenguid/firstmate/pull/1`, and its run completed with every call answered.
+That build is `FM_BACKEND_T3CODE_PR_TOOLS_VERIFIED_FROM` in `bin/backends/t3code.sh`; Claude workers on an older or unreadable server keep the clause.
+The opt-in guard repeats the check and fails naming both versions:
+
+```sh
+FM_T3CODE_PR_TOOLS_LIVE=1 FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-pr-tools-live-e2e.test.sh
+```
+
+```text
+ok - t3code live: T3 0.0.46-nightly.20261010.2935 with 2.1.296 (Claude Code) (claudeAgent claude-haiku-5-5) ran link_pull_request, list_thread_pull_requests, and unlink_pull_request in a Claude thread without a crash
+```
+
 ### Live transport guard
 
 The token-free guard checks the gate, the project catalog, a typed missing-thread read, and the supervisor lookup against the server the configured credential names, and changes nothing there.
@@ -2544,8 +2597,10 @@ tests/fm-backend.test.sh
 tests/fm-daemon.test.sh
 ```
 
-`tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, launch binding and its uncertain and refused outcomes, send idempotency, capture, interrupt claims, the proven archive, and the supervisor lookup.
-`tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort and uncertain-launch lease retention, tracked Codex configuration preservation, the exit and relaunch refusals, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
+The fake models the T3 protocol facts that hide defects when simplified: cursor paging, the read cap of 100, a wait on the exact run or else the latest by ordinal, an interrupt and an archive whose run ends asynchronously, a send committed before a reply that can be lost, and a pending-request count that includes approvals the question tools cannot see.
+`tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, catalog-resolved selection, launch binding and configuration read-back with their uncertain and refused outcomes, send idempotency and the lost-reply verdict, capture and its read cap, exact-run interrupt claims, pending questions, the bounded event wait, the proven archive, and paged supervisor lookup.
+`tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment, the Claude pull-request-tool version boundary, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort and uncertain-launch lease retention, tracked Codex configuration preservation, the exit and relaunch refusals, lost-reply resends through `fm-send.sh`, the push escalation of pending questions and `bin/fm-t3-answer.sh`, failed-run secondmate resume, the secondmate home shutdown barrier for pooled and standalone homes, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
+`tests/fm-secondmate-liveness.test.sh` covers the refusal to replace a secondmate whose old endpoint cannot be proven closed.
 `tests/fm-daemon.test.sh` covers discovery precedence and native busy state.
 
 The tracked Codex configuration guard is independent of the transport and passed on 2026-09-15 with `codex-cli 0.154.0` and Python 3.14.7.

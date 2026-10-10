@@ -2804,6 +2804,21 @@ EOF
   printf '%s\n' "$abs_home_path"
 }
 
+# t3code_secondmate_home_shutdown_barrier: T3 detaches a provider session as a
+# separate effect after its thread's archive reads back, so the secondmate's
+# Claude or Codex process, and anything it started, can still be running in
+# the home after the proven archive. Worker teardown's worktree reaper never
+# runs for a secondmate, so the same structural reaper runs here, over the
+# home, before it is returned or removed; without lsof nothing can prove the
+# home is quiet, and the home and its records are kept.
+t3code_secondmate_home_shutdown_barrier() {  # <home>
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "REFUSED: cannot prove T3 secondmate $ID's provider processes have left $1 (lsof is unavailable); preserving the home and its records for retry" >&2
+    return 1
+  fi
+  reap_task_worktree_processes "secondmate home" "$1"
+}
+
 remove_firstmate_home() {
   local home=$1 label=$2 expected_id=${3:-} abs_home_path process_event_backup
   [ -n "$home" ] || return 0
@@ -2819,6 +2834,11 @@ remove_firstmate_home() {
   fi
   process_event_backup=$(snapshot_firstmate_home_process_events "$abs_home_path" "$label") || return 1
   if ! cleanup_firstmate_home_process_events "$abs_home_path" "$label"; then
+    restore_firstmate_home_process_events "$abs_home_path" "$label" "$process_event_backup" || return $?
+    return 1
+  fi
+  if [ "$expected_id" = "$ID" ] && [ "$KIND" = secondmate ] && [ "$BACKEND" = t3code ] \
+    && ! t3code_secondmate_home_shutdown_barrier "$abs_home_path"; then
     restore_firstmate_home_process_events "$abs_home_path" "$label" "$process_event_backup" || return $?
     return 1
   fi

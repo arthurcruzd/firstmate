@@ -88,8 +88,9 @@
 #              The same pre-stop refusal applies to this home's worker tool
 #              exclusions (bin/fm-exclude-tools-lib.sh): a malformed list, or a
 #              replacement runtime that cannot hide the listed tools.
-#              Refused on t3code before anything is stopped: a T3 thread is
-#              bound to its driver and a new turn continues the same agent
+#              Refused on t3code before anything is stopped: a T3 thread
+#              keeps its conversation, so a new turn or a provider change on
+#              it continues the same agent rather than a fresh one
 #              (fm_control_backend_relaunch_supported).
 #              --note is required for a ship or scout, whose replacement
 #              inherits the local copy but none of the conversation; a
@@ -1175,7 +1176,7 @@ do_relaunch() {
 
   require_state_verified_backend relaunch
   fm_control_backend_relaunch_supported "$BACKEND" \
-    || die "task $ID runs on the $BACKEND backend, where a thread is bound to its driver and a new turn continues the same agent, so no replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch"
+    || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch"
   resolve_relaunch_profile
 
   case "$KIND" in

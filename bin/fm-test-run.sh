@@ -367,6 +367,7 @@ family_for_basename() {
     fm-kimi-trust-prompt-live-e2e.test.sh|\
     fm-devin-signals-live-e2e.test.sh|fm-commandcode-signals-live-e2e.test.sh|fm-muse-signals-live-e2e.test.sh|fm-rovo-signals-live-e2e.test.sh|fm-agy-signals-live-e2e.test.sh|fm-polytoken-signals-live-e2e.test.sh|\
     fm-launch-prompt-signals-live-e2e.test.sh|fm-backend-t3code-live-e2e.test.sh|\
+    fm-backend-t3code-pr-tools-live-e2e.test.sh|\
     fm-pi-seeded-home-trust-live-e2e.test.sh|\
     fm-herdr-version-floor-live-e2e.test.sh|\
     fm-herdr-pi-stale-registration-live-e2e.test.sh|\

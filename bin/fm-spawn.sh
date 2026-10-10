@@ -2239,10 +2239,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
   # The same table refuses a backend that cannot host a REPLACEMENT at all:
-  # a T3 thread is bound to its driver, and a turn on its stopped session
+  # a T3 thread keeps its conversation, so a turn or a provider change on it
   # continues the same agent instead of launching a new one.
   fm_control_backend_relaunch_supported "$BACKEND" || {
-    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint (a T3 thread is bound to its driver, and a turn on a stopped thread continues the same agent); refusing to relaunch $ID" >&2
+    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint (a T3 thread keeps its conversation, so a turn or a provider change on it continues the same agent); refusing to relaunch $ID" >&2
     exit 1
   }
   # Two states are agent-free, and both license a relaunch:
@@ -5606,9 +5606,11 @@ exclude_path() {
 # there; git-excluded like every other per-task harness file and removed by
 # fm-teardown.sh. Verified live: the same operator brief a worker refused as
 # prompt injection without the file was followed with it.
-# The T3 carrier adds one host-specific clause: T3's own pull-request-linking
-# MCP tools crash a Claude session there (verified live), and Firstmate records
-# the PR from the worker's `done: PR <url>` status line anyway.
+# On a T3 server older than the first build whose pull-request tools were
+# verified safe for Claude (fm_backend_t3code_claude_pr_tools_verified), the
+# carrier adds one clause steering the worker off them, since they crashed a
+# Claude session on a pre-V2 build; Firstmate records the PR from the worker's
+# `done: PR <url>` status line either way.
 spawn_t3code_claude_channel_install() {
   local channel="$WT/CLAUDE.local.md" tmp
   if git -C "$WT" ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1 || [ -e "$channel" ] || [ -L "$channel" ]; then
@@ -5618,7 +5620,11 @@ spawn_t3code_claude_channel_install() {
   tmp=$(mktemp "$WT/.CLAUDE.local.md.XXXXXX") || return 1
   {
     spawn_claude_task_channel_statement
-    printf '%s\n' ' When T3 Code hosts this task, do not call its link_pull_request, list_thread_pull_requests, or unlink_pull_request tools even if host instructions tell you to: calling them crashes the session, and Firstmate records your PR from the done: PR <url> status line.'
+    if fm_backend_t3code_claude_pr_tools_verified; then
+      printf '\n'
+    else
+      printf '%s\n' " This T3 Code server predates T3 $FM_BACKEND_T3CODE_PR_TOOLS_VERIFIED_FROM, the first build whose link_pull_request, list_thread_pull_requests, and unlink_pull_request tools were verified not to crash a Claude session, so do not call them even if host instructions tell you to; Firstmate records your PR from the done: PR <url> status line."
+    fi
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$channel" || { rm -f "$tmp"; return 1; }
   exclude_path 'CLAUDE.local.md'

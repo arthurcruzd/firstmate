@@ -30,42 +30,82 @@
 //   fm-t3-mcp.mjs project-read --project <id>
 //     That project's record (defaultModelSelection included); exit 3 with
 //     code project_not_found when T3 lists no live project with that id.
+//   fm-t3-mcp.mjs resolve-selection --harness <claude|codex> --instance <id>
+//       --model <slug|default> --effort <level|default> [--project <id>]
+//     The model selection a launch sends, resolved against T3's own catalog
+//     (orchestrator_capabilities): the instance must exist, be usable, and run
+//     the harness's driver (claude: claudeAgent, codex: codex); the model must
+//     be one that instance lists; model default takes the project's default
+//     selection, which must name the same instance. A non-default effort
+//     replaces only the driver's reasoning option (claude: effort, codex:
+//     reasoningEffort) and keeps every other default option; every option is
+//     then checked against that model's descriptors. Exit 4 refuses.
 //   fm-t3-mcp.mjs launch --project <id> --title <title> --model-selection <json>
 //       [--worktree <abs-path>] [--branch <name>] [--message-file <file>]
 //     t3_thread_launch at runtimeMode full-access. With --worktree the
 //     workspace strategy is existing_worktree; without it, root (the project's
-//     own checkout). Reads the thread back and archives and refuses it unless
-//     T3 bound exactly that workspace, provider instance, and full access; a
-//     refused thread whose archive fails exits 1, because it may still be
-//     live. A read-back that fails also archives and exits 1, since the
-//     thread exists but its binding is unproven. Without --message-file the
-//     thread is created idle.
+//     own checkout). Reads the thread and its t3_thread_configuration back and
+//     archives and refuses it unless T3 bound exactly that workspace, full
+//     access, instance, model, and every requested option value; a refused
+//     thread whose archive fails exits 1, because it may still be live. A
+//     read-back that fails also archives and exits 1, since the thread exists
+//     but its binding is unproven. Without --message-file the thread is
+//     created idle.
 //   fm-t3-mcp.mjs send --thread <id> --message-file <file> --client-request-id <id>
 //     t3_thread_send mode auto: start an idle thread's next turn or steer the
-//     running one. The client request id makes a retry idempotent.
+//     running one. T3 derives the message and command ids from the client
+//     request id, so a retry with the same id is the same delivery. T3 commits
+//     a send before it replies, so a reply lost after the request went out
+//     exits 7 (delivery_unconfirmed): the message may have landed, and only a
+//     retry with the same client request id is safe. A refusal before the
+//     request went out, or T3's own typed refusal, is proven non-delivery.
 //   fm-t3-mcp.mjs state --thread <id>
 //     exists, archived, status, activeRunId, pendingRequestCount,
 //     worktreePath, and turnAt (the latest run's completion, else its start or
 //     request time); a thread the verified server does not have reads
 //     exists:false.
 //   fm-t3-mcp.mjs read --thread <id> [--limit <n>]
-//     t3_thread_read: the thread record and its latest run, unchanged.
+//     t3_thread_read: the thread record and its latest run, unchanged. T3
+//     caps --limit at 100.
 //   fm-t3-mcp.mjs capture --thread <id> [--lines <n>]
 //     The activity view rendered as a bounded plain-text tail; the one verb
 //     whose stdout is text rather than JSON.
-//   fm-t3-mcp.mjs wait --thread <id> [--timeout-ms <n>]
-//     t3_thread_wait until the latest run is terminal or the timeout passes.
+//   fm-t3-mcp.mjs wait --thread <id> [--run <run-id>] [--timeout-ms <n>]
+//     t3_thread_wait until that run (the latest run without --run) is
+//     terminal or the timeout passes.
 //   fm-t3-mcp.mjs interrupt --thread <id> [--timeout-ms <n>]
-//     t3_thread_interrupt, then t3_thread_wait; cancel is confirmed,
-//     not-running, or unconfirmed.
+//     t3_thread_interrupt (T3 stops the latest active run), then
+//     t3_thread_wait on exactly the run T3 named; cancel is confirmed only
+//     when that run reads terminal, not-running when there was no active run,
+//     and unconfirmed otherwise (timeout, or a wait that answered for a
+//     different run). T3 ends the run asynchronously after the request.
+//   fm-t3-mcp.mjs requests --thread <id>
+//     The thread's pending runtime requests: questions (each user-input
+//     request id with its questions, from t3_pending_request_list/read) and
+//     approvals, the count of pending requests those tools cannot see or
+//     answer (permission approvals, answered only in T3 Code itself).
+//   fm-t3-mcp.mjs respond --thread <id> --request <request-id> --answers-file <file>
+//     t3_pending_request_respond with the JSON object in <file>, keyed by
+//     question id. It cannot approve a permission request.
+//   fm-t3-mcp.mjs watch --thread <id>... --timeout-ms <n> [--escalated <id>=<signature>]...
+//     The T3 event wait for the watcher. It first reads every thread: one
+//     whose pending requests changed from its --escalated signature reports
+//     event:blocked with that signature, its question ids, and its approval
+//     count; a thread given --escalated with nothing pending is listed in
+//     cleared. Otherwise it waits on the exact active run of every thread at
+//     once and reports event:run-ended for the first that turns terminal,
+//     event:timeout when none does, or event:none when no thread has an
+//     active run (the caller sleeps instead of re-arming).
 //   fm-t3-mcp.mjs archive --thread <id> [--timeout-ms <n>]
 //     t3_thread_organize archive, then read back until the thread reports
 //     archived:true and activeRunId:null (closed=true). A thread the verified
 //     server no longer has is already closed (missing=true).
 //   fm-t3-mcp.mjs thread-for-root --root <abs-path>
 //     The one unarchived, worktree-less thread with an active run on the live
-//     project rooted at <root>: exit 0 with threadId; exit 5 when there is
-//     none; exit 6 when there are several (threadIds names them).
+//     project rooted at <root>, across every t3_thread_list page; a fork
+//     counts, a delegated subagent does not: exit 0 with threadId; exit 5
+//     when there is none; exit 6 when there are several (threadIds names
+//     them).
 //
 // Every verb accepts --token-file <path>. It defaults to
 // $FM_T3CODE_TOKEN_FILE, else ${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/t3code-token,
@@ -81,7 +121,8 @@
 // T3 failure (tool error or JSON-RPC error; error.code carries T3's code when
 // it has one); 4 a local refusal (no credential, expired credential, revoked
 // credential, environment mismatch, capability gate, or a launch binding
-// mismatch whose thread was archived); 5 and 6 as thread-for-root says. A
+// mismatch whose thread was archived); 5 and 6 as thread-for-root says; 7 a
+// mutation whose request went out but whose reply was lost (send). A
 // failure prints {"ok":false,"error":{...}} on stdout and one line on stderr.
 // A credential within EXPIRY_WARN_DAYS of expiry adds a stderr warning on
 // every verb and a `credentialWarning` field on status.
@@ -102,8 +143,13 @@ export const REQUIRED_TOOLS = [
   "t3_thread_interrupt",
   "t3_thread_organize",
   "t3_thread_list",
+  "t3_thread_configuration",
   "t3_project_list",
   "t3_project_create",
+  "t3_pending_request_list",
+  "t3_pending_request_read",
+  "t3_pending_request_respond",
+  "orchestrator_capabilities",
 ];
 const ENVIRONMENT_TOOL = "t3_environment_read";
 const EXPIRY_WARN_DAYS = 5;
@@ -113,6 +159,14 @@ const SCOPES = ["orchestration:read", "orchestration:operate"];
 const ACCESS_CEILINGS = ["full-access"];
 const TERMINAL_RUN = new Set(["completed", "failed", "cancelled", "interrupted", "rolled_back"]);
 const ACTIVE_STATUSES = ["preparing", "queued", "starting", "running", "waiting"];
+const READ_LIMIT_MAX = 100;
+// Each Firstmate harness runs on one T3 driver, whose reasoning option id is
+// part of that driver's protocol; the values come from T3's catalog.
+const DRIVERS = {
+  claude: { driverKind: "claudeAgent", effortOption: "effort" },
+  codex: { driverKind: "codex", effortOption: "reasoningEffort" },
+};
+const REPEATABLE = new Set(["option", "thread", "escalated"]);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -129,8 +183,10 @@ function usage(message) {
   throw new Refusal("usage", message ?? "invalid use; see the header of bin/fm-t3-mcp.mjs", 2);
 }
 
+// Every flag takes one value; a repeatable flag also collects every value in
+// flags.all[key], while flags[key] keeps the last.
 function parseFlags(argv) {
-  const flags = { option: [] };
+  const flags = { all: {} };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith("--")) usage(`unexpected argument '${arg}'`);
@@ -138,8 +194,9 @@ function parseFlags(argv) {
     const value = argv[i + 1];
     if (value === undefined || value.startsWith("--")) usage(`--${key} needs a value`);
     i++;
-    if (key === "option") flags.option.push(value);
-    else flags[key] = value;
+    if (flags[key] !== undefined && !REPEATABLE.has(key)) usage(`--${key} is given twice`);
+    if (REPEATABLE.has(key)) (flags.all[key] ??= []).push(value);
+    flags[key] = value;
   }
   return flags;
 }
@@ -267,7 +324,7 @@ export class McpSession {
     this.server = null;
   }
 
-  async rpc(method, params, { notify = false, timeoutMs } = {}) {
+  async rpc(method, params, { notify = false, timeoutMs, signal } = {}) {
     const body = notify ? { jsonrpc: "2.0", method, params } : { jsonrpc: "2.0", id: this.nextId++, method, params };
     const headers = {
       "content-type": "application/json",
@@ -282,7 +339,7 @@ export class McpSession {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs ?? this.timeoutMs),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs ?? this.timeoutMs)]) : AbortSignal.timeout(timeoutMs ?? this.timeoutMs),
       });
     } catch (err) {
       throw new Refusal("transport", `T3 at ${this.origin} is unreachable: ${err.cause?.code || err.name}: ${err.message}`, 1);
@@ -634,6 +691,78 @@ function modelSelection(flags) {
   return sel;
 }
 
+// An option selection is valid when the model's catalog describes its id and,
+// for a select, lists its value; a boolean option takes a boolean.
+function optionProblem(model, option) {
+  const descriptor = (model.options ?? []).find((d) => d.id === option.id);
+  if (!descriptor) return `option '${option.id}' is not one model ${model.id} offers`;
+  if (descriptor.type === "boolean") return typeof option.value === "boolean" ? null : `option '${option.id}' takes true or false`;
+  const values = (descriptor.options ?? []).map((c) => c.id);
+  return values.includes(option.value) ? null : `option '${option.id}' value '${option.value}' is not one of ${values.join(", ")} for model ${model.id}`;
+}
+
+async function resolveSelection(flags) {
+  const harness = need(flags, "harness");
+  const driver = DRIVERS[harness];
+  if (!driver) throw new Refusal("harness_unsupported", `backend=t3code supports only the claude and codex harnesses, not '${harness}'`);
+  const instanceId = need(flags, "instance");
+  const wantModel = need(flags, "model");
+  const effort = need(flags, "effort");
+  const { session } = await verifiedSession(flags);
+  const caps = await session.call("orchestrator_capabilities", {});
+  const provider = (caps?.providers ?? []).find((p) => p.providerInstanceId === instanceId);
+  if (!provider) throw new Refusal("instance_unknown", `T3 has no provider instance '${instanceId}' (config/t3code-instances maps the ${harness} harness to it)`);
+  if (provider.driverKind !== driver.driverKind) {
+    throw new Refusal("driver_mismatch", `T3 instance '${instanceId}' runs the ${provider.driverKind} driver, not ${driver.driverKind}, so it cannot host the ${harness} harness; fix config/t3code-instances`);
+  }
+  if ((provider.constraints ?? []).length) throw new Refusal("instance_unavailable", `T3 instance '${instanceId}' cannot run threads: ${provider.constraints.join(" ")}`);
+  let base = { instanceId, model: wantModel };
+  if (wantModel === "default") {
+    const projectId = need(flags, "project");
+    const project = (await liveProjects(session)).find((p) => p.id === projectId);
+    if (!project) throw new Refusal("project_not_found", `T3 lists no live project ${projectId}`, 3);
+    const def = project.defaultModelSelection;
+    if (!def) throw new Refusal("no_default_model", `T3 project ${projectId} has no default model; pass --model with a slug from the T3 model catalog`);
+    if (def.instanceId !== instanceId) {
+      throw new Refusal("default_instance_mismatch", `T3 project ${projectId} defaults to instance ${def.instanceId}, but config/t3code-instances selects ${instanceId}; pass --model explicitly`);
+    }
+    base = { instanceId, model: def.model, ...(def.options !== undefined ? { options: def.options } : {}) };
+  }
+  const model = (provider.models ?? []).find((m) => m.id === base.model);
+  if (!model) throw new Refusal("model_unknown", `T3 instance '${instanceId}' does not list model '${base.model}'; pass --model with a slug from its catalog`);
+  let options = base.options;
+  if (effort !== "default") {
+    const chosen = { id: driver.effortOption, value: effort };
+    const problem = optionProblem(model, chosen);
+    if (problem) throw new Refusal("effort_unsupported", `backend=t3code cannot pass effort '${effort}' to harness '${harness}': ${problem}`);
+    const kept = options ?? [];
+    options = kept.some((o) => o.id === chosen.id) ? kept.map((o) => (o.id === chosen.id ? chosen : o)) : [...kept, chosen];
+  }
+  for (const option of options ?? []) {
+    const problem = optionProblem(model, option);
+    if (problem) throw new Refusal("option_unsupported", `the selection for harness '${harness}' is not valid in T3's catalog: ${problem}`);
+  }
+  return { ok: true, driverKind: provider.driverKind, selection: { instanceId, model: base.model, ...(options !== undefined ? { options } : {}) } };
+}
+
+// What a launch must read back: the workspace, full access, and exactly the
+// requested instance, model, and option values.
+function bindingProblems(t, config, selection, worktree) {
+  const problems = [];
+  if (worktree ? realOrRaw(t.worktreePath ?? "") !== realOrRaw(worktree) : (t.worktreePath ?? null) !== null) {
+    problems.push(`worktreePath ${t.worktreePath ?? "none"}`);
+  }
+  if (t.runtimeMode !== "full-access" || config?.runtimeMode !== "full-access") problems.push(`runtimeMode ${config?.runtimeMode ?? t.runtimeMode ?? "none"}`);
+  const bound = config?.modelSelection ?? {};
+  if (t.providerInstanceId !== selection.instanceId || bound.instanceId !== selection.instanceId) problems.push(`provider ${bound.instanceId ?? t.providerInstanceId ?? "none"}`);
+  if (bound.model !== selection.model) problems.push(`model ${bound.model ?? "none"}`);
+  for (const option of selection.options ?? []) {
+    const got = (bound.options ?? []).find((o) => o.id === option.id);
+    if (got?.value !== option.value) problems.push(`option ${option.id}=${got ? got.value : "none"}`);
+  }
+  return problems;
+}
+
 async function launch(flags) {
   const worktree = flags.worktree;
   if (worktree !== undefined && !path.isAbsolute(worktree)) usage("--worktree must be an absolute path");
@@ -657,8 +786,10 @@ async function launch(flags) {
   const archiveLaunched = () => session.call("t3_thread_organize", { threadId: out.threadId, action: "archive" }).then(() => true, () => false);
   // Prove the binding T3 recorded before anyone relies on it.
   let t;
+  let config;
   try {
     t = threadOf(await session.call("t3_thread_read", { threadId: out.threadId, limit: 1, runLimit: 1 }));
+    config = await session.call("t3_thread_configuration", { threadId: out.threadId });
   } catch (e) {
     const archived = await archiveLaunched();
     throw new Refusal(
@@ -668,17 +799,12 @@ async function launch(flags) {
       { threadId: out.threadId },
     );
   }
-  const problems = [];
-  if (worktree ? realOrRaw(t.worktreePath ?? "") !== realOrRaw(worktree) : (t.worktreePath ?? null) !== null) {
-    problems.push(`worktreePath ${t.worktreePath ?? "none"}`);
-  }
-  if (t.runtimeMode !== "full-access") problems.push(`runtimeMode ${t.runtimeMode ?? "none"}`);
-  if (t.providerInstanceId !== selection.instanceId) problems.push(`provider ${t.providerInstanceId ?? "none"}`);
+  const problems = bindingProblems(t, config, selection, worktree);
   if (problems.length) {
     const archived = await archiveLaunched();
     throw new Refusal(
       "binding_mismatch",
-      `T3 bound thread ${out.threadId} to ${problems.join(", ")}, not the requested ${worktree ? "worktree" : "project root"} at full access; ${archived ? "archived it" : "its archive failed, so archive it in T3 Code"}`,
+      `T3 bound thread ${out.threadId} to ${problems.join(", ")}, not the requested ${worktree ? "worktree" : "project root"} and model selection at full access; ${archived ? "archived it" : "its archive failed, so archive it in T3 Code"}`,
       archived ? 4 : 1,
       { threadId: out.threadId },
     );
@@ -700,13 +826,26 @@ async function launch(flags) {
 async function send(flags) {
   const args = { threadId: need(flags, "thread"), message: readMessage(flags), mode: "auto", clientRequestId: need(flags, "client-request-id") };
   const { session } = await verifiedSession(flags);
-  const out = await session.call("t3_thread_send", args);
-  return { ok: true, threadId: args.threadId, delivery: out?.delivery ?? null, status: out?.status ?? null, runId: out?.runId ?? null };
+  let out;
+  try {
+    out = await session.call("t3_thread_send", args);
+  } catch (err) {
+    // A typed T3 refusal (3) or a refused credential (4) proves the message
+    // was not taken; anything else happened after the request went out.
+    if (err instanceof Refusal && (err.exit === 3 || err.exit === 4)) throw err;
+    throw new Refusal(
+      "delivery_unconfirmed",
+      `the reply to t3_thread_send on thread ${args.threadId} was lost (${err.message}); T3 may have committed it, so retry only with client request id ${args.clientRequestId}`,
+      7,
+      { threadId: args.threadId, clientRequestId: args.clientRequestId },
+    );
+  }
+  return { ok: true, threadId: args.threadId, delivery: out?.delivery ?? null, status: out?.status ?? null, runId: out?.runId ?? null, messageId: out?.messageId ?? null };
 }
 
 async function read(flags) {
   const { session } = await verifiedSession(flags);
-  const out = await session.call("t3_thread_read", { threadId: need(flags, "thread"), limit: positiveInt(flags, "limit", 1, 200), runLimit: 1 });
+  const out = await session.call("t3_thread_read", { threadId: need(flags, "thread"), limit: positiveInt(flags, "limit", 1, READ_LIMIT_MAX), runLimit: 1 });
   return { ok: true, ...out };
 }
 
@@ -738,7 +877,7 @@ async function capture(flags) {
   const lines = positiveInt(flags, "lines", 40, 500);
   const { session } = await verifiedSession(flags);
   const read = (afterPosition) =>
-    session.call("t3_thread_read", { threadId, view: "activity", limit: 100, maxCharsPerItem: 600, runLimit: 1, ...(afterPosition >= 0 ? { afterPosition } : {}) });
+    session.call("t3_thread_read", { threadId, view: "activity", limit: READ_LIMIT_MAX, maxCharsPerItem: 600, runLimit: 1, ...(afterPosition >= 0 ? { afterPosition } : {}) });
   const head = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
   let start = Math.max(0, (head.itemCount ?? 0) - lines);
   for (;;) {
@@ -753,28 +892,132 @@ async function capture(flags) {
   }
 }
 
+// One t3_thread_wait; runId selects the exact run, else T3 waits on the
+// thread's latest run.
+function waitRun(session, threadId, runId, timeoutMs, signal) {
+  return session.call("t3_thread_wait", { threadId, ...(runId ? { runId } : {}), timeoutMs }, { timeoutMs: timeoutMs + 15_000, signal });
+}
+
 async function wait(flags) {
   const timeoutMs = positiveInt(flags, "timeout-ms", 600_000, 3_600_000);
   const { session } = await verifiedSession(flags);
-  const out = await session.call("t3_thread_wait", { threadId: need(flags, "thread"), timeoutMs }, { timeoutMs: timeoutMs + 15_000 });
+  const out = await waitRun(session, need(flags, "thread"), flags.run, timeoutMs);
   return { ok: true, ...out };
 }
 
-// cancel: confirmed (a running turn reached a terminal status), not-running
-// (there was no active turn), or unconfirmed (the wait timed out).
+// cancel: confirmed (the run T3 interrupted reached a terminal status),
+// not-running (there was no active run), or unconfirmed (the wait timed out
+// or answered for another run). T3 interrupts its latest active run and ends
+// it asynchronously, while a run queued behind it may already be terminal or
+// start meanwhile, so only that exact run's state counts.
 async function interrupt(flags) {
   const threadId = need(flags, "thread");
   const timeoutMs = positiveInt(flags, "timeout-ms", 10_000, 600_000);
   const { session } = await verifiedSession(flags);
   const requested = await session.call("t3_thread_interrupt", { threadId, clientRequestId: `fm-interrupt-${Date.now()}-${randomBytes(4).toString("hex")}` });
   if (requested?.status === "no_active_run") return { ok: true, threadId, requested: requested.status, cancel: "not-running" };
-  const waited = await session.call("t3_thread_wait", { threadId, timeoutMs }, { timeoutMs: timeoutMs + 15_000 });
-  const done = waited?.timedOut !== true && (TERMINAL_RUN.has(waited?.status) || waited?.status === "idle");
-  return { ok: true, threadId, requested: requested?.status ?? null, status: waited?.status ?? null, timedOut: waited?.timedOut === true, cancel: done ? "confirmed" : "unconfirmed" };
+  const runId = requested?.runId ?? null;
+  const base = { ok: true, threadId, runId, requested: requested?.status ?? null };
+  if (!runId) return { ...base, cancel: "unconfirmed" };
+  if (TERMINAL_RUN.has(requested.status)) return { ...base, status: requested.status, timedOut: false, cancel: "confirmed" };
+  const waited = await waitRun(session, threadId, runId, timeoutMs);
+  const done = waited?.runId === runId && waited?.timedOut !== true && TERMINAL_RUN.has(waited?.status);
+  return { ...base, waitedRunId: waited?.runId ?? null, status: waited?.status ?? null, timedOut: waited?.timedOut === true, cancel: done ? "confirmed" : "unconfirmed" };
 }
 
 function threadOf(out) {
   return out?.thread ?? out ?? {};
+}
+
+// The pending runtime requests on one thread: the questions T3's
+// pending-request tools can read and answer, and the remainder of
+// pendingRequestCount, which are approvals those tools cannot see.
+async function pendingOf(session, threadId, pendingRequestCount) {
+  if (!pendingRequestCount) return { questions: [], approvals: 0 };
+  const listed = await session.call("t3_pending_request_list", { threadId });
+  const ids = [...new Set(listed?.requestIds ?? [])].sort();
+  return { questions: ids, approvals: Math.max(0, pendingRequestCount - ids.length) };
+}
+
+// The signature the watcher stores once it has escalated a thread's pending
+// requests, so the same requests never wake it twice.
+const pendingSignature = (p) => `q:${p.questions.join(",")};a:${p.approvals}`;
+
+async function requests(flags) {
+  const threadId = need(flags, "thread");
+  const { session } = await verifiedSession(flags);
+  const t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+  const pending = await pendingOf(session, threadId, t.pendingRequestCount ?? 0);
+  const questions = [];
+  for (const requestId of pending.questions) {
+    const q = await session.call("t3_pending_request_read", { threadId, requestId });
+    questions.push({ requestId, questions: q?.questions ?? [] });
+  }
+  return { ok: true, threadId, pendingRequestCount: t.pendingRequestCount ?? 0, questions, approvals: pending.approvals, signature: pendingSignature(pending) };
+}
+
+async function respond(flags) {
+  const threadId = need(flags, "thread");
+  const requestId = need(flags, "request");
+  const file = need(flags, "answers-file");
+  let answers;
+  try {
+    answers = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    usage(`--answers-file ${file} must hold JSON`);
+  }
+  if (!answers || typeof answers !== "object" || Array.isArray(answers)) usage("--answers-file must hold a JSON object keyed by question id");
+  const { session } = await verifiedSession(flags);
+  await session.call("t3_pending_request_respond", { threadId, requestId, answers });
+  return { ok: true, threadId, requestId };
+}
+
+// watch: one bounded supervision wait across threads (see the header).
+async function watch(flags) {
+  const threadIds = [...new Set(flags.all.thread ?? [])];
+  if (!threadIds.length) usage("--thread is required");
+  const timeoutMs = positiveInt(flags, "timeout-ms", 60_000, 3_600_000);
+  const escalated = new Map();
+  for (const pair of flags.all.escalated ?? []) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) usage("--escalated takes <thread-id>=<signature>");
+    escalated.set(pair.slice(0, eq), pair.slice(eq + 1));
+  }
+  const { session } = await verifiedSession(flags);
+  const cleared = [];
+  const runs = [];
+  for (const threadId of threadIds) {
+    let t;
+    try {
+      t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+    } catch (err) {
+      if (isNotFound(err)) continue;
+      throw err;
+    }
+    if (t.archived === true || t.archivedAt) continue;
+    const pending = await pendingOf(session, threadId, t.pendingRequestCount ?? 0);
+    const signature = pendingSignature(pending);
+    if (pending.questions.length || pending.approvals) {
+      if (escalated.get(threadId) !== signature) return { ok: true, event: "blocked", threadId, signature, questions: pending.questions, approvals: pending.approvals, cleared };
+    } else if (escalated.has(threadId)) {
+      cleared.push(threadId);
+    }
+    if (t.activeRunId) runs.push({ threadId, runId: t.activeRunId });
+  }
+  if (!runs.length) return { ok: true, event: "none", cleared };
+  const abort = new AbortController();
+  try {
+    const ended = await Promise.any(
+      runs.map(async ({ threadId, runId }) => {
+        const waited = await waitRun(session, threadId, runId, timeoutMs, abort.signal);
+        if (waited?.runId === runId && waited?.timedOut !== true && TERMINAL_RUN.has(waited?.status)) return { threadId, runId, status: waited.status };
+        throw new Error("not ended");
+      }),
+    ).catch(() => null);
+    return ended ? { ok: true, event: "run-ended", ...ended, cleared } : { ok: true, event: "timeout", cleared };
+  } finally {
+    abort.abort();
+  }
 }
 
 async function archive(flags) {
@@ -802,22 +1045,36 @@ async function archive(flags) {
   throw new Refusal("close_unproven", `thread ${threadId} did not read back archived with no active run within ${timeoutMs} ms (archived=${t.archived === true || Boolean(t.archivedAt)}, activeRunId=${t.activeRunId ?? null})`, 3, { thread: t });
 }
 
+// Every thread T3 lists for a project with the given statuses, across pages,
+// without delegated subagents.
+async function listThreads(session, projectId, statuses) {
+  const seen = new Map();
+  let cursor;
+  for (let page = 0; page < 1000; page++) {
+    const listed = await session.call("t3_thread_list", { projectId, statuses, includeSubagents: false, limit: 100, ...(cursor !== undefined ? { cursor } : {}) });
+    for (const item of listed?.threads ?? []) seen.set(item.threadId, item);
+    if (listed?.nextCursor === null || listed?.nextCursor === undefined) break;
+    cursor = listed.nextCursor;
+  }
+  return [...seen.values()];
+}
+
 // thread-for-root: away-mode supervisor discovery. T3 puts no thread id into
 // the agent's environment, so the only self-discovery is a cwd match: on the
 // project rooted at <root>, the unarchived thread with no worktree of its own
 // whose run is active (the daemon starts from inside the captain's own turn).
+// A fork is an ordinary conversation and counts; a delegated subagent does not.
 async function threadForRoot(flags) {
   const rootPath = need(flags, "root");
   if (!path.isAbsolute(rootPath)) usage("--root must be an absolute path");
   const { session } = await verifiedSession(flags);
   const project = await projectForRoot(session, rootPath);
   if (!project) throw new Refusal("no_thread", `T3 has no project rooted at ${rootPath}`, 5);
-  const listed = await session.call("t3_thread_list", { projectId: project.id, statuses: ACTIVE_STATUSES, limit: 100 });
   const live = [];
-  for (const item of listed?.threads ?? []) {
-    if (item.parentThreadId) continue;
+  for (const item of await listThreads(session, project.id, ACTIVE_STATUSES)) {
+    if (item.relationshipToParent === "subagent") continue;
     const t = threadOf(await session.call("t3_thread_read", { threadId: item.threadId, limit: 1, runLimit: 1 }));
-    if (t.archived === true || t.archivedAt || (t.worktreePath ?? null) !== null) continue;
+    if (t.relationshipToParent === "subagent" || t.archived === true || t.archivedAt || (t.worktreePath ?? null) !== null) continue;
     if (ACTIVE_STATUSES.includes(t.status)) live.push(item.threadId);
   }
   if (live.length === 1) return { ok: true, threadId: live[0] };
@@ -831,12 +1088,16 @@ const VERBS = {
   state,
   "project-ensure": projectEnsure,
   "project-read": projectRead,
+  "resolve-selection": resolveSelection,
   launch,
   send,
   read,
   capture,
   wait,
   interrupt,
+  requests,
+  respond,
+  watch,
   archive,
   "thread-for-root": threadForRoot,
 };

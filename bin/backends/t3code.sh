@@ -89,17 +89,6 @@ fm_backend_t3code_project_ensure() {  # <project-path> -> project id
   fm_backend_t3code_mcp project-ensure --root "$real" --title "fm-$(basename "$real")" | fm_backend_t3code_json_get projectId
 }
 
-# The harness -> T3 provider-option id table. Codex takes reasoningEffort and
-# refuses max; Claude takes effort up to max. Anything else is not a T3 harness.
-fm_backend_t3code_effort_option() {  # <harness> <effort> -> "<option-id> <value>"
-  case "$1:$2" in
-    claude:low|claude:medium|claude:high|claude:xhigh|claude:max) printf 'effort %s' "$2" ;;
-    codex:low|codex:medium|codex:high|codex:xhigh) printf 'reasoningEffort %s' "$2" ;;
-    claude:*|codex:*) echo "error: backend=t3code cannot pass effort '$2' to harness '$1' (claude: low|medium|high|xhigh|max; codex: low|medium|high|xhigh)" >&2; return 1 ;;
-    *) echo "error: backend=t3code supports only the claude and codex harnesses, not '$1'" >&2; return 1 ;;
-  esac
-}
-
 fm_backend_t3code_instance_id() {  # <harness>
   local harness=$1 file line value
   case "$harness" in
@@ -117,34 +106,20 @@ fm_backend_t3code_instance_id() {  # <harness>
   printf '%s' "$value"
 }
 
+# fm_backend_t3code_model_selection: the launch's model selection, resolved
+# against T3's own catalog before anything is leased (bin/fm-t3-mcp.mjs
+# resolve-selection owns the driver, model, and option checks). Prints the
+# selection JSON; the helper prints its own refusal.
 fm_backend_t3code_model_selection() {  # <harness> <model> <effort> <project-id> -> JSON
-  local harness=$1 model=$2 effort=$3 project_id=$4 instance option='' project
+  local harness=$1 model=${2:-default} effort=${3:-default} project_id=$4 instance out
   instance=$(fm_backend_t3code_instance_id "$harness") || return 1
-  if [ "$effort" != default ] && [ -n "$effort" ]; then
-    option=$(fm_backend_t3code_effort_option "$harness" "$effort") || return 1
-  fi
-  if [ "$model" = default ] || [ -z "$model" ]; then
-    project=$(fm_backend_t3code_mcp project-read --project "$project_id") || return 1
-    # shellcheck disable=SC2016  # Single quotes are deliberate: ${...} belongs to the Node snippet.
-    printf '%s' "$project" | node -e '
-const [projectId, instanceId, option] = process.argv.slice(1);
-const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
-const selection = data.project && data.project.defaultModelSelection;
-if (!selection) { console.error(`error: T3 project ${projectId} has no default model; pass --model with a slug from the T3 model catalog`); process.exit(1); }
-if (selection.instanceId !== instanceId) { console.error(`error: T3 project ${projectId} defaults to instance ${selection.instanceId}, but config/t3code-instances selects ${instanceId}; pass --model explicitly`); process.exit(1); }
-const out = { instanceId, model: selection.model };
-if (option) { const [id, value] = option.split(" "); out.options = [{ id, value }]; }
-else if (selection.options !== undefined) out.options = selection.options;
-process.stdout.write(JSON.stringify(out));
-' "$project_id" "$instance" "$option"
-    return
-  fi
-  node -e '
-const [instanceId, model, option] = process.argv.slice(1);
-const out = { instanceId, model };
-if (option) { const [id, value] = option.split(" "); out.options = [{ id, value }]; }
-process.stdout.write(JSON.stringify(out));
-' "$instance" "$model" "$option"
+  out=$(fm_backend_t3code_mcp resolve-selection --harness "$harness" --instance "$instance" \
+    --model "$model" --effort "$effort" --project "$project_id") || return 1
+  printf '%s' "$out" | node -e '
+const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+if (!d.ok || !d.selection) process.exit(1);
+process.stdout.write(JSON.stringify(d.selection));
+'
 }
 
 # fm_backend_t3code_thread_create: launch an idle thread at full access and
@@ -188,22 +163,51 @@ console.error("error: " + d.error.message);
   esac
 }
 
-fm_backend_t3code_request_id() {
-  printf 'fm-%s-%s-%s' "$(date +%s)" "${BASHPID:-$$}" "$RANDOM"
+# One logical delivery keeps one client request id across retries and
+# restarts: T3 derives the message id from it, so a resend after a lost reply
+# lands on the message T3 already committed instead of a second one. The id is
+# recorded under state/t3code-sends, keyed by thread and text, until an
+# outcome is proven; a record older than an hour starts a new delivery, so
+# deliberately repeated text later (a constant doorbell) is not swallowed.
+fm_backend_t3code_send_record() {  # <thread-id> <text> -> record path
+  local dir key
+  dir="${FM_STATE_OVERRIDE:-$FM_HOME/state}/t3code-sends"
+  key=$(printf '%s\0%s' "$1" "$2" | node -e '
+process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(0)).digest("hex"));
+') || return 1
+  printf '%s/%s' "$dir" "$key"
+}
+
+fm_backend_t3code_send_request_id() {  # <record> -> client request id
+  local record=$1 id tmp
+  if [ -n "$(find "$record" -mmin -60 2>/dev/null)" ] && id=$(cat "$record" 2>/dev/null) && [ -n "$id" ]; then
+    printf '%s' "$id"
+    return 0
+  fi
+  id=$(printf 'fm-%s-%s-%s' "$(date +%s)" "${BASHPID:-$$}" "$RANDOM")
+  mkdir -p "${record%/*}" || return 1
+  tmp="$record.$$.tmp"
+  { printf '%s' "$id" > "$tmp" && mv -f "$tmp" "$record"; } || { rm -f "$tmp"; return 1; }
+  printf '%s' "$id"
 }
 
 # One durable message: it starts an idle thread's next turn or steers the
 # running one (t3_thread_send mode auto). The model selection was fixed at
 # launch, so the optional third argument is accepted for the caller's
-# symmetry and not sent.
+# symmetry and not sent. Exit 0 delivered; 7 the reply was lost after the
+# request went out (the record keeps its request id for a safe retry); any
+# other status is proven non-delivery.
 fm_backend_t3code_turn_start() {  # <thread-id> <text> [model-selection-json]
-  local thread=$1 text=$2 file rc=0
+  local thread=$1 text=$2 file record id rc=0
+  record=$(fm_backend_t3code_send_record "$thread" "$text") || return 1
+  id=$(fm_backend_t3code_send_request_id "$record") || return 1
   # The brief rides a file: it is the one value too large to trust to argv.
   file=$(mktemp "${TMPDIR:-/tmp}/fm-t3code-msg.XXXXXX") || return 1
   printf '%s' "$text" > "$file" || { rm -f "$file"; return 1; }
   fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" \
-    --client-request-id "$(fm_backend_t3code_request_id)" >/dev/null || rc=$?
+    --client-request-id "$id" >/dev/null || rc=$?
   rm -f "$file"
+  [ "$rc" -eq 7 ] || rm -f "$record"
   return "$rc"
 }
 
@@ -212,11 +216,12 @@ fm_backend_t3code_thread_state() {  # <thread-id>
 }
 
 # fm_backend_t3code_probe: one word naming the thread's row in the status
-# table, from its V2 thread status: idle, starting (preparing, queued,
-# starting), running (running, or waiting while the run drains), ready
-# (completed), interrupted (interrupted, cancelled, rolled_back), error
-# (failed), archived, http-404 (the verified server has no such thread), or
-# http-failure (unreachable, refused, or unreadable).
+# table, from its V2 thread status: blocked (any pending runtime request: a
+# question or a permission approval waits on a human), idle, starting
+# (preparing, queued, starting), running (running, or waiting while the run
+# drains), ready (completed), interrupted (interrupted, cancelled,
+# rolled_back), error (failed), archived, http-404 (the verified server has
+# no such thread), or http-failure (unreachable, refused, or unreadable).
 fm_backend_t3code_probe() {  # <thread-id>
   local out
   out=$(fm_backend_t3code_thread_state "$1" 2>/dev/null) || { printf 'http-failure'; return 0; }
@@ -227,6 +232,7 @@ const word = () => {
   if (!d || d.ok !== true) return "http-failure";
   if (d.exists === false) return "http-404";
   if (d.archived === true) return "archived";
+  if (d.pendingRequestCount > 0) return "blocked";
   switch (d.status) {
     case "idle": return "idle";
     case "preparing": case "queued": case "starting": return "starting";
@@ -259,7 +265,9 @@ process.stdout.write(String(Math.max(0, Math.floor((Date.now() - at) / 1000))));
 fm_backend_t3code_state_row() {  # <probe-row>
   case "$1" in
     starting|running) printf 'busy alive' ;;
-    ready|idle|interrupted) printf 'idle alive' ;;
+    # A pending request is not progress: like a pane's blocked prompt it
+    # reads idle, so the wedge ladder never defers it as a running turn.
+    blocked|ready|idle|interrupted) printf 'idle alive' ;;
     error) printf 'unknown dead' ;;
     archived|http-404) printf 'unknown missing' ;;
     *) printf 'unknown unreadable' ;;
@@ -297,12 +305,18 @@ fm_backend_t3code_capture() {  # <thread-id> <lines>
   fm_backend_t3code_mcp capture --thread "$1" --lines "${2:-40}"
 }
 
+# empty: T3 accepted the message; unconfirmed: the reply was lost after the
+# request went out, so the message may have landed and only a resend of the
+# same text (which reuses its request id) is safe; send-failed: proven not
+# delivered.
 fm_backend_t3code_send_text_submit() {  # <thread-id> <text> <retries> <enter-sleep> <settle>
-  if fm_backend_t3code_turn_start "$1" "$2"; then
-    printf 'empty'
-  else
-    printf 'send-failed'
-  fi
+  local rc=0
+  fm_backend_t3code_turn_start "$1" "$2" || rc=$?
+  case "$rc" in
+    0) printf 'empty' ;;
+    7) printf 'unconfirmed' ;;
+    *) printf 'send-failed' ;;
+  esac
 }
 
 # fm_backend_t3code_native_interrupt <thread-id>: interrupt the running turn
@@ -344,6 +358,147 @@ fm_backend_t3code_kill() {  # <thread-id>
   fi
   out=$(fm_backend_t3code_mcp archive --thread "$thread") || return 1
   [ "$(printf '%s' "$out" | fm_backend_t3code_json_get closed)" = true ]
+}
+
+# --- pending requests ---------------------------------------------------------
+#
+# A pending runtime request (pendingRequestCount) waits on a human. T3's
+# pending-request tools read and answer user-input questions only; a
+# permission approval stays answerable in T3 Code itself, so it is surfaced
+# as an approval count and never answered here. bin/fm-t3-answer.sh is the
+# supervisor's entry point.
+
+fm_backend_t3code_pending_requests() {  # <thread-id> -> requests JSON
+  fm_backend_t3code_mcp requests --thread "$1"
+}
+
+fm_backend_t3code_answer_request() {  # <thread-id> <request-id> <answers-json-file>
+  fm_backend_t3code_mcp respond --thread "$1" --request "$2" --answers-file "$3" >/dev/null
+}
+
+# --- native event wait ----------------------------------------------------------
+#
+# The watcher's push splice (bin/fm-watch.sh event_wait_or_sleep) calls these
+# through bin/fm-backend.sh. T3 refuses the `/mcp` credential on its WebSocket
+# stream, but t3_thread_wait is itself an event-driven wait on stored run
+# updates, so one bounded `fm-t3-mcp.mjs watch` call per cycle covers every
+# recorded T3 worker: a new or changed pending request is the actionable
+# `blocked` edge, escalated once per request signature; a run reaching a
+# terminal status ends the wait early so the poll loop reconciles that turn at
+# once; and with no active run the wait sleeps its budget rather than
+# re-arming, so idle threads never spin. The poll loop remains the backstop.
+
+FM_BACKEND_T3CODE_ESCALATED_PREFIX=.t3code-escalated-
+
+fm_backend_t3code_escalation_marker() {  # <state_dir> <thread-id>
+  printf '%s/%s%s' "$1" "$FM_BACKEND_T3CODE_ESCALATED_PREFIX" "$(printf '%s' "$2" | tr ':/.' '___')"
+}
+
+fm_backend_t3code_events_capable() {  # <session>
+  fm_backend_t3code_mcp status >/dev/null 2>&1
+}
+
+# fm_backend_t3code_wait_transition: 0 with a normalized `blocked` record
+# (pane_id = thread id, workspace_id = request signature) on a fresh pending
+# request; 1 when a run ended, the budget passed, or nothing was running (the
+# budget is slept); 2 when the server could not be read.
+fm_backend_t3code_wait_transition() {  # <session> <timeout_secs> <state_dir> <thread...>
+  local timeout=$2 state=$3 thread marker out
+  shift 3
+  local -a args=(watch --timeout-ms "$((timeout * 1000))")
+  for thread in "$@"; do
+    args+=(--thread "$thread")
+    marker=$(fm_backend_t3code_escalation_marker "$state" "$thread")
+    [ ! -f "$marker" ] || args+=(--escalated "$thread=$(cat "$marker")")
+  done
+  out=$(fm_backend_t3code_mcp "${args[@]}" 2>/dev/null) || return 2
+  # shellcheck disable=SC2016  # ${...} belongs to the Node snippet.
+  out=$(printf '%s' "$out" | node -e '
+const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+for (const id of d.cleared ?? []) console.log(`cleared\t${id}`);
+if (d.event === "blocked") console.log(`blocked\t${d.threadId}\t${d.signature}`);
+else console.log(`event\t${d.event}`);
+') || return 2
+  local kind a b
+  while IFS=$'\t' read -r kind a b; do
+    case "$kind" in
+      cleared) rm -f "$(fm_backend_t3code_escalation_marker "$state" "$a")" ;;
+      blocked)
+        fm_transition_record "$a" "$b" "" blocked t3code
+        return 0
+        ;;
+      event) [ "$a" != none ] || sleep "$timeout" ;;
+    esac
+  done <<< "$out"
+  return 1
+}
+
+fm_backend_t3code_commit_transition() {  # <state_dir> <session> <record>
+  local thread signature
+  thread=$(fm_transition_pane_id "$3")
+  signature=$(fm_transition_workspace_id "$3")
+  [ -n "$thread" ] || return 1
+  printf '%s' "$signature" > "$(fm_backend_t3code_escalation_marker "$1" "$thread")"
+}
+
+fm_backend_t3code_clear_transition() {  # <state_dir> <thread-id>
+  [ -n "$2" ] || return 0
+  rm -f "$(fm_backend_t3code_escalation_marker "$1" "$2")"
+}
+
+# fm_backend_t3code_transition_note: the escalation detail for a blocked
+# record, naming what is pending and how it is answered.
+fm_backend_t3code_transition_note() {  # <record>
+  local signature questions approvals
+  signature=$(fm_transition_workspace_id "$1")
+  questions=${signature#q:}
+  questions=${questions%%;*}
+  approvals=${signature##*;a:}
+  [ -z "$questions" ] || printf 'T3 question %s pending - read and answer with bin/fm-t3-answer.sh' "$questions"
+  if [ "${approvals:-0}" != 0 ]; then
+    [ -z "$questions" ] || printf '; '
+    printf '%s T3 permission approval(s) pending - only T3 Code itself can approve' "$approvals"
+  fi
+}
+
+# T3's pull-request tools (link_pull_request, list_thread_pull_requests,
+# unlink_pull_request) once crashed a Claude session on a pre-V2 T3 build, so
+# Claude workers were told never to call them. All three ran cleanly in a
+# Claude thread on this first verified build (docs/verification/
+# runtime-backends.md "Claude pull-request tools"); the opt-in live guard
+# tests/fm-backend-t3code-pr-tools-live-e2e.test.sh re-proves it.
+FM_BACKEND_T3CODE_PR_TOOLS_VERIFIED_FROM=0.0.46-nightly.20261010.2935
+
+# fm_backend_t3code_version_at_least <version> <floor>: 0 when <version> is at
+# or past <floor>. A release outranks every nightly of its own version, and
+# nightlies order by date then build; anything unparseable is not at least.
+fm_backend_t3code_version_at_least() {  # <version> <floor>
+  node -e '
+const parse = (v) => {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-nightly\.(\d+)\.(\d+))?$/.exec(String(v).trim());
+  if (!m) return null;
+  return [+m[1], +m[2], +m[3], m[4] === undefined ? Infinity : +m[4], m[5] === undefined ? Infinity : +m[5]];
+};
+const [a, b] = [parse(process.argv[1]), parse(process.argv[2])];
+if (!a || !b) process.exit(1);
+for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) process.exit(a[i] > b[i] ? 0 : 1);
+' "$1" "$2"
+}
+
+# fm_backend_t3code_claude_pr_tools_verified: 0 when the signed-in server is
+# at or past the first build whose pull-request tools were verified safe for
+# Claude; an unreadable server keeps the older, safer instruction.
+fm_backend_t3code_claude_pr_tools_verified() {
+  local version
+  version=$(fm_backend_t3code_mcp status 2>/dev/null | fm_backend_t3code_json_get serverVersion) || return 1
+  fm_backend_t3code_version_at_least "$version" "$FM_BACKEND_T3CODE_PR_TOOLS_VERIFIED_FROM"
+}
+
+# fm_backend_t3code_resume_failed: continue a secondmate whose last run
+# failed in its own readable thread, rather than replacing the thread and
+# losing its conversation. A new turn runs on the same driver and transcript.
+fm_backend_t3code_resume_failed() {  # <thread-id>
+  fm_backend_t3code_turn_start "$1" "Firstmate recovery: your previous T3 run ended failed. Reconcile the work already recorded in your home, report anything your parent needs through your parent channel, then idle as your charter says."
 }
 
 fm_backend_t3code_validate_harness() {  # <harness>

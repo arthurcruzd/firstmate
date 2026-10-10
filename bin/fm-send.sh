@@ -65,8 +65,10 @@
 # and outside --resolve-key). Pane backends type the literal text ONCE, then
 # retry Enter without retyping; T3 Code starts one native turn. Typed-plane exit
 # contract: 0 = submit confirmed; 3 = the text reached the live endpoint and
-# submission was attempted, but the read-back stayed unconfirmed (verify the endpoint
-# before any resend, and never submit blindly; a marked request's
+# submission was attempted, but the read-back stayed unconfirmed, or an API
+# backend lost its reply after the request went out (verify the endpoint
+# before any resend, and never submit blindly; a T3 Code resend of the
+# identical text reuses its request id and is idempotent; a marked request's
 # pending-reply expectation stays armed because this outcome is not a proven
 # failure); any other nonzero = the send failed and nothing may be assumed
 # delivered. Submission dispatches through the target's recorded backend; the
@@ -1173,6 +1175,15 @@ else
     # surfaces through the library's own reconciliation
     # (bin/fm-pending-reply-lib.sh).
     echo "fm-send: text delivered to $T but submission is unconfirmed (verdict=pending; tried $RESOLUTION_TRIED); do not retype or blindly resend - verify with fm-peek.sh, then re-send '--key Enter' only if the composer still holds the text" >&2
+    exit 3
+    ;;
+  unconfirmed)
+    # An API backend lost the reply after the request went out (T3 Code
+    # commits a send before it answers). Like pending, delivery is unproven
+    # rather than refused, so the pending-reply expectation stays armed; the
+    # adapter keeps the logical delivery's request id, so re-running this
+    # exact send is idempotent rather than a second message.
+    echo "fm-send: delivery to $T is unconfirmed (verdict=unconfirmed: the $TARGET_BACKEND reply was lost after the request went out; tried $RESOLUTION_TRIED); verify with fm-peek.sh, and resend only the identical text, which reuses its request id" >&2
     exit 3
     ;;
   *)
