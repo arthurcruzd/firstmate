@@ -1632,18 +1632,25 @@ test_misbound_thread_launch_returns_lease() {
   pass "fm-spawn.sh --backend t3code: a thread T3 bound elsewhere is archived and the lease returned"
 }
 
-test_uncertain_launch_message_keeps_git_hooks() {
-  local id=t3uncertainturn out rc
+test_uncertain_launch_message_keeps_task_record() {
+  local id=t3uncertainturn out rc thread
   t3_case spawn-uncertain-turn
-  t3_world_set 'w.dropTools = { t3_thread_send: 1 }'
+  t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
   t3_worker_setup "$id"
   out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
-  expect_code 1 "$rc" "a lost launch-message response must abort spawn"$'\n'"$out"
-  case "$(t3_dispatch_types)" in "t3_thread_launch t3_thread_send!"*) ;; *) fail "the launch message must reach the server, got '$(t3_dispatch_types)'" ;; esac
-  assert_absent "$CASE_DIR/state/$id.meta" "an aborted launch must roll back its metadata"
+  expect_code 1 "$rc" "a launch brief whose reply was lost must still fail the spawn"$'\n'"$out"
+  assert_not_contains "$out" "T3 refused the launch turn" "a possibly delivered brief must never be reported as refused"
+  assert_contains "$out" "may already have been delivered" "a lost launch reply must say the brief may have landed"
+  assert_contains "$out" "resend only the identical brief text, which reuses its request id" "the error must name the only safe resend"
+  assert_present "$CASE_DIR/state/$id.meta" "a possibly delivered launch must keep its task record"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$id.meta")
+  assert_contains "$out" "T3 thread $thread" "the error must name the thread to inspect"
+  [ "$(t3_fake_calls t3_thread_send | grep -c .)" = 1 ] || fail "the launch brief must never be retried automatically"
+  [ "$(t3_dispatch_types)" = "t3_thread_launch t3_thread_send" ] || fail "the thread must be neither archived nor relaunched, got '$(t3_dispatch_types)'"
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -eq 0 ] || fail "a possibly running worker must keep its lease"
   [ -d "$CASE_DIR/state/$id.git-hooks" ] || fail "an uncertain accepted launch must keep the Git hook directory its thread uses"$'\n'"$out"
   rm -rf "/tmp/fm-$id"
-  pass "fm-spawn.sh --backend t3code: a launch message whose response is lost keeps its Git hook directory"
+  pass "fm-spawn.sh --backend t3code: a launch brief whose reply is lost is reported unconfirmed and keeps its task record"
 }
 
 test_scout_teardown_stops_and_archives_before_slot_return() {
@@ -2125,4 +2132,4 @@ test_spawn_abort_returns_lease_only_after_archive ok
 test_spawn_abort_returns_lease_only_after_archive fail
 test_uncertain_thread_launch_keeps_lease
 test_misbound_thread_launch_returns_lease
-test_uncertain_launch_message_keeps_git_hooks
+test_uncertain_launch_message_keeps_task_record

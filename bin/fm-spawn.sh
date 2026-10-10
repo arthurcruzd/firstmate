@@ -1504,6 +1504,7 @@ ORCA_TERMINAL=
 T3CODE_ABORT_CLEANUP=0
 T3CODE_LEASED=0
 T3CODE_CREATE_UNCERTAIN=0
+T3CODE_LAUNCH_UNCONFIRMED=0
 T3CODE_PROJECT_ID=
 T3CODE_MODEL_SELECTION=
 HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -7042,8 +7043,11 @@ if [ "$BACKEND" = t3code ]; then
   T3CODE_BRIEF_TEXT=$("$FM_ROOT/bin/fm-operational-input.sh" encode launch-brief < "$BRIEF") || exit 1
   SPAWN_LAUNCH_SENT=1
   fm_backend_t3code_turn_start "$T" "$T3CODE_BRIEF_TEXT" "$T3CODE_MODEL_SELECTION" || {
-    echo "error: T3 refused the launch turn for $ID on thread $T; inspect the thread in T3 Code" >&2
-    exit 1
+    if [ "$?" -ne 7 ]; then
+      echo "error: T3 refused the launch turn for $ID on thread $T; inspect the thread in T3 Code" >&2
+      exit 1
+    fi
+    T3CODE_LAUNCH_UNCONFIRMED=1
   }
 else
   if ! (umask 077 && mkdir "$LAUNCH_DIR") 2>/dev/null; then
@@ -7292,6 +7296,11 @@ if [ -n "$SPAWN_DEFERRED_SIGNAL" ]; then
 fi
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0
+
+if [ "$T3CODE_LAUNCH_UNCONFIRMED" = 1 ]; then
+  echo "error: the launch brief for $ID may already have been delivered to T3 thread $T: its reply was lost after the request went out. The task record is kept; inspect the thread in T3 Code, and if the brief is absent resend only the identical brief text, which reuses its request id within the hour" >&2
+  exit 1
+fi
 
 SPAWN_DELIVERY=
 [ -z "$MODE" ] || SPAWN_DELIVERY=" mode=$MODE yolo=$YOLO"

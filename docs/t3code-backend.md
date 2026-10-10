@@ -153,6 +153,8 @@ Secondmate retirement requires `lsof` to prove the home is quiet; without it, te
 If spawn aborts after launching the thread, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive and `treehouse return --force` steps.
 `t3_thread_launch` has no idempotency key, so a lost launch reply or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and never retries.
 When the thread id is known, the helper attempts to archive it and reports its id, but even an accepted archive request leaves the lease held until the archive is verified.
+A lost reply to the launch brief means the brief may already be running, so spawn keeps the task record, lease, and thread, never resends the brief itself, and exits nonzero with the thread to inspect.
+Only a resend of the identical brief text reuses its request id.
 Before returning a retained slot by hand, prove both the archive with no active run and the end of its provider and worktree-owned processes, as teardown does above.
 The kill is idempotent, so an already archived thread, or one the verified server no longer has, is the end state, and an unreachable or gate-refused server refuses the teardown rather than returning a slot a live thread still points at.
 Archiving keeps the transcript visible in T3 Code; this backend never deletes a thread.
