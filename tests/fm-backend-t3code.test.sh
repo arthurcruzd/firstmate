@@ -515,6 +515,10 @@ test_status_table() {
   [ "$got" = unknown:missing ] || fail "an archived thread should classify unknown:missing, got $got"
   t3_run 'fm_backend_t3code_target_exists thread-live' && fail "an archived thread must not exist"
   [ "$(t3_run 'fm_backend_t3code_composer_state thread-live')" = unknown ] || fail "an archived thread's composer is unknown"
+  t3_world "$(t3_thread_json thread-live running true)"
+  got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
+  [ "$got" = unknown:unreadable ] || fail "an archived thread whose run still drains is not proven closed and must classify unknown:unreadable, got $got"
+  [ "$(t3_run 'fm_backend_t3code_composer_state thread-live')" = unknown ] || fail "an archived thread whose run still drains has an unknown composer"
   got="$(t3_run 'fm_backend_t3code_busy_state thread-gone'):$(t3_run 'fm_backend_t3code_agent_state thread-gone')"
   [ "$got" = unknown:missing ] || fail "a thread the verified server lacks should classify unknown:missing, got $got"
   down=$(t3_down_config)
@@ -527,7 +531,7 @@ test_status_table() {
   t3_world_set 'w.failTools = {}'
   t3_run 'fm_backend_t3code_target_exists thread-live' || fail "a live thread must exist"
   [ "$(t3_run 'fm_backend_t3code_composer_state thread-live')" = empty ] || fail "a live thread's composer is always empty"
-  pass "t3code status table: every V2 thread status, a pending request, archived, missing, unreachable, and unreadable rows"
+  pass "t3code status table: every V2 thread status, a pending request, archived, archived-but-draining, missing, unreachable, and unreadable rows"
 }
 
 test_unreadable_thread_defers_like_busy() {
@@ -558,6 +562,49 @@ test_unreadable_thread_defers_like_busy() {
   [ "$got" = 3 ] || fail "the stale recheck must preserve uncertainty, got $got"
   [ -z "$(t3_dispatch_types)" ] || fail "an unreadable thread must not be sent a message"
   pass "t3code: a failed thread read reports unknown busy state, submits no away-mode injection, and keeps stale rechecks uncertain"
+}
+
+# A digest whose T3 reply was lost may already be delivered. Its generation is
+# frozen and retried verbatim (one request id), and an event arriving meanwhile
+# goes out in the next digest, so every event lands exactly once.
+test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim() {
+  local state got
+  t3_case daemon-digest-freeze completed
+  state="$CASE_DIR/state"
+  mkdir -p "$state"
+  t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
+  got=$(t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=codex
+    afk_enter "$1"
+    escalate_add "$1" "event-one"
+    escalate_add "$1" "event-two"
+    escalate_flush "$1"; printf "first=%s\n" "$?"
+    escalate_add "$1" "event-three"
+    node -e "
+const fs = require(\"fs\"), f = process.argv[1], w = JSON.parse(fs.readFileSync(f, \"utf8\"));
+const t = w.threads[\"thread-live\"]; t.status = \"completed\"; t.activeRunId = null;
+fs.writeFileSync(f, JSON.stringify(w));
+" "$2"
+    escalate_flush "$1"; printf "second=%s\n" "$?"
+  ' "$state" "$T3_FAKE_WORLD" 2>&1)
+  assert_contains "$got" "first=1" "an unconfirmed digest is not reported delivered: $got"
+  assert_contains "$got" "second=0" "the frozen digest and the next generation are delivered: $got"
+  [ ! -s "$state/.subsuper-escalations" ] || fail "every event was delivered, buffer still holds '$(cat "$state/.subsuper-escalations")'"
+  [ ! -e "$state/.subsuper-escalations.frozen" ] || fail "a confirmed frozen generation must be cleared"
+  [ "$(t3_fake_calls t3_thread_send | node -e '
+const ids = require("fs").readFileSync(0, "utf8").trim().split("\n").map((l) => JSON.parse(l).clientRequestId);
+process.stdout.write(ids.length === 3 && ids[0] === ids[1] && ids[1] !== ids[2] ? "ok" : ids.join(","));
+')" = ok ] || fail "the frozen digest must be retried with its request id, then the new event sent once, got '$(t3_fake_calls t3_thread_send)'"
+  node -e '
+const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const texts = w.threads["thread-live"].items.filter((i) => i.type === "user_message").map((i) => i.text);
+const count = (s) => texts.filter((t) => t.includes(s)).length;
+if (count("event-one") !== 1 || count("event-two") !== 1 || count("event-three") !== 1) {
+  console.error(JSON.stringify(texts)); process.exit(1);
+}
+' "$T3_FAKE_WORLD" || fail "each event must reach the supervisor thread exactly once"
+  pass "away daemon on T3: an unconfirmed digest is frozen and retried verbatim; a later event goes in the next digest, each event once"
 }
 
 test_kill_interrupts_then_archives_and_tolerates_gone() {
@@ -1744,7 +1791,7 @@ t3_item_count() {
 # must read unconfirmed, through the adapter and through fm-send, and a resend
 # must reuse the request id so the message lands once.
 test_lost_send_reply_is_unconfirmed_and_resend_is_idempotent() {
-  local id out rc thread=mcp:5c6d7e8f-0a1b-4c2d-9e3f-23456789abcd
+  local id out rc sends accepted thread=mcp:5c6d7e8f-0a1b-4c2d-9e3f-23456789abcd
   t3_case send-lost-reply
   t3_world "$(t3_thread_json "$thread" completed false)"
   t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
@@ -1755,8 +1802,21 @@ test_lost_send_reply_is_unconfirmed_and_resend_is_idempotent() {
   [ "$(t3_item_count "$thread" "deliver once")" = 1 ] || fail "the committed send and its resend must be one delivery"
   [ "$(t3_fake_calls t3_thread_send | node -e 'const ids=new Set(require("fs").readFileSync(0,"utf8").trim().split("\n").map((l)=>JSON.parse(l).clientRequestId)); process.stdout.write(String(ids.size))')" = 1 ] \
     || fail "the resend must reuse the logical delivery's request id"
+  sends="$CASE_DIR/state/t3code-sends"
+  accepted=$(find "$sends" -name '*.accepted')
+  [ "$(printf '%s\n' "$accepted" | grep -c .)" = 1 ] || fail "the accepted delivery's outcome must be retained, got '$accepted'"
+  node -e '
+const o = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const id = require("path").basename(process.argv[1], ".accepted");
+if (o.clientRequestId !== id || !/^msg:/.test(o.messageId || "") || !o.runId || o.delivery !== "started") process.exit(1);
+' "$accepted" || fail "the retained outcome must carry the request id, messageId, runId, and delivery, got '$(cat "$accepted")'"
   out=$(t3_run 'fm_backend_t3code_send_text_submit "$1" "deliver once" 3 0.01 0.01' "$thread" 2>/dev/null)
   [ "$(t3_item_count "$thread" "deliver once")" = 2 ] || fail "after a proven delivery the same text later is a new delivery"
+  [ "$(find "$sends" -name '*.accepted' | grep -c .)" = 2 ] || fail "each accepted delivery keeps its own outcome"
+  [ -z "$(find "$sends" -type f ! -name '*.accepted')" ] || fail "a proven delivery leaves no in-flight record behind"
+  touch -d '2 days ago' "$accepted"
+  t3_run 'fm_backend_t3code_send_text_submit "$1" "another" 3 0.01 0.01' "$thread" >/dev/null 2>&1
+  [ ! -e "$accepted" ] || fail "an accepted outcome older than a day is pruned"
 
   id=t3sendlost1
   make_t3_control_task send-lost-fm-send "$id" "$thread" completed
@@ -1771,6 +1831,26 @@ test_lost_send_reply_is_unconfirmed_and_resend_is_idempotent() {
   expect_code 0 "$rc" "the identical resend through fm-send succeeds"$'\n'"$out"
   [ "$(t3_item_count "$thread" "/compact now")" = 1 ] || fail "fm-send's resend after a lost reply must land as one delivery"
   pass "t3code send: a reply lost after commit is unconfirmed through the adapter and fm-send, and the resend lands once"
+}
+
+# A marked secondmate request on the typed plane (a slash command) carries a
+# fresh correlation on every plain rerun, so a lost reply must never be
+# answered with advice to resend the same text.
+test_lost_send_reply_to_secondmate_names_armed_correlation() {
+  local id=t3smlost1 out rc thread=mcp:1c2d3e4f-6a7b-4c8d-9e0f-89abcdef0123
+  make_t3_control_task send-lost-secondmate "$id" "$thread" completed
+  fm_write_meta "$CTRL_STATE/$id.meta" \
+    "window=fm-$id" "endpoint_task_id=$id" "home=$CASE_DIR/sm-home" "project=$CTRL_PROJ" \
+    "harness=claude" "kind=secondmate" "backend=t3code" "t3_thread_id=$thread" "t3_project_id=proj-1"
+  t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
+  out=$(FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$CTRL_STATE" FM_DATA_OVERRIDE="$CTRL_DATA" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$ROOT/bin/fm-send.sh" "$id" "/status" 2>&1); rc=$?
+  expect_code 3 "$rc" "a lost reply to a typed secondmate request is delivered-unconfirmed (exit 3)"$'\n'"$out"
+  assert_contains "$out" "verdict=unconfirmed" "fm-send names the unconfirmed verdict"
+  assert_not_contains "$out" "resend only the identical text" "a marked request must not be told to resend: a rerun mints a new correlation"
+  assert_contains "$out" "do not resend" "a marked request is told not to resend"
+  assert_contains "$out" "stays armed" "the armed correlation is named"
+  pass "t3code send: a lost reply to a secondmate names its armed correlation instead of advising a resend"
 }
 
 # t3_watch_cycles <state-dir> <n>: source the real watcher (its guard returns
@@ -1848,6 +1928,27 @@ fm_secondmate_liveness_relaunch "$1" smfail && echo relaunched=yes || echo relau
   assert_grep "t3_thread_id=$thread" "$state/smfail.meta" "the endpoint record is unchanged"
   assert_grep relaunched "$state/.secondmate-relaunch-smfail" "the resume is recorded in the relaunch ledger"
   pass "secondmate liveness backend=t3code: a failed run is resumed on its own thread, never archived and replaced"
+}
+
+# A secondmate whose thread was archived while its run still drains is not
+# proven closed: recovery leaves it in place instead of launching a second
+# supervisor beside the draining one.
+test_draining_archived_t3_secondmate_is_not_relaunched() {
+  local thread=mcp:0b1c2d3e-5f6a-4b7c-8d9e-789abcdef012 state out
+  t3_case secondmate-draining running
+  t3_world "$(t3_thread_json "$thread" running true)"
+  state="$CASE_DIR/state"
+  mkdir -p "$state"
+  fm_write_meta "$state/smdrain.meta" "window=fm-smdrain" "kind=secondmate" "harness=claude" "backend=t3code" "t3_thread_id=$thread" "home=$CASE_DIR/sm-home"
+  out=$(STATE="$state" FM_STATE_OVERRIDE="$state" FM_CONFIG_OVERRIDE="$CONFIG" FM_HOME="$CASE_DIR/home" bash -c '
+. "$0/bin/fm-secondmate-liveness-lib.sh"
+fm_secondmate_liveness_probe "$1" smdrain poll
+printf "probe=%s state=%s\n" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE"
+' "$ROOT" "$state/smdrain.meta" 2>&1)
+  assert_not_contains "$out" "probe=relaunchable" "an archived thread with an active run must not be relaunchable: $out"
+  assert_contains "$out" "state=unreadable" "an archived thread with an active run reads unreadable: $out"
+  [ -z "$(t3_dispatch_types)" ] || fail "probing a draining thread must dispatch nothing, got '$(t3_dispatch_types)'"
+  pass "secondmate liveness backend=t3code: an archived thread whose run still drains is left in place, not replaced"
 }
 
 # A pooled secondmate home (a Treehouse slot of the Firstmate root) is
@@ -1939,10 +2040,13 @@ test_capture_renders_activity_and_status
 test_send_key_mapping
 test_send_text_submit_verdicts
 test_lost_send_reply_is_unconfirmed_and_resend_is_idempotent
+test_lost_send_reply_to_secondmate_names_armed_correlation
 test_status_table
 test_push_wait_escalates_pending_question_once
 test_answer_script_reads_and_answers_questions
 test_failed_t3_secondmate_is_resumed_in_place
+test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim
+test_draining_archived_t3_secondmate_is_not_relaunched
 test_kill_interrupts_then_archives_and_tolerates_gone
 test_dispatcher_routes_and_validates_t3code_meta
 test_harness_admission_and_typing_refusals

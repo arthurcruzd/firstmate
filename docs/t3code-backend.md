@@ -117,7 +117,10 @@ Exact call payloads are owned by `bin/fm-t3-mcp.mjs` and `bin/backends/t3code.sh
 T3 pages that view oldest first, so the helper starts from the thread's visible item count to read the tail.
 An ordinary metadata-routed `fm-send.sh` text steer becomes a durable steering-inbox record, and its doorbell is a `t3_thread_send` in `auto` mode, which starts an idle thread's next turn or steers the running one.
 T3 derives the message id from the client request id and commits a send before it replies, so the adapter keeps one request id per logical delivery (the thread and text) until its outcome is proven, and a resend after a lost reply lands on the message T3 already committed.
+An accepted delivery's outcome (its request id, `messageId`, `runId`, and `delivery`) is kept for a day as `state/t3code-sends/<request-id>.accepted`, so it can be reconciled against T3's own message and run.
 The submit primitive reports `empty` when T3 accepts the message, so the daemon can clear its delivery buffer; `unconfirmed` when the reply was lost after the request went out, which `fm-send.sh` reports as delivered-unconfirmed (exit 3) with any reply expectation kept armed; and `send-failed` only for a proven refusal.
+After `unconfirmed`, only an unmarked send is safe to resend with identical text; a marked secondmate request is not resent, because a rerun mints a new reply correlation and so a new message.
+The away daemon freezes an unconfirmed digest and retries its exact text, so it keeps its request id, while events that arrive meanwhile wait for the next digest.
 Task completion remains a separate worker status event.
 Escape and Ctrl-C are both a `t3_thread_interrupt`; Enter is a no-op and Ctrl-U is unsupported.
 
@@ -162,7 +165,8 @@ Thread persistence alone does not prove a live agent.
 - `preparing`, `queued`, `starting`, `running`, and `waiting` (the run's post-turn drain) read busy/alive.
 - `idle`, `completed`, `interrupted`, `cancelled`, and `rolled_back` read idle/alive.
 - `failed` reads unknown/dead.
-- An archived thread, or one the verified server does not have, reads missing.
+- An archived thread with no active run, or one the verified server does not have, reads missing.
+- An archived thread whose run is still draining is not proven closed, so it reads `unknown unreadable` until the run ends.
 - An unreachable server, a refused gate, or a failed read reads `unknown unreadable`, which is never treated as proof that a replacement agent is safe.
 
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
@@ -179,6 +183,7 @@ A new or changed set of pending requests is escalated at once, once per set, as 
 Otherwise the call waits on each thread's exact active run and returns as soon as one turns terminal, so the poll loop reconciles that turn without waiting out its interval; with no active run it sleeps the interval instead of re-arming.
 The poll loop, its wedge timer, and the `FM_BUSY_TURN_MAX_SECS` bound on a running thread remain the backstop, and a server the call cannot read drops the cycle to plain polling.
 Secondmate threads stay off the splice, as on Herdr.
+In a home that also records Herdr workers, Herdr keeps the push wait and the T3 workers stay on the poll loop, so adding a T3 task never slows Herdr escalation.
 
 Read and answer a worker's pending questions with [`bin/fm-t3-answer.sh`](../bin/fm-t3-answer.sh), which uses T3's `t3_pending_request_*` tools.
 Those tools cannot see or approve a permission request, so an approval is surfaced as a count and answered only in T3 Code itself.

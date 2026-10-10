@@ -194,7 +194,6 @@ function parseFlags(argv) {
     const value = argv[i + 1];
     if (value === undefined || value.startsWith("--")) usage(`--${key} needs a value`);
     i++;
-    if (flags[key] !== undefined && !REPEATABLE.has(key)) usage(`--${key} is given twice`);
     if (REPEATABLE.has(key)) (flags.all[key] ??= []).push(value);
     flags[key] = value;
   }
@@ -840,7 +839,7 @@ async function send(flags) {
       { threadId: args.threadId, clientRequestId: args.clientRequestId },
     );
   }
-  return { ok: true, threadId: args.threadId, delivery: out?.delivery ?? null, status: out?.status ?? null, runId: out?.runId ?? null, messageId: out?.messageId ?? null };
+  return { ok: true, threadId: args.threadId, clientRequestId: args.clientRequestId, delivery: out?.delivery ?? null, status: out?.status ?? null, runId: out?.runId ?? null, messageId: out?.messageId ?? null };
 }
 
 async function read(flags) {

@@ -1182,8 +1182,15 @@ else
     # commits a send before it answers). Like pending, delivery is unproven
     # rather than refused, so the pending-reply expectation stays armed; the
     # adapter keeps the logical delivery's request id, so re-running this
-    # exact send is idempotent rather than a second message.
-    echo "fm-send: delivery to $T is unconfirmed (verdict=unconfirmed: the $TARGET_BACKEND reply was lost after the request went out; tried $RESOLUTION_TRIED); verify with fm-peek.sh, and resend only the identical text, which reuses its request id" >&2
+    # exact send is idempotent rather than a second message. A marked
+    # secondmate request is the exception: a plain rerun mints a new
+    # correlation, so its text and request id differ, and the armed attempt
+    # refuses a resend of this one.
+    if [ -n "$PENDING_REPLY_CORR" ]; then
+      echo "fm-send: delivery to $T is unconfirmed (verdict=unconfirmed: the $TARGET_BACKEND reply was lost after the request went out; tried $RESOLUTION_TRIED); do not resend - a rerun mints a new pending-reply correlation and would deliver twice; correlation $PENDING_REPLY_CORR stays armed, so verify with fm-peek.sh and let its reply or the watcher's reconciliation settle it" >&2
+    else
+      echo "fm-send: delivery to $T is unconfirmed (verdict=unconfirmed: the $TARGET_BACKEND reply was lost after the request went out; tried $RESOLUTION_TRIED); verify with fm-peek.sh, and resend only the identical text, which reuses its request id" >&2
+    fi
     exit 3
     ;;
   *)

@@ -169,6 +169,9 @@ console.error("error: " + d.error.message);
 # recorded under state/t3code-sends, keyed by thread and text, until an
 # outcome is proven; a record older than an hour starts a new delivery, so
 # deliberately repeated text later (a constant doorbell) is not swallowed.
+# An accepted delivery's outcome (the helper's JSON: clientRequestId,
+# messageId, runId, delivery) stays beside it as <request-id>.accepted for a
+# day, so it can be reconciled against T3's own message and run.
 fm_backend_t3code_send_record() {  # <thread-id> <text> -> record path
   local dir key
   dir="${FM_STATE_OVERRIDE:-$FM_HOME/state}/t3code-sends"
@@ -194,19 +197,24 @@ fm_backend_t3code_send_request_id() {  # <record> -> client request id
 # One durable message: it starts an idle thread's next turn or steers the
 # running one (t3_thread_send mode auto). The model selection was fixed at
 # launch, so the optional third argument is accepted for the caller's
-# symmetry and not sent. Exit 0 delivered; 7 the reply was lost after the
-# request went out (the record keeps its request id for a safe retry); any
-# other status is proven non-delivery.
+# symmetry and not sent. Exit 0 delivered (its outcome retained); 7 the reply
+# was lost after the request went out (the record keeps its request id for a
+# safe retry); any other status is proven non-delivery.
 fm_backend_t3code_turn_start() {  # <thread-id> <text> [model-selection-json]
-  local thread=$1 text=$2 file record id rc=0
+  local thread=$1 text=$2 file record id out rc=0
   record=$(fm_backend_t3code_send_record "$thread" "$text") || return 1
+  find "${record%/*}" -maxdepth 1 -name '*.accepted' -mmin +1440 -delete 2>/dev/null
   id=$(fm_backend_t3code_send_request_id "$record") || return 1
   # The brief rides a file: it is the one value too large to trust to argv.
   file=$(mktemp "${TMPDIR:-/tmp}/fm-t3code-msg.XXXXXX") || return 1
   printf '%s' "$text" > "$file" || { rm -f "$file"; return 1; }
-  fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" \
-    --client-request-id "$id" >/dev/null || rc=$?
+  out=$(fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" \
+    --client-request-id "$id") || rc=$?
   rm -f "$file"
+  if [ "$rc" -eq 0 ] && { ! printf '%s\n' "$out" > "${record%/*}/$id.accepted.$$.tmp" \
+    || ! mv -f "${record%/*}/$id.accepted.$$.tmp" "${record%/*}/$id.accepted"; }; then
+    rm -f "${record%/*}/$id.accepted.$$.tmp"
+  fi
   [ "$rc" -eq 7 ] || rm -f "$record"
   return "$rc"
 }
@@ -220,8 +228,10 @@ fm_backend_t3code_thread_state() {  # <thread-id>
 # question or a permission approval waits on a human), idle, starting
 # (preparing, queued, starting), running (running, or waiting while the run
 # drains), ready (completed), interrupted (interrupted, cancelled,
-# rolled_back), error (failed), archived, http-404 (the verified server has
-# no such thread), or http-failure (unreachable, refused, or unreadable).
+# rolled_back), error (failed), archived, closing (archived while its run
+# still drains: not yet proven closed, so it reads unreadable rather than
+# missing), http-404 (the verified server has no such thread), or
+# http-failure (unreachable, refused, or unreadable).
 fm_backend_t3code_probe() {  # <thread-id>
   local out
   out=$(fm_backend_t3code_thread_state "$1" 2>/dev/null) || { printf 'http-failure'; return 0; }
@@ -231,7 +241,7 @@ try { d = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { d = null;
 const word = () => {
   if (!d || d.ok !== true) return "http-failure";
   if (d.exists === false) return "http-404";
-  if (d.archived === true) return "archived";
+  if (d.archived === true) return d.activeRunId ? "closing" : "archived";
   if (d.pendingRequestCount > 0) return "blocked";
   switch (d.status) {
     case "idle": return "idle";
@@ -296,7 +306,7 @@ fm_backend_t3code_target_exists() {  # <thread-id>
 # T3 has no composer to clear, so a live thread is always ready for a steer.
 fm_backend_t3code_composer_state() {  # <thread-id> [expected-label] -> empty|unknown
   case "$(fm_backend_t3code_probe "$1")" in
-    archived|http-404|http-failure) printf 'unknown' ;;
+    archived|closing|http-404|http-failure) printf 'unknown' ;;
     *) printf 'empty' ;;
   esac
 }

@@ -234,6 +234,9 @@ WEDGE_ALARM_NOTIFIER_PID=
 INJECT_LAST_FAILURE=
 # 1 once the latest delivery attempt reached the submit primitive.
 INJECT_SUBMIT_ATTEMPTED=0
+# The latest submit's verdict and the exact text it submitted.
+INJECT_LAST_VERDICT=
+INJECT_SENT_MSG=
 # The captain-relevant verb set and the status classifiers (last_status_line,
 # status_is_captain_relevant, window_to_task, and the status-span reader) now
 # live in bin/fm-classify-lib.sh, shared with the always-on watcher.
@@ -888,12 +891,59 @@ escalate_full_text_save() {  # <state> <buf>
   printf '%s' "$file"
 }
 
+# A digest whose delivery came back unconfirmed (only T3 Code reports it: the
+# reply was lost after the request went out) may already be in the
+# supervisor's transcript. Its generation is frozen: <buf>.frozen-msg keeps the
+# exact submitted text, so every retry reuses the adapter's request id for it,
+# and <buf>.frozen records the buffer's since-stamp and the items it covered.
+# Items appended later form the next generation and are flushed only after the
+# frozen one is confirmed (or proven refused, which unfreezes it for a
+# rebuild), so no event is lost or delivered twice.
+escalate_freeze() {  # <buf> <submitted-message>
+  local buf=$1
+  if ! printf '%s' "$2" > "$buf.frozen-msg" \
+    || ! { printf 'since=%s\n' "$(cat "$buf.since" 2>/dev/null)"; cat "$buf"; } > "$buf.frozen.tmp" \
+    || ! mv -f "$buf.frozen.tmp" "$buf.frozen"; then
+    rm -f "$buf.frozen.tmp" "$buf.frozen" "$buf.frozen-msg"
+    log "digest freeze could not be recorded; the next flush rebuilds it"
+  fi
+}
+
+# escalate_flush_frozen: retry a frozen generation verbatim. Returns 0 once
+# none is pending (confirmed, or a freeze that no longer matches the buffer,
+# such as one left behind by a cleared buffer), 1 while it is still pending
+# or was just refused (unfrozen, so the next flush rebuilds every item).
+escalate_flush_frozen() {  # <state> <buf>
+  local state=$1 buf=$2 n items
+  n=$(( $(wc -l < "$buf.frozen") - 1 ))
+  items=$(mktemp "$state/.subsuper-frozen.XXXXXX" 2>/dev/null) || return 1
+  tail -n +2 "$buf.frozen" > "$items"
+  if [ "$(head -n 1 "$buf.frozen")" != "since=$(cat "$buf.since" 2>/dev/null)" ] \
+    || [ ! -f "$buf.frozen-msg" ] || ! head -n "$n" "$buf" | cmp -s - "$items"; then
+    rm -f "$items" "$buf.frozen" "$buf.frozen-msg"
+    return 0
+  fi
+  if inject_msg "$(cat "$buf.frozen-msg")" "$state" exact; then
+    unknown_wake_acknowledge_flushed "$state" "$items" \
+      || log "unknown-wake acknowledgement write failed; a delivered unknown wake may escalate again"
+    tail -n +"$((n + 1))" "$buf" > "$items" && mv -f "$items" "$buf"
+    rm -f "$items" "$buf.frozen" "$buf.frozen-msg" "$state/.subsuper-inject-wedged"
+    [ -s "$buf" ] || rm -f "$buf.since"
+    ESCALATE_KEPT_FULL=
+    return 0
+  fi
+  rm -f "$items"
+  [ "$INJECT_LAST_VERDICT" != send-failed ] || rm -f "$buf.frozen" "$buf.frozen-msg"
+  return 1
+}
+
 # Flush the escalation buffer as ONE batched, single-line, bounded digest to
 # the supervisor endpoint. Returns 0 on successful inject (or empty buffer),
 # non-zero on inject failure (buffer preserved for retry / catch-up). A bounded
 # digest's full-text file is kept once the submit ran, because the digest naming
 # it may have been typed; ESCALATE_KEPT_FULL remembers it so a retry of the same
-# buffer reuses it instead of writing another copy.
+# buffer reuses it instead of writing another copy. A frozen generation
+# (escalate_freeze) is retried first, verbatim.
 ESCALATE_KEPT_FULL=
 escalate_flush() {  # <state>
   local state=$1 buf msg full='' fresh=0
@@ -903,6 +953,10 @@ escalate_flush() {  # <state>
     INJECT_LAST_FAILURE="escalation buffer $buf is not a readable file"
     log "inject skipped: $INJECT_LAST_FAILURE"
     return 1
+  fi
+  if [ -f "$buf.frozen" ]; then
+    escalate_flush_frozen "$state" "$buf" || return 1
+    [ -s "$buf" ] || return 0
   fi
   escalate_digest_body "$buf"
   msg=$ESCALATE_BODY
@@ -930,6 +984,7 @@ escalate_flush() {  # <state>
   fi
   if [ "$INJECT_SUBMIT_ATTEMPTED" = 1 ]; then
     [ -z "$full" ] || ESCALATE_KEPT_FULL=$full
+    [ "$INJECT_LAST_VERDICT" != unconfirmed ] || escalate_freeze "$buf" "$INJECT_SENT_MSG"
   elif [ "$fresh" = 1 ]; then
     rm -f "$full"
   fi
@@ -1522,24 +1577,29 @@ window_for_task() {  # <task-key> [state]
 #     human's half-typed line, or a previous injection's unsent text), defer
 #     entirely - injecting would merge with the human's text. T3 Code has no
 #     composer and reports the guard as empty.
-inject_msg() {  # <message> [state]
-  local msg=$1 state target backend retries sleep_s verdict composer reason encoded bytes errf err='' body
+inject_msg() {  # <message> [state] [exact]
+  local msg=$1 state target backend retries sleep_s verdict composer reason encoded bytes errf err='' body exact=${3:-}
   state="${2:-$(_state_root)}"
   # (1) Presence-gate: inject ONLY when afk is active. When afk is off, the
   # daemon self-handles and stays quiet; firstmate drives the normal always-on
   # watcher triage. Escalations buffer and survive for the next catch-up flush.
   INJECT_LAST_FAILURE=
+  INJECT_LAST_VERDICT=
+  INJECT_SENT_MSG=
   INJECT_SUBMIT_ATTEMPTED=0
   afk_active "$state" || { INJECT_LAST_FAILURE="deferred: afk inactive"; log "inject $INJECT_LAST_FAILURE"; return 1; }
   # (2) Single-line digest: collapse any embedded newlines so submission via
   # send-keys + Enter is unambiguous regardless of how the TUI composer treats
   # them. Then use the canonical typed envelope so downstream consumers retain
   # the exact away-supervisor kind without interpreting this payload's prose.
-  msg=$(_collapse_newlines "$msg")
-  fm_operational_input_encode away-supervisor "$msg" encoded \
-    || { INJECT_LAST_FAILURE="the digest could not be encoded"; log "inject failed: $INJECT_LAST_FAILURE"; return 1; }
-  body=$msg
-  msg=$encoded
+  # An `exact` message is a frozen digest's submitted text, sent verbatim.
+  if [ "$exact" != exact ]; then
+    msg=$(_collapse_newlines "$msg")
+    fm_operational_input_encode away-supervisor "$msg" encoded \
+      || { INJECT_LAST_FAILURE="the digest could not be encoded"; log "inject failed: $INJECT_LAST_FAILURE"; return 1; }
+    body=$msg
+    msg=$encoded
+  fi
   target="${FM_SUPERVISOR_TARGET:-$FM_SUPERVISOR_TARGET_DEFAULT}"
   # Dispatch through bin/fm-backend.sh so each supervisor pane or T3 thread is checked by
   # its backend. Falls back to tmux when unset (sourced/test contexts that never
@@ -1582,7 +1642,7 @@ inject_msg() {  # <message> [state]
   #      the owner's record-backed doorbell instead of the typed envelope, so
   #      the away-mode return check can still tell this escalation from the
   #      captain. The record is written only once every guard has passed.
-  if fm_operational_harness_needs_record "$(fm_daemon_primary_harness)"; then
+  if [ "$exact" != exact ] && fm_operational_harness_needs_record "$(fm_daemon_primary_harness)"; then
     if ! fm_operational_record_write "$state" away-supervisor "$body" msg; then
       INJECT_LAST_FAILURE="could not publish the away-supervisor record under $state"
       log "inject failed: $INJECT_LAST_FAILURE"
@@ -1604,7 +1664,9 @@ inject_msg() {  # <message> [state]
   bytes=$(LC_ALL=C; printf '%s' "${#msg}")
   errf=$(mktemp "$state/.subsuper-inject-err.XXXXXX" 2>/dev/null) || errf=
   INJECT_SUBMIT_ATTEMPTED=1
+  INJECT_SENT_MSG=$msg
   verdict=$(fm_backend_send_text_submit "$backend" "$target" "$msg" "$retries" "$sleep_s" "$sleep_s" 2>"${errf:-/dev/null}")
+  INJECT_LAST_VERDICT=$verdict
   if [ -n "$errf" ]; then
     err=$(cat "$errf" 2>/dev/null)
     rm -f "$errf"
