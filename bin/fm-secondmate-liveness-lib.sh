@@ -6,27 +6,28 @@
 # library so classification handling and the guarded relaunch path stay
 # single-sourced here.
 #
-# A secondmate's recorded endpoint is the tmux window, herdr pane, or remote
-# peer it runs in. Probing classifies that endpoint through the owning backend
-# adapter's fm_backend_agent_state (local) or the remote control script's
+# A secondmate's recorded endpoint is the tmux window, herdr pane, T3 thread,
+# or remote peer it runs in. Probing classifies that endpoint through the owning
+# backend adapter's fm_backend_agent_state (local) or the remote control script's
 # state verb (remote), which returns one of:
 #
 #   alive       - a primary-agent runtime is positively running
-#   dead        - the endpoint exists, but no agent is running in it
+#   dead        - no agent remains in a pane, or T3 reports a failed run
 #   missing     - the endpoint itself is gone
 #   ambiguous   - backend inventory could not prove either way
 #   unreadable  - backend state exists but could not be parsed
 #   unverified  - the endpoint is recorded under a session this home does not
 #                 own, so probing is not authorized
 #
-# Only `dead` and `missing` are recovery-authorizing states: they prove the
-# agent is not running, so relaunching cannot produce a duplicate endpoint.
+# Only `dead` and `missing` authorize recovery. The probe and recovery functions
+# below own whether that means resuming the endpoint or proving its close before
+# replacement; docs/t3code-backend.md owns T3's native status meanings.
 # `ambiguous`, `unreadable`, and `unverified` leave the endpoint untouched -
 # relaunching on inconclusive evidence could create a second endpoint beside a
 # live one - and an unreachable remote host is never evidence of death, so a
 # remote route is never replaced by a local endpoint.
 #
-# Relaunch goes through `bin/fm-spawn.sh <id> --secondmate` with
+# Replacement relaunch goes through `bin/fm-spawn.sh <id> --secondmate` with
 # FM_SPAWN_NO_GUARD=1, the same guarded path every recovery uses. That path
 # re-resolves placement from the task's own metadata and registry route, so a
 # remote mate is relaunched on its recorded remote host through bin/fm-on.sh -

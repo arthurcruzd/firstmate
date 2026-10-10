@@ -123,7 +123,7 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
 - **tmux cannot.** `list-windows -a` describes only the tmux server the *current process* addresses (its `TMUX_TMPDIR`/socket), and a task record carries no socket identity for its endpoint.
   A different but running server would answer "not anywhere" about a window it was never able to see, so a server-wide read cannot tell a destroyed window from one on a server this process cannot address.
   There is no read available that closes that gap, so tmux always refuses - for a renamed session, a moved window, a foreign socket, and a dead server alike.
-- **T3 Code refuses `exit` before this proof.** Its adapter reports `missing` only for an archived thread or one the verified server does not have, while an unreachable server reports `unreadable`.
+- **T3 Code refuses `exit` before this proof.** Its [native status table](t3code-backend.md#restart-and-liveness-behavior) owns absence and unreadability, including an archived thread whose active run is still draining.
   T3 Code still cannot reclaim the task because a thread keeps its conversation, so no fresh agent can replace it and `relaunch` refuses before this proof can authorize a replacement.
 
 Every transient or self-contradicting read stays `unreadable` or `ambiguous` and still refuses, so a momentary backend failure can never be mistaken for absence.

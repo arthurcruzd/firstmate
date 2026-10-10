@@ -102,7 +102,7 @@ Every kind receives `GOTMPDIR`, `COMPACT_ADVISER_DISABLE=1`, and `FM_TASK_INBOX`
 A secondmate additionally receives the launch prefix every other backend types (`FM_ROOT_OVERRIDE`, `FM_STATE_OVERRIDE`, `FM_DATA_OVERRIDE`, `FM_PROJECTS_OVERRIDE`, and `FM_CONFIG_OVERRIDE` empty, `FM_PUBLIC_FOLLOWUP_PRIMARY_HOME`, `FM_HOME`, `FM_TRACE_CONTEXT`, `FM_SUPERVISION_MODEL`) plus `FM_SUPERVISOR_BACKEND=t3code` and its own thread id as `FM_SUPERVISOR_TARGET`, so its away daemon resolves its target exactly.
 A `claude` ship or scout worker also receives the task-worker channel statement that a pane launch appends to the system prompt, written as a `CLAUDE.local.md` in its worktree because T3 owns the system prompt; a secondmate does not, as on every backend.
 Without it a Claude worker can refuse the launch brief as prompt injection, which happened live.
-On a T3 server older than `0.0.46-nightly.20261010.2935`, the statement also tells the worker not to call T3's `link_pull_request`, `list_thread_pull_requests`, or `unlink_pull_request` tools, because they crashed a Claude session on a pre-V2 build; all three ran cleanly on that build ([verification record](verification/runtime-backends.md#claude-pull-request-tools)), so a newer server gets no such clause.
+The statement's pull-request-tool workaround follows the [verified version boundary](verification/runtime-backends.md#claude-pull-request-tools); an older or unreadable server keeps the clause, while a server at or past the verified build gets none.
 Firstmate records the PR from the worker's `done: PR <url>` status line either way.
 A `claude` task checks the leased worktree and refuses a tracked, existing, or symlinked `CLAUDE.local.md`, because that file is the backend's channel and teardown removes it.
 
@@ -116,11 +116,13 @@ Exact call payloads are owned by `bin/fm-t3-mcp.mjs` and `bin/backends/t3code.sh
 `fm-peek.sh` renders the newest items of the thread's activity view as `[type/status] text` lines followed by a `t3code: status=<status> run=<active run>` line.
 T3 pages that view oldest first, so the helper starts from the thread's visible item count to read the tail.
 An ordinary metadata-routed `fm-send.sh` text steer becomes a durable steering-inbox record, and its doorbell is a `t3_thread_send` in `auto` mode, which starts an idle thread's next turn or steers the running one.
-T3 derives the message id from the client request id and commits a send before it replies, so the adapter keeps one request id per logical delivery (the thread and text) until its outcome is proven, and a resend after a lost reply lands on the message T3 already committed.
+T3 derives the message id from the client request id and commits a send before it replies, so retries must reuse that id to reach the message T3 already committed.
+For ordinary sends and doorbells, the adapter reuses the id stored in a record keyed by thread and text for up to 60 minutes from creation, ending that delivery earlier on confirmation or a typed send refusal.
+After that window, identical text starts a new delivery, so verify an older unconfirmed send in T3 Code before resending it.
 An accepted delivery's outcome (its request id, `messageId`, `runId`, and `delivery`) is kept for a day as `state/t3code-sends/<request-id>.accepted`, so it can be reconciled against T3's own message and run.
 The submit primitive reports `empty` when T3 accepts the message, so the daemon can clear its delivery buffer; `unconfirmed` when the reply was lost after the request went out, which `fm-send.sh` reports as delivered-unconfirmed (exit 3) with any reply expectation kept armed; and `send-failed` only for a proven refusal.
-After `unconfirmed`, only an unmarked send is safe to resend with identical text; a marked secondmate request is not resent, because a rerun mints a new reply correlation and so a new message.
-A retry of an unconfirmed delivery that fails for any reason other than T3 refusing the send, including an unreachable server, stays `unconfirmed` and keeps the request id.
+After `unconfirmed`, an unmarked send can reuse its request id by resending identical text within that window; a marked secondmate request is not resent, because a rerun mints a new reply correlation and so a new message.
+While the logical delivery still holds its id, a retry that fails for any reason other than T3 refusing the send, including an unreachable server, stays `unconfirmed` and keeps that id.
 The away daemon mints a request id for each T3 digest.
 It freezes an unconfirmed digest and retries its exact text under that id, with no expiry, until T3 accepts or refuses it, while events that arrive meanwhile wait for the next digest.
 Task completion remains a separate worker status event.
@@ -147,10 +149,11 @@ A remote secondmate is unaffected by this backend: it always runs on the remote 
 Cleanup keeps all shared Firstmate safety checks.
 Before the slot returns to the pool, or before a secondmate home is removed, teardown interrupts any active run, archives the thread with `t3_thread_organize`, and requires T3 to read back `archived:true` with no active run, so no live thread can act in a slot another task may lease.
 T3 detaches the provider session as a separate effect after that read-back, so its Claude or Codex process can briefly outlive it: a worker's slot is cleared by teardown's worktree-process reaper, and a secondmate home, pooled or standalone, goes through the same reaper before it is returned or removed, keeping the home and its records when the process scan cannot complete.
+Secondmate retirement requires `lsof` to prove the home is quiet; without it, teardown preserves the home and records for retry.
 If spawn aborts after launching the thread, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive and `treehouse return --force` steps.
 `t3_thread_launch` has no idempotency key, so a lost launch reply or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and never retries.
 When the thread id is known, the helper attempts to archive it and reports its id, but even an accepted archive request leaves the lease held until the archive is verified.
-Confirm the thread is archived in T3 Code before returning the retained slot.
+Before returning a retained slot by hand, prove both the archive with no active run and the end of its provider and worktree-owned processes, as teardown does above.
 The kill is idempotent, so an already archived thread, or one the verified server no longer has, is the end state, and an unreachable or gate-refused server refuses the teardown rather than returning a slot a live thread still points at.
 Archiving keeps the transcript visible in T3 Code; this backend never deletes a thread.
 The `fm-` project of a torn-down secondmate home stays in T3 Code pointing at the removed directory until the operator deletes it there, because deleting a nonempty project takes the archived thread's transcript with it.
@@ -174,7 +177,7 @@ Thread persistence alone does not prove a live agent.
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
 A new turn continues the same driver and transcript; `fm-control.sh relaunch` remains refused.
 Automatic secondmate recovery treats a failed run the same way: the thread is still readable, so recovery resumes it in place with one recovery turn instead of archiving it and launching a second thread, and the relaunch ledger bounds repeats.
-On every backend, a secondmate whose old endpoint cannot be proven closed is left in place with its record, never replaced.
+[`bin/fm-secondmate-liveness-lib.sh`](../bin/fm-secondmate-liveness-lib.sh) owns the shared recovery close-proof barrier.
 Teardown still requires a proven archive before returning the worktree.
 
 ## Push events and polling fallback
@@ -224,7 +227,7 @@ A home that used the earlier HTTP dispatch transport needs the `/mcp` credential
 Keep each task's recorded thread id and use normal steering and teardown after sign-in; [`verification/runtime-backends.md`](verification/runtime-backends.md#adapter-wiring-on-linux) records the pre-V2 thread-read evidence.
 If a task's thread no longer reads back, release the task by hand:
 
-1. Archive the task's thread in T3 Code.
+1. Archive the task's thread in T3 Code and satisfy the [cleanup proof above](#current-lifecycle-and-safety) before releasing its worktree or home.
 2. For a worker, undo the per-worktree environment with `bin/fm-t3code-codex-env.sh cleanup <worktree>`, then remove `CLAUDE.local.md` and `.claude/settings.local.json` from the worktree.
    Skipping this hands the next holder of the slot a hidden `.codex/config.toml` overlay carrying the dead task's environment, and refuses the next T3 Codex spawn there.
    For a secondmate, release its own tasks in this same order, then run `bin/fm-t3code-codex-env.sh cleanup <home>` and remove its `.claude/settings.local.json` before releasing the home.

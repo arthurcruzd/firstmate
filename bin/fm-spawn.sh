@@ -77,9 +77,9 @@
 #   agent-free on a backend with both a recovery-grade agent-state classifier
 #   and replacement-agent support (tmux or herdr), and clears the previous
 #   harness's per-task wiring before arming the new incarnation. T3 Code has
-#   the classifier but refuses relaunch because a thread stays bound to its
-#   original driver. Two verdicts are agent-free: a `dead` endpoint is
-#   ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
+#   the classifier but refuses relaunch because a thread keeps its conversation
+#   across turns and provider changes. Two verdicts are agent-free: a `dead`
+#   endpoint is ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
 #   merely unreachable from here - and it is only available on HERDR, which must
