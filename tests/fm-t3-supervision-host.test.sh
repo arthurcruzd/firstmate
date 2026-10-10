@@ -335,7 +335,7 @@ test_main_only_close_keeps_the_host_parked_and_resurfaces_nothing() {
 # captain outcome while unloaded tells the reopened session to run session
 # start, and the next session start opens a new engine conversation.
 test_unloaded_session_keeps_supervision_off_the_thread() {
-  local home host first second
+  local home host second
   home=$(make_home unloaded)
   use_t3 "$home"
   open_session "$home"
@@ -344,7 +344,6 @@ test_unloaded_session_keeps_supervision_off_the_thread() {
   host=$(host_pid "$home")
   append_status "$home" 'step one'
   wait_until 300 handled_at_least "$home" 1 || fail "unloaded: the first wake was not handled"
-  first=$(sed -n 's/^arg=--session-id$//p; /^arg=--session-id$/{n;s/^arg=//p;}' "$home/engine-call.1" | head -1)
   unload_session "$home"
   append_status "$home" 'step two'
   wait_until 300 handled_at_least "$home" 2 \
@@ -362,10 +361,9 @@ test_unloaded_session_keeps_supervision_off_the_thread() {
   echo handle > "$home/stub-mode"
   append_status "$home" 'step three'
   wait_until 300 handled_at_least "$home" 4 || fail "unloaded: the wake after the reopen was not handled: $(cat "$home/state/.supervision-host.log")"
-  second=$(ls "$home"/engine-call.* | sort -t. -k2 -n | tail -1)
+  second="$home/engine-call.$(find "$home" -maxdepth 1 -name 'engine-call.*' | sed 's/.*\.//' | sort -n | tail -1)"
   assert_grep 'arg=--session-id' "$second" "unloaded: a new main session must start a new engine conversation"
   [ "$(send_count)" -eq 1 ] || fail "unloaded: a routine wake after the reopen reached the thread: $(sends)"
-  [ -n "$first" ] || true
   pass "relay host: an unloaded session keeps supervision and routine wakes off the thread, and the reopen starts a new engine conversation"
   stop_home "$home"
 }

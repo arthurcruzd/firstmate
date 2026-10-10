@@ -105,7 +105,10 @@ fm_t3_relay_sent_record() {
   local dir="$1/$FM_T3_RELAY_SENT_DIRNAME" tmp old
   mkdir -p "$dir" 2>/dev/null || return 1
   tmp=$(mktemp "$dir/.rec.XXXXXX" 2>/dev/null) || return 1
-  cp "$3" "$tmp" 2>/dev/null && mv -f "$tmp" "$dir/$2.msg" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  if ! cp "$3" "$tmp" 2>/dev/null || ! mv -f "$tmp" "$dir/$2.msg" 2>/dev/null; then
+    rm -f "$tmp"
+    return 1
+  fi
   # shellcheck disable=SC2012 # Names are relay request ids: no newlines.
   ls -t "$dir" 2>/dev/null | sed -n "$((FM_T3_RELAY_SENT_KEEP + 1)),\$p" | while IFS= read -r old; do
     rm -f "$dir/$old"
