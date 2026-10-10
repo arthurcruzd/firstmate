@@ -141,6 +141,8 @@ export interface UnreadWakeScope {
    * non-heartbeat wake claims it in the away posture.
    */
   heartbeatSeqs: string[];
+  /** Every row the scan read, claimed or left for main. */
+  queuedRows: number;
   taskByWakeKey: Record<string, string>;
 }
 
@@ -154,6 +156,7 @@ const EMPTY_SCOPE: UnreadWakeScope = {
   needsDecisionKeys: [],
   checkSeqs: [],
   heartbeatSeqs: [],
+  queuedRows: 0,
   taskByWakeKey: {},
 };
 const UNSAFE_SCOPE: UnreadWakeScope = {
@@ -166,6 +169,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
   needsDecisionKeys: [],
   checkSeqs: [],
   heartbeatSeqs: [],
+  queuedRows: 0,
   taskByWakeKey: {},
 };
 
@@ -311,13 +315,14 @@ function nonBlankLines(text: string): string[] {
 
 // bin/fm-classify-lib.sh's _fm_open_decisions_file_ident, which stamps each
 // row of state/.status-presentation-cursor. Any failure throws, and the caller
-// then reads the whole log.
+// then reads the whole log. TZ is pinned exactly as there, so a reader in
+// another timezone renders the same birth time.
 function statusFileIdentity(path: string): string {
   const darwin = process.platform === "darwin";
   const output = execFileSync(
     darwin ? "/usr/bin/stat" : "stat",
     darwin ? ["-f", "%d:%i|%B|%FB", path] : ["-c", "%d:%i|%W|%w", path],
-    { encoding: "utf8", env: { ...process.env, LC_ALL: "C" }, stdio: ["ignore", "pipe", "ignore"] },
+    { encoding: "utf8", env: { ...process.env, LC_ALL: "C", TZ: "UTC0" }, stdio: ["ignore", "pipe", "ignore"] },
   ).trim();
   const [ident, birthEpoch, birth] = output.split("|");
   if (!ident || !birthEpoch) throw new Error("status identity unavailable");
@@ -564,6 +569,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     needsDecisionKeys,
     checkSeqs,
     heartbeatSeqs,
+    queuedRows: rows.length,
     taskByWakeKey: Object.fromEntries(taskByKey),
   };
 }
@@ -600,12 +606,20 @@ export interface BranchOfferVerdict {
 // row: until that row is read, a later signal or stale trigger for the same
 // task stays on main. Other tasks and heartbeat handling remain independent.
 //
+// The watcher's own downtime recovery close, `check: rearm-resurface`, names
+// no row: it asks for the queue to be presented again. It is the one check
+// close judged by that queue instead of by its class: when a clean scan leaves
+// no row for main (an empty queue included), the branch may take it and claims
+// whatever is eligible, or nothing, exactly as the away daemon self-handles it;
+// any row left for main keeps the close on main.
+//
 // The away posture collapses that partition: every actionable row is
 // branch-eligible and the trigger class no longer forces anything to main
 // (scopeForUnreadWake owns the per-row rule).
 export function branchOfferForWake(state: string, message: string, afk: boolean, attendedHost = false): BranchOfferVerdict {
   const heartbeat = /^heartbeat($|:)/.test(message);
-  const isCheckTrigger = /^check:/.test(message);
+  const isRearmResurface = message.trim() === "check: rearm-resurface";
+  const isCheckTrigger = /^check:/.test(message) && !isRearmResurface;
   const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
   const triggerKeys = /^signal:/.test(message)
     ? message
@@ -620,10 +634,13 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
     scope.taskByWakeKey[key] ?? scope.taskByWakeKey[key.replace(/^fm-/, "")] ?? key;
   const needsDecisionTasks = new Set(scope.needsDecisionKeys.map(taskIdentity));
   const isNeedsDecisionTrigger = triggerKeys.some((key) => needsDecisionTasks.has(taskIdentity(key)));
+  const nothingLeftForMain = (judged: UnreadWakeScope): boolean =>
+    !judged.corrupted && judged.eligibleSeqs.length === judged.queuedRows;
+  const attendedScope = afk ? scopeForUnreadWake(state, heartbeat, false) : scope;
   const attendedEligible = !isCheckTrigger && !isNeedsDecisionTrigger && (
-    afk ? scopeForUnreadWake(state, heartbeat, false).eligible : scope.eligible
+    isRearmResurface ? nothingLeftForMain(attendedScope) : attendedScope.eligible
   );
-  const eligible = afk ? scope.eligible : attendedEligible;
+  const eligible = afk ? scope.eligible || (isRearmResurface && nothingLeftForMain(scope)) : attendedEligible;
   return { scope, heartbeat, eligible, awayOnly: Boolean(eligible && !attendedEligible) };
 }
 

@@ -357,6 +357,28 @@ test_weak_identity_still_presents_and_advances() {
   pass "fallback identity still presents and advances status state"
 }
 
+# Main's session and a supervision process can run in different timezones (a
+# T3-hosted primary next to its relay service), and either may present first.
+# BRT3 is a POSIX zone, so no zone database is needed.
+test_a_drain_in_another_timezone_does_not_replay_presented_notes() {
+  local dir state out status
+  dir=$(make_case other-timezone)
+  state="$dir/state"
+  out="$dir/drain.out"
+  status="$state/tz.status"
+  printf 'note: presented in the captain zone\n' > "$status"
+  TZ=BRT3 FM_STATE_OVERRIDE="$state" "$DRAIN" >/dev/null 2>/dev/null \
+    || fail "the drain in the captain's timezone failed"
+  printf 'note: appended later\n' >> "$status"
+  TZ=UTC0 FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "the drain in UTC failed"
+  grep -F 'tz note: appended later' "$out" >/dev/null \
+    || fail "the drain in UTC lost the new note: $(cat "$out")"
+  if grep -F 'presented in the captain zone' "$out" >/dev/null; then
+    fail "a drain in another timezone replayed an already-presented note: $(cat "$out")"
+  fi
+  pass "a drain in another timezone keeps the presented-status position"
+}
+
 test_snapshot_failure_is_visible() {
   local dir state out reader
   dir=$(make_case snapshot-failure); state="$dir/state"; out="$dir/drain.out"; reader="$dir/identity-reader"
@@ -459,6 +481,7 @@ test_unread_output_over_cap_remains_recoverable
 test_snapshot_does_not_ack_a_later_append
 test_retired_task_id_starts_new_status_unread
 test_weak_identity_still_presents_and_advances
+test_a_drain_in_another_timezone_does_not_replay_presented_notes
 test_snapshot_failure_is_visible
 test_open_decisions_fold_is_unchanged
 test_empty_queue_does_not_swallow_later_signal_annotation

@@ -484,11 +484,23 @@ cat > "$ADAPTER_ROOT/bin/fm-procevent-selfann.sh" <<'SH'
 #!/usr/bin/env bash
 # Fixture adapter that declares a durable downstream announcement of its own.
 # FM_HOME/state/selfann-fail makes its application fail so the fallback
-# publication path stays provable.
+# publication path stays provable. FM_HOME/state/selfann-gate-<source-id> holds
+# an application in flight until it is removed, recording the applying runner
+# in selfann-applying-<source-id>-<sequence>; an application whose runner died
+# meanwhile does not acknowledge.
 case "${1-}" in
   self-announcing) exit 0 ;;
   autohandle)
     [ ! -e "$FM_HOME/state/selfann-fail" ] || exit 1
+    if [ -e "$FM_HOME/state/selfann-gate-$2" ]; then
+      runner=$PPID
+      printf '%s\n' "$runner" > "$FM_HOME/state/selfann-applying-$2-$3"
+      for _ in $(seq 1 600); do
+        [ -e "$FM_HOME/state/selfann-gate-$2" ] || break
+        sleep 0.05
+      done
+      kill -0 "$runner" 2>/dev/null || exit 1
+    fi
     printf '%s %s\n' "$2" "$3" >> "$FM_HOME/state/applied"
     "$FM_PROCEVENT_UNDER_TEST" handled "$2" "$3" >/dev/null
     ;;
@@ -567,6 +579,51 @@ assert_contains "$(wake_payloads "$HSELF")" "procevent selfann self-src 2" \
   "a capture the self-announcing adapter could not apply lost its check-wake announcement"
 rm -f "$HSELF/state/selfann-fail"
 pass "a self-announcing adapter applies quietly and still publishes what it could not apply"
+
+# Captures of two self-announcing sources can land together, as remote second
+# mates' replies do when their machine comes back. While one runner is still
+# applying its capture, another source's runner sweeps every pending result
+# after its own, and every supervision cycle reconciles: neither may announce
+# the capture its own runner is applying, or one remote note becomes a second,
+# already-applied check wake. A runner gone mid-application leaves its capture
+# to re-announcement as before.
+HAPPLY="$TMP_ROOT/happly"; new_home "$HAPPLY"
+fm_test_track_procevent_home "$HAPPLY"
+pe_adapter "$HAPPLY" register selfann slow-src -- /bin/echo "slow apply" >/dev/null
+pe_adapter "$HAPPLY" register selfann quick-src -- /bin/echo "quick apply" >/dev/null
+: > "$HAPPLY/state/selfann-gate-slow-src"
+pe_adapter "$HAPPLY" start slow-src > "$TMP_ROOT/slow-start.out" 2>&1 &
+SLOW_START_PID=$!
+wait_for "$HAPPLY/state/selfann-applying-slow-src-1" || fail "the gated application never started"
+out=$(pe_adapter "$HAPPLY" start quick-src 2>&1)
+assert_contains "$out" "autohandled: quick-src" "the second source did not apply its own capture"
+assert_absent "$HAPPLY/state/procevent-inbox/slow-src.1.handled" "the gated application finished before the sweep it must survive"
+assert_not_contains "$(wake_payloads "$HAPPLY")" "procevent selfann slow-src 1" \
+  "another source's sweep announced a capture its own runner was still applying"
+pe_adapter "$HAPPLY" retire quick-src >/dev/null
+out=$(pe_adapter "$HAPPLY" reconcile)
+assert_contains "$out" "published=0" "reconcile announced a capture its own runner was still applying"
+rm -f "$HAPPLY/state/selfann-gate-slow-src"
+wait "$SLOW_START_PID" || fail "the gated runner failed after its application was released"
+assert_contains "$(cat "$TMP_ROOT/slow-start.out")" "autohandled: slow-src" "the released application was not reported as applied"
+assert_present "$HAPPLY/state/procevent-inbox/slow-src.1.handled" "the released application was not acknowledged"
+assert_not_contains "$(wake_payloads "$HAPPLY")" "procevent selfann slow-src" \
+  "a capture applied by its own runner still gained a check wake"
+: > "$HAPPLY/state/selfann-gate-slow-src"
+pe_adapter "$HAPPLY" start slow-src > "$TMP_ROOT/slow-dead.out" 2>&1 &
+SLOW_DEAD_PID=$!
+wait_for "$HAPPLY/state/selfann-applying-slow-src-2" || fail "the second gated application never started"
+kill -KILL "$(cat "$HAPPLY/state/selfann-applying-slow-src-2")" 2>/dev/null \
+  || fail "the applying runner could not be stopped"
+wait "$SLOW_DEAD_PID" 2>/dev/null || true
+rm -f "$HAPPLY/state/selfann-gate-slow-src"
+pe_adapter "$HAPPLY" retire slow-src >/dev/null 2>&1 || true
+assert_absent "$HAPPLY/state/procevent-inbox/slow-src.2.handled" "an application whose runner died was acknowledged"
+out=$(pe_adapter "$HAPPLY" reconcile)
+assert_contains "$out" "published=1" "a capture whose applying runner died was not re-announced"
+assert_contains "$(wake_payloads "$HAPPLY")" "procevent selfann slow-src 2" \
+  "a capture whose applying runner died lost its check-wake announcement"
+pass "a capture its own runner is applying is announced by no other publication, and re-announced once that runner is gone"
 
 HTERM="$TMP_ROOT/hterm"; new_home "$HTERM"
 fm_test_track_procevent_home "$HTERM"

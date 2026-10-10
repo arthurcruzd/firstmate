@@ -414,6 +414,10 @@ test_dispatch_entry_scopes_rows_and_renders_the_away_tail() {
   out=$(printf 'signal: %s\n' "$state/demo.status" | FM_HOME="$home" node "$DISPATCH" offer)
   assert_contains "$out" "eligible=1" "an attended signal trigger with a claimable row must be the branch's"
   assert_contains "$out" "rows=1" "the offer must carry the scope it judged"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "an attended resurface over a row left for main must stay main's"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer --afk)
+  assert_contains "$out" "eligible=1" "an away resurface must be the branch's"
 
   printf '[captain] keep it small\n[main] Will do.\n' > "$home/mirror"
   out=$(printf 'signal: demo.status\n' | FM_HOME="$home" node "$DISPATCH" wake-prompt --report 'the bin/fm-branch-report.sh command' --mirror-file "$home/mirror")
@@ -436,6 +440,47 @@ test_dispatch_entry_scopes_rows_and_renders_the_away_tail() {
   assert_contains "$out" "POSTURE: AWAY." "an away wake prompt must carry the posture tail"
   assert_contains "$out" "    merge nothing" "the away tail must carry the record's read-back verbatim"
   pass "dispatch entry: the host reads branch eligibility, the offer rule, and the wake prompt from the Pi branch's own owner"
+}
+
+# The watcher's downtime resurface names no row: it asks for the queue to be
+# presented again, so the offer judges it by that queue. Nothing left for main
+# (an empty queue, or only rows the branch may claim) keeps it off main, as the
+# away daemon self-handles it; any row main owns keeps it main's.
+test_dispatch_offer_judges_the_resurface_by_its_queue() {
+  local home state out
+  home="$TMP_ROOT/dispatch-resurface"
+  state="$home/state"
+  mkdir -p "$state"
+  printf 'project=demo\nwindow=fm-demo\n' > "$state/demo.meta"
+  : > "$state/.wake-queue"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=1" "an attended resurface over an empty queue must stay off main"
+  assert_contains "$out" "rows=" "fixture: the empty queue printed no claim line"
+  assert_not_contains "$out" "rows=1" "an empty queue must claim nothing"
+  out=$(printf 'check: merge landed: fixture\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "any other check close over an empty queue must stay main's"
+
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=1" "a resurface over only claimable rows must be the branch's"
+  assert_contains "$out" "rows=1" "the resurface must claim the rows it re-presents"
+  assert_contains "$out" "unscoped=0" "a resurface claiming task rows must stay scoped to their tasks"
+
+  : > "$state/.wake-queue"
+  append_wake "$state" signal demo.status "needs-decision:signal: $state/demo.status"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface over a decision row must stay main's"
+
+  : > "$state/.wake-queue"
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  append_wake "$state" heartbeat heartbeat "heartbeat"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface over a heartbeat row left for main must stay main's"
+
+  rm -f "$state/.wake-queue"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface over an unreadable queue must stay main's"
+  pass "dispatch entry: the watcher's downtime resurface is judged by the queue it re-presents"
 }
 
 # --- host loop ----------------------------------------------------------------
@@ -1798,10 +1843,8 @@ SH
 }
 
 # Park again after a host was stopped mid-park: the new cycle's first close is
-# the watcher's downtime resurface, which main drains before the next park.
-# That close can end the park before its cycle is ever seen live, so this
-# waits for the exit itself.
-# The resurface pass-through leaves its successor running. Stop that watcher
+# the watcher's downtime resurface (park_after_stop below).
+# A resurface pass-through leaves its successor running. Stop that watcher
 # and acknowledge the downtime its exit records, so the next park starts a
 # watcher it owns. Attaching instead would not observe the exit until the
 # beacon went stale, and this fixture's turn budget would already be gone.
@@ -1827,14 +1870,25 @@ quiet_pass_through_successor() {  # <home>
     || fail "fixture: could not acknowledge the successor downtime"
 }
 
+resurface_noops() {  # <home>
+  local n
+  n=$(grep -cE '	no-op	nothing for the branch to claim	check: rearm-resurface$' "$1/state/.supervision-host.log" 2>/dev/null)
+  printf '%s\n' "${n:-0}"
+}
+resurface_absorbed() { [ "$(resurface_noops "$1")" -gt "$2" ] && watcher_live "$1"; }
+
 park_after_stop() {  # <home>
+  local before
+  # Main drains what the stopped host left queued, so the resurface finds
+  # nothing for main and the host keeps it.
+  main_drain_and_ack "$1"
+  before=$(resurface_noops "$1")
   rm -f "$1/host.rc"
   : > "$1/park.go"
-  wait_until 150 host_exited "$1" || fail "the watcher's downtime resurface did not reach main: $(cat "$1/host.out")"
-  assert_re '^check: rearm-resurface' "$1/host.out" "fixture: the first close after the watcher stopped was not its resurface"
-  main_drain_and_ack "$1"
-  quiet_pass_through_successor "$1"
-  park_again "$1"
+  wait_until 150 resurface_absorbed "$1" "$before" \
+    || fail "the watcher's downtime resurface over an empty queue was not kept off main: $(cat "$1/host.out"; tail -n 5 "$1/state/.supervision-host.log" 2>/dev/null)"
+  host_exited "$1" && fail "an idle downtime resurface reached main: $(cat "$1/host.out")"
+  return 0
 }
 
 # Dialog counts as delivered only once the turn that carried it is accepted
@@ -2961,6 +3015,7 @@ test_park_exit_probe_uses_half_second_child_sleeps
 test_report_surface_enforces_actor_turn_and_scope
 test_report_after_the_return_is_queued_for_main
 test_dispatch_entry_scopes_rows_and_renders_the_away_tail
+test_dispatch_offer_judges_the_resurface_by_its_queue
 test_branch_outcomes_only_on_a_host_home_off_pi
 test_branch_outcomes_put_captain_first_and_collapse_routine_overflow
 test_branch_outcomes_collapse_repeated_captain_outcomes_per_task

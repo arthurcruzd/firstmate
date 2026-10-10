@@ -176,7 +176,11 @@
 # adapter keeps the strict publish-before-apply order, because without a
 # declared downstream channel an applied-and-acknowledged result would otherwise
 # go silent. An unhandled result stays eligible for bounded re-announcement on
-# every reconcile in both modes, exactly as before.
+# every reconcile in both modes, exactly as before. While its runner is still
+# applying a capture, that runner's private record names it, and every other
+# publication - another source's sweep and reconcile alike - leaves the
+# capture to it; a record naming a process that is gone is not honored, so a
+# runner that dies mid-application leaves its capture to re-announcement.
 #
 # Polling again is adapter-owned through the same kind of seam. An adapter that
 # answers exit 0 to `bin/fm-procevent-<adapter>.sh relisten` keeps this runner
@@ -406,6 +410,33 @@ adapter_self_announcing() {  # <adapter>
   script=$(adapter_script "$1")
   [ -f "$script" ] && [ ! -L "$script" ] || return 1
   "$script" self-announcing >/dev/null 2>&1
+}
+
+# The record a self-announcing runner keeps while it applies its own capture
+# (header): its pid and process identity, written before the capture turns
+# durable and removed once application ends.
+applying_file() { printf '%s/.%s.applying\n' "$REG" "$1"; }
+
+mark_source_applying() {  # <source-id>
+  local identity tmp
+  identity=$(fm_pid_identity "$$" 2>/dev/null) || return 1
+  tmp=$(umask 077; mktemp "$REG/.applying.XXXXXX") || return 1
+  if printf '%s\t%s\n' "$$" "$identity" > "$tmp" && mv -f -- "$tmp" "$(applying_file "$1")"; then
+    return 0
+  fi
+  rm -f -- "$tmp"
+  return 1
+}
+
+# True only while a live runner other than this process is applying a capture
+# of the source, so a publication leaves that capture to it.
+source_applied_elsewhere() {  # <source-id>
+  local record pid identity
+  record=$(applying_file "$1")
+  [ -f "$record" ] && [ ! -L "$record" ] || return 1
+  IFS=$'\t' read -r pid identity < "$record" || return 1
+  [ -n "$pid" ] && [ "$pid" != "$$" ] || return 1
+  fm_procevent_pid_state "$pid" "$identity"
 }
 
 source_file()  { printf '%s/%s.source\n' "$REG" "$1"; }
@@ -818,6 +849,10 @@ publish_result() {  # <result-file>
   line=$(fm_procevent_event_line "$adapter" "$id" "$seq") || return 1
   owner_task=$(fm_procevent_result_owner_task "$result" 2>/dev/null || true)
   fm_procevent_source_lock_acquire "$id" || return 1
+  if source_applied_elsewhere "$id"; then
+    fm_procevent_source_lock_release "$id"
+    return 1
+  fi
   if ! fm_procevent_is_handled "$STATE" "$id" "$seq"; then
     if [ -n "$owner_task" ]; then
       if adapter_result_is_terminal "$adapter" "$result"; then
@@ -1351,6 +1386,13 @@ EOF
     durable="./$durable"
   fi
 
+  # A self-announcing capture is in flight from before it turns durable until
+  # its application ends (header), so no other publication announces it first.
+  if [ "$extension_owner" -eq 0 ] && adapter_self_announcing "$adapter"; then
+    self_announcing=1
+    mark_source_applying "$id" || true
+  fi
+
   if [ "$extension_owner" -eq 1 ]; then
     :
   else
@@ -1381,9 +1423,7 @@ EOF
   # downstream channel, so publication waits until after application and covers
   # only what remains unhandled; every other adapter keeps the strict
   # publish-before-apply order (announcement-ownership note in the header).
-  if [ "$extension_owner" -eq 0 ] && adapter_self_announcing "$adapter"; then
-    self_announcing=1
-  else
+  if [ "$self_announcing" -eq 0 ]; then
     if publish_result "$durable"; then
       published_capture=1
     elif fm_procevent_is_handled "$STATE" "$id" "$(fm_procevent_result_sequence "$durable")"; then
@@ -1399,6 +1439,7 @@ EOF
     else
       printf 'not-autohandled: %s (left for the handler; still unacknowledged)\n' "$id" >&2
     fi
+    rm -f -- "$(applying_file "$id")"
     # publish_result's own handled guard keeps a fully autohandled capture
     # quiet here; anything the adapter left unhandled is announced exactly as
     # before, and a crash above leaves it to reconcile's re-announcement.

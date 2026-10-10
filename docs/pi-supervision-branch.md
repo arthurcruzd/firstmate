@@ -98,6 +98,7 @@ What is never offered, or falls back to main:
 
 - While attended, a check-kind triggering close is never offered, even when other rows are eligible.
   Check-kind closes are merge-confirmation polls, Relay mentions, credential/auth failures, and every other legitimately main-only class.
+  The one exception is the watcher's own downtime resurface, `check: rearm-resurface`, which names no row and only asks for the queue to be presented again: it is offered when a clean scan leaves no row for main, an empty queue included, and the branch claims only the rows it may take.
 - When a triggering close has no acceptor (extension absent, branch broken), it keeps today's wake-to-main path.
 - Watcher-failure alarms always go to main, because only main can repair the watcher cycle.
 
