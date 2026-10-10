@@ -23,7 +23,7 @@ Run the server that hosts Firstmate workers with T3's product telemetry off, so 
 T3CODE_TELEMETRY_ENABLED=false t3 serve --host 127.0.0.1 --port <port> --no-browser
 ```
 
-Every spawn and control action reports the server's telemetry state and warns unless the listening loopback server's own process proves it off.
+Every spawn and control action checks the server's telemetry state and warns unless the listening loopback server's own process proves it off.
 
 Select T3 Code with local `config/backend` containing `t3code`, `FM_BACKEND=t3code` for one launch, or `--backend t3code` for one task.
 T3 Code is explicit-only for task dispatch; a configured server does not select this backend automatically.
@@ -136,7 +136,9 @@ A remote secondmate is unaffected by this backend: it always runs on the remote 
 Cleanup keeps all shared Firstmate safety checks.
 Before the slot returns to the pool, or before a secondmate home is removed, teardown interrupts any active run, archives the thread with `t3_thread_organize`, and requires T3 to read back `archived:true` with no active run, so no live thread can act in a slot another task may lease.
 If spawn aborts after launching the thread, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive and `treehouse return --force` steps.
-`t3_thread_launch` has no idempotency key, so a launch whose response was lost leaves ownership uncertain: spawn keeps the lease, never retries, and names the slot to check in T3 Code before returning it.
+`t3_thread_launch` has no idempotency key, so a lost launch reply or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and never retries.
+When the thread id is known, the helper attempts to archive it and reports its id, but even an accepted archive request leaves the lease held until the archive is verified.
+Confirm the thread is archived in T3 Code before returning the retained slot.
 The kill is idempotent, so an already archived thread, or one the verified server no longer has, is the end state, and an unreachable or gate-refused server refuses the teardown rather than returning a slot a live thread still points at.
 Archiving keeps the transcript visible in T3 Code; this backend never deletes a thread.
 The `fm-` project of a torn-down secondmate home stays in T3 Code pointing at the removed directory until the operator deletes it there, because deleting a nonempty project takes the archived thread's transcript with it.
@@ -195,7 +197,8 @@ In-flight tasks keep the backend recorded in their own `state/<id>.meta`, so the
 ## Moving a task from the pre-V2 transport
 
 A home that used the earlier HTTP dispatch transport needs the `/mcp` credential first: run the [sign-in](#sign-in), which replaces the old bearer in `config/t3code-token`.
-Whether T3 V2 still serves a thread created through that transport is unverified, so if a task's thread no longer reads back, release the task by hand:
+Keep each task's recorded thread id and use normal steering and teardown after sign-in; [`verification/runtime-backends.md`](verification/runtime-backends.md#adapter-wiring-on-linux) records the pre-V2 thread-read evidence.
+If a task's thread no longer reads back, release the task by hand:
 
 1. Archive the task's thread in T3 Code.
 2. For a worker, undo the per-worktree environment with `bin/fm-t3code-codex-env.sh cleanup <worktree>`, then remove `CLAUDE.local.md` and `.claude/settings.local.json` from the worktree.

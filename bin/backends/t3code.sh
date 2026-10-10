@@ -152,8 +152,9 @@ process.stdout.write(JSON.stringify(out));
 # strategy; an empty one launches at the project's own root, which is a
 # secondmate's home. The helper reads the binding back and archives a thread
 # T3 bound anywhere else. Exit 1 means the outcome is uncertain: a lost
-# response can leave a thread behind whose id never came back, because
-# t3_thread_launch has no idempotency key.
+# reply can leave a thread behind whose id never came back, and a failed
+# binding read-back leaves the binding unproven even after requesting archive.
+# In either case spawn keeps the lease; the helper owns those failure verdicts.
 fm_backend_t3code_thread_create() {  # <project-id> <title> <branch> <worktree> <model-selection-json> -> thread id
   local project_id=$1 title=$2 branch=$3 worktree=$4 selection=$5 out rc
   local -a args=(launch --project "$project_id" --title "$title" --model-selection "$selection")

@@ -1239,7 +1239,8 @@ fi
 # be readable before the first destructive step. --force does not override
 # this. A forced descendant is proved in validate_firstmate_home_children_removal.
 teardown_require_backend_prerequisites "$BACKEND" "$ID" || exit 1
-# The V1 write path must exist before any local teardown mutation, even under --force.
+# The T3 capability and identity gate must pass before local teardown mutation,
+# even under --force.
 if [ "$BACKEND" = t3code ]; then
   fm_backend_runtime_check t3code || exit 1
 fi

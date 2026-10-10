@@ -2235,14 +2235,12 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
 # window's capture is the thread's messages plus a session line, so it stays
 # byte-identical through a long tool call where a pane would keep repainting;
 # a still-running session is therefore read from the server itself before the
-# quiet transcript is reported. Only `running` defers, which the adapter's
-# shared rule also gives a live session with `working` background work:
-# `starting`, a settled session, idle `monitoring` background work, a stopped or
-# failed session whatever job outlives it, and an unreadable server all keep
-# the unchanged escalation, so a leftover status can never excuse a dead thread.
+# quiet transcript is reported. Only the adapter's `running` word defers,
+# covering V2's running turn and waiting post-turn drain. Starting, settled,
+# failed, missing, and unreadable threads keep the unchanged escalation.
 # The deferral is itself bounded by BUSY_TURN_MAX_SECS, measured from the latest
-# turn boundary T3 records: a turn that has run, or background work that has
-# outlived its turn, for that long without a newer boundary escalates like any
+# run boundary T3 records: a turn or post-turn drain that has lasted that long
+# without a newer boundary escalates like any
 # busy pane past the bound, and a missing turn timestamp never defers.
 # Returns 0 when it has handled the window, 1 to escalate on the unchanged path.
 wedge_defer_t3code_running() {  # <window> <since-file> <triage-label> <idle-age>
@@ -3118,7 +3116,7 @@ heartbeat_scan_finds_actionable() {
 }
 
 # event_wait_or_sleep: the terminal wait of each supervision cycle. For a home
-# with push-capable windows (herdr, rex, t3code), it replaces the blind `sleep POLL` with a
+# with push-capable windows (herdr, rex), it replaces the blind `sleep POLL` with a
 # bounded wait on the backend's native transition stream, so a crew going
 # `blocked` wakes the supervisor sub-second instead of after the stale-pane
 # wedge timer. For every other home - no push-capable window, backend not
@@ -4161,7 +4159,7 @@ EOF
     fi
   fi
 
-  # Terminal wait: a bounded native-event wait for push-capable homes (herdr, rex, t3code),
+  # Terminal wait: a bounded native-event wait for push-capable homes (herdr, rex),
   # else the blind poll sleep. See event_wait_or_sleep.
   event_wait_or_sleep
 done
