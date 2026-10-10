@@ -67,8 +67,8 @@
 # contract: 0 = submit confirmed; 3 = the text reached the live endpoint and
 # submission was attempted, but the read-back stayed unconfirmed, or an API
 # backend lost its reply after the request went out (verify the endpoint
-# before any resend, and never submit blindly; a T3 Code resend of the
-# identical text reuses its request id and is idempotent; a marked request's
+# before any resend, and never submit blindly; docs/t3code-backend.md owns
+# T3 Code's request-id retention and retry policy; a marked request's
 # pending-reply expectation stays armed because this outcome is not a proven
 # failure); any other nonzero = the send failed and nothing may be assumed
 # delivered. Submission dispatches through the target's recorded backend; the
@@ -1181,9 +1181,9 @@ else
     # An API backend lost the reply after the request went out (T3 Code
     # commits a send before it answers). Like pending, delivery is unproven
     # rather than refused, so the pending-reply expectation stays armed; the
-    # adapter keeps the logical delivery's request id, so re-running this
-    # exact send is idempotent rather than a second message. A marked
-    # secondmate request is the exception: a plain rerun mints a new
+    # adapter retains the logical delivery's request id under the retry policy
+    # in docs/t3code-backend.md. A marked secondmate request is the exception:
+    # a plain rerun mints a new
     # correlation, so its text and request id differ, and the armed attempt
     # refuses a resend of this one.
     if [ -n "$PENDING_REPLY_CORR" ]; then

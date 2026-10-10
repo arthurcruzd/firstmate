@@ -51,9 +51,8 @@ fm_backend_t3code_tool_check() {
 
 # fm_backend_t3code_mcp <verb> [args...] - one helper call against this home's
 # credential. It prints one JSON object (capture prints text) and exits as its
-# header says: 0 ok, 1 transport or unexpected failure, 2 invalid use, 3 a
-# typed T3 failure, 4 a local refusal (credential or capability gate), and
-# thread-for-root's 5 and 6. Every failure prints one stderr line.
+# header says, including send's delivery-unconfirmed status 7.
+# Every failure prints one stderr line.
 fm_backend_t3code_mcp() {
   command -v node >/dev/null 2>&1 || { echo "error: backend=t3code selected but 'node' is not installed" >&2; return 1; }
   node "$FM_BACKEND_T3CODE_HELPER" "$@" --token-file "$(fm_backend_t3code_token_file)"
@@ -324,8 +323,8 @@ fm_backend_t3code_capture() {  # <thread-id> <lines>
 }
 
 # empty: T3 accepted the message; unconfirmed: the message may have landed
-# (a lost reply, or a failed retry of one) and only a resend of the same text
-# (which reuses its request id) is safe; send-failed: proven not delivered.
+# after a lost reply or failed retry; send-failed: proven not delivered.
+# docs/t3code-backend.md owns request-id retention and safe retry rules.
 fm_backend_t3code_send_text_submit() {  # <thread-id> <text> <retries> <enter-sleep> <settle>
   local rc=0
   fm_backend_t3code_turn_start "$1" "$2" || rc=$?
