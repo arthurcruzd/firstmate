@@ -47,8 +47,12 @@
 # known harness token; otherwise detection remains real (tests/lib.sh arms
 # the marker for isolated suites).
 
+# The T3 wake relay's predicates, for the main-session key below. A copy of
+# this file without its sibling treats no home as relay-owned.
+_fm_engine_t3_lib="$(dirname "${BASH_SOURCE[0]}")/fm-t3-host-lib.sh"
 # shellcheck source=bin/fm-t3-host-lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/fm-t3-host-lib.sh"
+[ ! -f "$_fm_engine_t3_lib" ] || . "$_fm_engine_t3_lib"
+unset _fm_engine_t3_lib
 
 FM_SUPERVISION_ENGINES_VERIFIED='claude'
 
@@ -209,7 +213,8 @@ fm_supervision_host_main_key() {
   if ! identity=$(fm_pid_identity "$pid" 2>/dev/null) || [ -z "$identity" ]; then
     case "$pid" in ''|*[!0-9]*) return 1 ;; esac
     [ -f "$1/.t3-relay" ] && [ -f "$1/.supervision-host-t3-key" ] || return 1
-    ! kill -0 "$pid" 2>/dev/null && fm_t3_relay_owns_home "$1" || return 1
+    declare -F fm_t3_relay_owns_home >/dev/null && ! kill -0 "$pid" 2>/dev/null \
+      && fm_t3_relay_owns_home "$1" || return 1
     IFS="$(printf '\t')" read -r recorded key < "$1/.supervision-host-t3-key" 2>/dev/null || return 1
     [ "$recorded" = "$pid" ] && [ -n "$key" ] || return 1
     printf '%s\n' "$key"
@@ -218,7 +223,7 @@ fm_supervision_host_main_key() {
   key="$pid:$(printf '%s\n' "$identity" | cksum | awk '{ print $1 }'):$(sed -n '1p' "$1/.lock-session" 2>/dev/null | cksum | awk '{ print $1 }')"
   printf '%s\n' "$key"
   if [ -f "$1/.t3-relay" ] && [ "$(cat "$1/.supervision-host-t3-key" 2>/dev/null)" != "$pid"$'\t'"$key" ] \
-    && fm_t3_relay_owns_home "$1"; then
+    && declare -F fm_t3_relay_owns_home >/dev/null && fm_t3_relay_owns_home "$1"; then
     recorded=$(mktemp "$1/.supervision-host-t3-key.XXXXXX" 2>/dev/null) || return 0
     printf '%s\t%s\n' "$pid" "$key" > "$recorded" 2>/dev/null \
       && mv -f "$recorded" "$1/.supervision-host-t3-key" 2>/dev/null

@@ -170,7 +170,7 @@ append_entry() {  # <captain|main> <text> [<id>]
       '<task-notification>'*) return 0 ;;
     esac
     ! operational "$text" || return 0
-    ! fm_t3_relay_sent_message "$STATE" "$text" || return 0
+    ! { declare -F fm_t3_relay_sent_message >/dev/null && fm_t3_relay_sent_message "$STATE" "$text"; } || return 0
   fi
   key=$(fm_supervision_host_main_key "$STATE") || return 1
   fm_lock_acquire_wait "$LOCK" || return 1
