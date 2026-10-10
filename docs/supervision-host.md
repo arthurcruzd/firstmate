@@ -67,6 +67,7 @@ The host's header owns the output contract they read.
 | Primary | Arm owner | A handed-back wake reaches main as |
 |---|---|---|
 | Claude | the Stop auto-arm, `bin/fm-claude-stop-autoarm.sh`, inside its single-flight generation | the hook's exit-2 rewake (`Stop hook feedback`) |
+| Claude running as a T3 Code thread | the T3 wake relay, `bin/fm-t3-host.sh relay`, a user service outside the session | an ordinary thread message; see [The T3 wake relay](#the-t3-wake-relay) |
 | Cursor | the `stop` hook park, `bin/fm-turnend-guard-cursor.sh` | the park's `watcher` follow-up |
 | OpenCode | the TUI plugin, `.opencode/plugins/fm-primary-watch-arm.js`, which restarts its own successor after each close | a `watcher` prompt through `promptAsync` |
 | omp | the watch extension, `.omp/extensions/fm-primary-omp-watch.ts`, which restarts its own successor after each close | the extension's `watcher` follow-up |
@@ -80,6 +81,19 @@ The host pins dispatched work to the primary's crew harness rather than the engi
 Grok's arm command is fixed when the session-start block renders.
 So adding or removing the file on a Grok home takes effect at the next session start.
 The other owners read the file at every arm.
+
+### The T3 wake relay
+
+T3 unloads an idle Claude session, so a primary that runs as a T3 thread has its watcher owned by the relay ([t3code-backend.md](t3code-backend.md#firstmate-itself-in-t3)), which runs the host and its engine inside its own service.
+The host's header owns its relay mode; three things differ from the other owners:
+
+- Ownership is the relay's record, not the session lock, which stays main's.
+- There is no [park boundary](#the-park-boundary), because no hook registration bounds the relay's wait.
+- A close main must receive, a main-only pass-through or a captain outcome, does not end the park: the host puts it in the relay's outbox (`bin/fm-t3-host-lib.sh`) and keeps supervising on its successor cycle, and the relay sends each entry to the thread as one ordinary message.
+  So a pass-through leaves no successor for a later [take-over](#attended), and main's acknowledgement of the close resurfaces nothing.
+
+While T3 has the session unloaded, its lock holder is gone but no other session started, so the main-session key the host last saw stays the session's (`fm_supervision_host_main_key`), and the engine keeps its conversation and takes routine wakes without reopening the session.
+The relay records every message it sends, so the dialog mirror never takes one for the captain's words.
 
 ### The report surface
 
@@ -410,6 +424,7 @@ Each arm owner's own suite covers its host mode against a stub host.
 |---|---|
 | `tests/fm-supervision-host.test.sh` | Drives the real host, auto-arm, grant, drain, report, and lease scripts against a stub engine, in both postures, including the shared offer rule and the drain's `BRANCH OUTCOMES` section. |
 | `tests/fm-claude-stop-autoarm.test.sh` | The Claude arm owner's host mode against a stub host. |
+| `tests/fm-t3-supervision-host.test.sh` | The T3 wake relay running the real host against a fake T3 server and a stub engine: routine wakes off the thread, one ordinary message per captain outcome, a parked host across main-only closes, an unloaded session, relay ownership, and the outbox across a relay restart. |
 | `tests/fm-cursor-primary.test.sh` | The Cursor arm owner's host mode against a stub host. |
 | `tests/fm-pi-watch-extension.test.sh` | The OpenCode plugin's host mode against a stub host. |
 | `tests/fm-omp-harness.test.sh` | The omp arm owner's host mode against a stub host. |

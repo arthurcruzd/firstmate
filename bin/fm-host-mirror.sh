@@ -21,7 +21,9 @@
 # with the wrapper a harness puts around a turn it started itself: Claude
 # submits its Stop-hook rewake inside <task-notification>, with no other field
 # to tell it from a typed prompt (tests/fm-host-mirror-live-e2e.test.sh proves
-# it).
+# it). A prompt that is exactly a message the T3 wake relay sent to a primary
+# running as a T3 thread is dropped as well (bin/fm-t3-host-lib.sh, the
+# relay's sent record), because T3 submits it as a user prompt.
 # Every writer is a silent no-op unless this home runs the supervision host
 # for the writer's primary (fm_supervision_host_enabled, checked before
 # anything else runs: by default on Claude, never with an `off` file), the
@@ -168,6 +170,7 @@ append_entry() {  # <captain|main> <text> [<id>]
       '<task-notification>'*) return 0 ;;
     esac
     ! operational "$text" || return 0
+    ! fm_t3_relay_sent_message "$STATE" "$text" || return 0
   fi
   key=$(fm_supervision_host_main_key "$STATE") || return 1
   fm_lock_acquire_wait "$LOCK" || return 1

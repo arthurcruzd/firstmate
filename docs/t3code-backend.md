@@ -202,8 +202,15 @@ The home therefore runs the wake relay, `bin/fm-t3-host.sh relay`, as a user ser
 A [T3-hosted remote second mate](remote-secondmates.md#t3-code-endpoint) runs the same relay in its own home on its own host.
 The relay owns the watcher outside the session and sends each actionable wake to the primary's thread as an ordinary message, which also reopens an unloaded session.
 While a live relay owns the home the Claude Stop auto-arm stands aside, the turn-end guard accepts the relay's fresh beacon, and session start renders [`supervision-protocols/t3-relay.md`](supervision-protocols/t3-relay.md).
-In away or quiet mode the relay delivers no wakes: it runs the [away daemon](#away-mode) itself, which owns the watcher, handles routine wakes without a turn, and sends the thread only what needs Firstmate.
-So `/quiet` on a T3-hosted primary keeps routine fleet traffic out of the captain's conversation and survives T3 unloading the idle session.
+
+On a home that runs the [supervision host](supervision-host.md) (by default for this Claude primary; `config/supervision-host-off` opts out), the relay runs the host as its watcher cycle, so the host's headless engine runs inside the relay's service, never inside the session T3 can unload.
+The engine takes the wakes the supervision branch may take and keeps routine outcomes off the thread, also while T3 has the session unloaded; check wakes, decision wakes, and whatever it cannot take still arrive as ordinary wake messages.
+A captain outcome it records arrives as one ordinary message that lists each outcome's summary and sends main to its drain.
+[`supervision-host.md`](supervision-host.md#arm-owners) owns how the relay runs the host.
+So the attended host is quiet mode on a T3-hosted primary: `/quiet` enters nothing there, and `/afk` writes only the away record, because the host is also the away session.
+
+Where the home does not run the host, or the attended host lacks one of its parts, away or quiet mode works as before: the relay delivers no wakes and runs the [away daemon](#away-mode) itself, which owns the watcher, handles routine wakes without a turn, and sends the thread only what needs Firstmate.
+Either way routine fleet traffic stays out of the captain's conversation and survives T3 unloading the idle session.
 A T3 server restart ends the primary's session and cancels any running worker turn; the relay's next wake reopens the session, whose session start runs again, and a cancelled worker is recovered with one steer.
 
 Treehouse keys its pools by repository identity, so two homes on one machine that clone the same remote share one pool by default, and T3 binds a thread only to a linked worktree of the clone it registered.
@@ -271,12 +278,12 @@ Whether T3 V2 still serves a thread created through that transport is unverified
 ## Regression entry points
 
 ```sh
-bin/fm-test-run.sh tests/fm-t3-mcp.test.sh tests/fm-backend-t3code.test.sh tests/fm-t3-host.test.sh
+bin/fm-test-run.sh tests/fm-t3-mcp.test.sh tests/fm-backend-t3code.test.sh tests/fm-t3-host.test.sh tests/fm-t3-supervision-host.test.sh
 bin/fm-test-run.sh tests/fm-backend.test.sh tests/fm-daemon.test.sh tests/fm-control.test.sh
 FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
 ```
 
-The first three run against a fake T3 `/mcp` server ([`tests/t3-fake-server.mjs`](../tests/t3-fake-server.mjs)) and a fake Treehouse; `tests/fm-t3-host.test.sh` also covers the relay hosting the away daemon.
+The first four run against a fake T3 `/mcp` server ([`tests/t3-fake-server.mjs`](../tests/t3-fake-server.mjs)) and a fake Treehouse; `tests/fm-t3-host.test.sh` also covers the relay hosting the away daemon, and `tests/fm-t3-supervision-host.test.sh` the relay running the supervision host.
 The live guard spends no model tokens and changes nothing on the server: it checks the gate, the project catalog, and a typed missing-thread read against the server the configured credential names, and skips cleanly without one.
 Set `FM_T3CODE_LIVE_E2E=0` to disable it or `FM_T3CODE_LIVE_E2E=1` to require it; the shared `FM_LIVE` override also applies.
 [`verification/runtime-backends.md`](verification/runtime-backends.md#t3-code) records the dated live results.

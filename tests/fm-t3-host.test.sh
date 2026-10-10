@@ -3,7 +3,9 @@
 # relay-ownership predicate the Stop auto-arm, turn-end guard, and protocol
 # renderer stand aside for, the protocol block a relay-owned home renders,
 # launch/adopt of a primary thread against tests/t3-fake-server.mjs, and the
-# relay hosting the away daemon in away or quiet mode.
+# relay hosting the away daemon in away or quiet mode, on a home that opted out
+# of the supervision host (tests/fm-t3-supervision-host.test.sh covers the
+# relay running it).
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -156,7 +158,9 @@ starts_at_least() {  # <log> <n>
 # flag clears or the relay itself is stopped.
 test_relay_hosts_away_daemon() {
   local home="$TMP_ROOT/hosted" entry log relay lockholder pid
-  mkdir -p "$home/state"
+  mkdir -p "$home/state" "$home/config"
+  # The plain relay: tests/fm-t3-supervision-host.test.sh covers the host.
+  : > "$home/config/supervision-host-off"
   log="$home/daemon.log"
   entry="$TMP_ROOT/fake-daemon.sh"
   cat > "$entry" <<'SH'
@@ -217,6 +221,7 @@ SH
 test_relay_hands_open_watcher_cycle_to_daemon() {
   local home="$TMP_ROOT/handoff" arm entry log relay sends
   mkdir -p "$home/state" "$home/config"
+  : > "$home/config/supervision-host-off"
   log="$home/events.log"
   [ -n "$T3_FAKE_PID" ] || t3_fake_start "$TMP_ROOT/server" T3CODE_TELEMETRY_ENABLED=false
   t3_fake_case "$TMP_ROOT/case-handoff"

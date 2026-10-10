@@ -37,13 +37,27 @@
 #     clears. A daemon another owner already runs is left alone. Entering the
 #     mode while a watcher cycle is open ends that cycle at once and delivers
 #     nothing, so the daemon drains its wake from the durable queue.
-#     Otherwise, while the home needs supervision, it runs bin/fm-watch-arm.sh in the foreground,
-#     and on an actionable close (signal:, stale:, check:, heartbeat) sends the
-#     reason lines to the recorded thread under an idempotent request id
-#     (telling a session T3 reopened without its SessionStart hooks, found by a
-#     dead session-lock holder, to run session start first),
-#     retrying until T3 accepts it; the durable wake queue holds the event in
-#     the meantime. The next arm names the closed one as its predecessor.
+#     Otherwise, while the home needs supervision, it runs one watcher cycle
+#     in the foreground: on a home that runs the supervision host
+#     (fm_supervision_host_enabled for a Claude primary; by default, never
+#     with config/supervision-host-off) that cycle is
+#     bin/fm-supervision-host.sh park in its relay mode, whose engine takes the
+#     wakes it may take and puts each close main must receive into the relay
+#     outbox (bin/fm-t3-host-lib.sh) while it keeps supervising; elsewhere it
+#     is bin/fm-watch-arm.sh. The relay sends every outbox entry, and every
+#     actionable close (signal:, stale:, check:, heartbeat, or a
+#     supervision-host: line) a cycle exits with, to the recorded thread as
+#     one ordinary message under an idempotent request id: a wake carries the
+#     reason lines and any supervision-host: lines, and a captain outcome the
+#     host recorded carries each outcome's summary from the outcome store.
+#     A session T3 reopened without its SessionStart hooks, found by a dead
+#     session-lock holder, is told to run session start first. It retries
+#     until T3 accepts each message; the durable wake queue, the outcome
+#     store, and the outbox hold the event in the meantime. It records each
+#     message it sends (bin/fm-t3-host-lib.sh, the relay's sent record) so
+#     the dialog mirror never takes one for the captain's words. The next
+#     cycle names the closed one as its predecessor, and a host that stood
+#     down or died without a close is started again.
 #   fm-t3-host.sh install [--name <unit>]
 #     Runs `relay` as a user service: a systemd user unit on Linux (default
 #     name fm-t3-relay-<home basename>.service), or an Aqua launch agent on
@@ -62,8 +76,9 @@
 # (seconds between state/.afk checks while the relay waits on a watcher cycle
 # or runs the away daemon, default 2).
 # Test seams: FM_T3_RELAY_DAEMON_ENTRY replaces bin/fm-afk-start.sh as the
-# command the relay runs for the away daemon, and FM_T3_RELAY_ARM_ENTRY
-# replaces bin/fm-watch-arm.sh as its watcher cycle.
+# command the relay runs for the away daemon, FM_T3_RELAY_ARM_ENTRY replaces
+# bin/fm-watch-arm.sh as its watcher cycle, and FM_T3_RELAY_HOST_ENTRY replaces
+# bin/fm-supervision-host.sh as its host cycle.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,6 +94,7 @@ MODE_POLL=${FM_T3_RELAY_MODE_POLL:-2}
 case "$MODE_POLL" in ''|*[!0-9]*|0) MODE_POLL=2 ;; esac
 DAEMON_ENTRY=${FM_T3_RELAY_DAEMON_ENTRY:-$SCRIPT_DIR/fm-afk-start.sh}
 ARM_ENTRY=${FM_T3_RELAY_ARM_ENTRY:-$SCRIPT_DIR/fm-watch-arm.sh}
+HOST_ENTRY=${FM_T3_RELAY_HOST_ENTRY:-$SCRIPT_DIR/fm-supervision-host.sh}
 RELAY_DAEMON_PID=
 
 # shellcheck source=bin/fm-t3-host-lib.sh
@@ -203,6 +219,10 @@ cmd_adopt() {
 # closed arm, so a retried delivery is the same T3 message.
 deliver() {  # <request-id> <file>
   local rid=$1 file=$2 thread delay=5 out
+  # Recorded before the send: T3 may submit it, and the mirror hook read it,
+  # before the send returns.
+  fm_t3_relay_sent_record "$STATE" "$rid" "$file" \
+    || printf 'fm-t3-host relay: could not record %s as sent; the dialog mirror may take it for the captain'"'"'s words\n' "$rid" >&2
   while :; do
     thread=$(record_get "$HOST_RECORD" thread)
     if [ -n "$thread" ]; then
@@ -222,6 +242,55 @@ deliver() {  # <request-id> <file>
 
 fm_t3_relay_mine() {
   [ "$(record_get "$RELAY_RECORD" pid)" = "$$" ]
+}
+
+# Write the one message a close sends to the thread into <message-file>;
+# fails when the close holds nothing main must receive.
+relay_compose() {  # <close-file> <message-file>
+  local close=$1 seqs rows
+  if grep -q '^supervision-host: branch-outcome:' "$close"; then
+    seqs=$(sed -n 's/^supervision-host: branch-outcome: .*(store rows \([0-9, ]*\)).*/\1/p' "$close" | head -n 1 | tr -d ' ')
+    rows=
+    [ -z "$seqs" ] || rows=$("$SCRIPT_DIR/fm-branch-outcome.sh" lookup --seqs "$seqs" 2>/dev/null \
+      | jq -r 'select(.silent != true) | "- \(.task): \(.summary)"' 2>/dev/null | tr -d '\r')
+    {
+      printf '%s\n' 'Firstmate supervision outcome from the T3 wake relay:'
+      [ -z "$rows" ] || printf '%s\n' "$rows"
+      grep -E '^supervision-host:' "$close" | grep -v '^supervision-host: branch-outcome:'
+      fm_t3_session_holder_alive "$STATE" || printf '%s\n' "$FM_T3_REOPENED_SESSION_HINT"
+      printf '%s\n' "The supervision host already handled the wake behind this (store rows ${seqs:-unknown}): run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and run the mark-processed acknowledgement it prints. The relay owns watcher continuity; do not arm a watcher yourself."
+    } > "$2"
+    return 0
+  fi
+  grep -Eq '^(signal:|stale:|check:|heartbeat($|:)|supervision-host:)' "$close" || return 1
+  {
+    printf '%s\n' 'Firstmate wake from the T3 wake relay:'
+    grep -E '^(signal:|stale:|check:|heartbeat)' "$close" | head -8
+    grep -E '^supervision-host:' "$close"
+    # T3 reopens an unloaded session without running its SessionStart
+    # hooks, so a dead lock holder means this message starts a new session.
+    fm_t3_session_holder_alive "$STATE" || printf '%s\n' "$FM_T3_REOPENED_SESSION_HINT"
+    printf '%s\n' 'Run bin/fm-wake-drain.sh first and handle the wake. The relay owns watcher continuity; do not arm a watcher yourself.'
+  } > "$2"
+}
+
+# Send every entry in the relay outbox, oldest first, removing each once T3
+# accepted it; fails when this relay was replaced mid-delivery.
+relay_flush_outbox() {  # <message-file>
+  local f
+  for f in "$STATE/$FM_T3_RELAY_OUTBOX_DIRNAME"/*.close; do
+    [ -f "$f" ] || continue
+    if relay_compose "$f" "$1"; then
+      deliver "fm-t3-relay-$(basename "$f" .close)" "$1" || return 1
+    fi
+    rm -f "$f"
+  done
+}
+
+# True when this home's watcher cycle is the supervision host's
+# (docs/configuration.md "Supervision host" owns the gate).
+relay_runs_host() {
+  fm_supervision_host_enabled "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" claude
 }
 
 # True while bin/fm-afk-launch.sh holds its lock: an entry, refresh, or stop is
@@ -271,7 +340,7 @@ relay_host_daemon() {
 }
 
 cmd_relay() {
-  local out msg arm_pid rc pred='' n=0 started
+  local out msg arm_pid rc pred='' n=0 started host=0
   mkdir -p "$STATE"
   if fm_t3_relay_owns_home "$STATE" && ! fm_t3_relay_mine; then
     echo "fm-t3-host relay: another live relay owns $FM_HOME (pid $(record_get "$RELAY_RECORD" pid)); exiting" >&2
@@ -289,6 +358,8 @@ cmd_relay() {
   trap relay_exit TERM INT HUP
   # shellcheck source=bin/fm-supervision-lib.sh
   . "$SCRIPT_DIR/fm-supervision-lib.sh"
+  # shellcheck source=bin/fm-supervision-engine-lib.sh
+  . "$SCRIPT_DIR/fm-supervision-engine-lib.sh"
   # The daemon-lock liveness helpers; sourcing enables errexit, which this
   # loop does not use.
   # shellcheck source=bin/fm-afk-start.sh
@@ -298,6 +369,8 @@ cmd_relay() {
   msg=$(mktemp) || die "mktemp failed"
   echo "fm-t3-host relay: owning watcher for $FM_HOME (pid $$)"
   while fm_t3_relay_mine; do
+    # A host this relay or its predecessor ran may have left closes unsent.
+    relay_flush_outbox "$msg" || break
     # While state/.afk exists the away daemon owns the watcher and triage
     # (docs/t3code-backend.md "Away-mode supervisor support"), run here.
     if [ -e "$STATE/.afk" ]; then
@@ -311,15 +384,24 @@ cmd_relay() {
       continue
     fi
     : > "$out"
-    FM_HOME="$FM_HOME" FM_WATCH_PREDECESSOR_ARM_PID="$pred" "$ARM_ENTRY" > "$out" 2>&1 &
+    host=0
+    if relay_runs_host; then
+      host=1
+      FM_HOME="$FM_HOME" FM_WATCH_PREDECESSOR_ARM_PID="$pred" FM_SUPERVISION_HOST_PRIMARY=claude \
+        FM_SUPERVISION_HOST_T3_RELAY_PID=$$ "$HOST_ENTRY" park > "$out" 2>&1 &
+    else
+      FM_HOME="$FM_HOME" FM_WATCH_PREDECESSOR_ARM_PID="$pred" "$ARM_ENTRY" > "$out" 2>&1 &
+    fi
     arm_pid=$!
     # Entering away or quiet mode mid-cycle hands the watcher to the daemon at
-    # once; the watcher queues every wake durably before it reports one.
+    # once; the watcher queues every wake durably before it reports one. The
+    # host keeps supervising while the relay sends what it put in the outbox.
     while kill -0 "$arm_pid" 2>/dev/null; do
       if [ -e "$STATE/.afk" ] || ! fm_t3_relay_mine; then
         kill -TERM "$arm_pid" 2>/dev/null
         break
       fi
+      [ "$host" -eq 0 ] || relay_flush_outbox "$msg" || break
       sleep "$MODE_POLL"
     done
     wait "$arm_pid"
@@ -331,17 +413,20 @@ cmd_relay() {
       pred=''
       continue
     fi
-    if grep -Eq '^(signal:|stale:|check:|heartbeat($|:))' "$out"; then
+    # What the host put in the outbox before it exited goes first.
+    [ "$host" -eq 0 ] || relay_flush_outbox "$msg" || break
+    if [ "$host" -eq 1 ] && grep -q '^supervision-host stood down:' "$out"; then
+      printf 'fm-t3-host relay: %s\n' "$(grep -m 1 '^supervision-host stood down:' "$out")" >&2
+      pred=''
+      sleep "$IDLE_POLL"
+    elif relay_compose "$out" "$msg"; then
       n=$((n + 1))
-      {
-        printf '%s\n' 'Firstmate wake from the T3 wake relay:'
-        grep -E '^(signal:|stale:|check:|heartbeat)' "$out" | head -8
-        # T3 reopens an unloaded session without running its SessionStart
-        # hooks, so a dead lock holder means this message starts a new session.
-        fm_t3_session_holder_alive "$STATE" || printf '%s\n' "$FM_T3_REOPENED_SESSION_HINT"
-        printf '%s\n' 'Run bin/fm-wake-drain.sh first and handle the wake. The relay owns watcher continuity; do not arm a watcher yourself.'
-      } > "$msg"
       deliver "fm-t3-relay-$$-$pred-$n" "$msg" || break
+    elif [ "$host" -eq 1 ] && { [ "$rc" -gt 128 ] || [ ! -s "$out" ]; }; then
+      # The host died without a close; the next one stops what it left.
+      printf 'fm-t3-host relay: the supervision host exited without a close (rc=%s); starting another\n' "$rc" >&2
+      pred=''
+      sleep 2
     elif [ "$rc" -ne 0 ]; then
       printf 'fm-t3-host relay: arm closed without a wake (rc=%s): %s\n' "$rc" "$(grep -E '^watcher:' "$out" | tail -1)" >&2
       pred=''

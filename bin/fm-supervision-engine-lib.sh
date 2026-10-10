@@ -47,6 +47,9 @@
 # known harness token; otherwise detection remains real (tests/lib.sh arms
 # the marker for isolated suites).
 
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fm-t3-host-lib.sh"
+
 FM_SUPERVISION_ENGINES_VERIFIED='claude'
 
 # fm_supervision_host_primary: print the primary harness the home gate judges
@@ -189,13 +192,39 @@ fm_supervision_host_outcomes_drained() {
 # feed to it. When the holder's identity cannot be read, it prints nothing and
 # fails, so an attended wake reaches main, a mirror writer records nothing,
 # and no conversation, latch, or dialog kept under an earlier key is reused.
+# The one exception is a home a live T3 wake relay owns (bin/fm-t3-host-lib.sh):
+# T3 unloads an idle primary session, which ends the lock holder while the
+# session itself is only parked, and the thread reopens it on its next message.
+# There every key computed from a live holder is remembered in
+# state/.supervision-host-t3-key with that holder's pid, and while the lock
+# still names that pid and it is no longer alive, the remembered key is the
+# main session's, so the relay's host keeps its conversation, latch, and dialog
+# across the unload instead of waking main for every wake. Session start takes
+# the lock under a new holder, which ends the exception. No other home reads or
+# writes that file.
 # Needs bin/fm-wake-lib.sh sourced first.
 fm_supervision_host_main_key() {
-  local pid identity
+  local pid identity key recorded
   pid=$(sed -n '1p' "$1/.lock" 2>/dev/null)
-  identity=$(fm_pid_identity "$pid" 2>/dev/null) && [ -n "$identity" ] || return 1
-  printf '%s:%s:%s\n' "$pid" "$(printf '%s\n' "$identity" | cksum | awk '{ print $1 }')" \
-    "$(sed -n '1p' "$1/.lock-session" 2>/dev/null | cksum | awk '{ print $1 }')"
+  if ! identity=$(fm_pid_identity "$pid" 2>/dev/null) || [ -z "$identity" ]; then
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ -f "$1/.t3-relay" ] && [ -f "$1/.supervision-host-t3-key" ] || return 1
+    ! kill -0 "$pid" 2>/dev/null && fm_t3_relay_owns_home "$1" || return 1
+    IFS="$(printf '\t')" read -r recorded key < "$1/.supervision-host-t3-key" 2>/dev/null || return 1
+    [ "$recorded" = "$pid" ] && [ -n "$key" ] || return 1
+    printf '%s\n' "$key"
+    return 0
+  fi
+  key="$pid:$(printf '%s\n' "$identity" | cksum | awk '{ print $1 }'):$(sed -n '1p' "$1/.lock-session" 2>/dev/null | cksum | awk '{ print $1 }')"
+  printf '%s\n' "$key"
+  if [ -f "$1/.t3-relay" ] && [ "$(cat "$1/.supervision-host-t3-key" 2>/dev/null)" != "$pid"$'\t'"$key" ] \
+    && fm_t3_relay_owns_home "$1"; then
+    recorded=$(mktemp "$1/.supervision-host-t3-key.XXXXXX" 2>/dev/null) || return 0
+    printf '%s\t%s\n' "$pid" "$key" > "$recorded" 2>/dev/null \
+      && mv -f "$recorded" "$1/.supervision-host-t3-key" 2>/dev/null
+    rm -f "$recorded" 2>/dev/null
+  fi
+  return 0
 }
 
 # fm_supervision_host_health_key <state-dir>: the key the host's

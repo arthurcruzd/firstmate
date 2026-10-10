@@ -11,8 +11,9 @@
 # command becomes the host; on a home that does not run it the output is
 # unchanged. A home whose primary runs as a T3 Code thread under a live wake
 # relay (fm_t3_relay_owns_home in bin/fm-t3-host-lib.sh) renders
-# docs/supervision-protocols/t3-relay.md in place of the harness protocol, and
-# its repair line names the relay.
+# docs/supervision-protocols/t3-relay.md in place of the harness protocol, with
+# its lines tagged t3-host when the relay runs the supervision host and
+# t3-plain otherwise, and its repair line names the relay.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -119,6 +120,10 @@ if fm_t3_relay_owns_home "$STATE"; then
 fi
 HOST_SNIPPET=
 grok_arm='bin/fm-watch-arm.sh'
+# The relay protocol's lines tagged t3-host or t3-plain render by whether the
+# relay runs the supervision host, which it does for a Claude primary
+# (bin/fm-t3-host.sh relay).
+RELAY_TAG=t3-plain
 case "$HARNESS" in
   claude|cursor|opencode|omp|grok|codex)
     # shellcheck source=bin/fm-supervision-engine-lib.sh
@@ -126,6 +131,8 @@ case "$HARNESS" in
     if [ "$T3_RELAY" -eq 0 ] && fm_supervision_host_enabled "$CONFIG" "$HARNESS"; then
       HOST_SNIPPET="$DOC_DIR/supervision-host.md"
       grok_arm='bin/fm-supervision-host.sh park'
+    elif [ "$T3_RELAY" -eq 1 ] && fm_supervision_host_enabled "$CONFIG" claude; then
+      RELAY_TAG=t3-host
     fi
     ;;
 esac
@@ -156,7 +163,7 @@ render_snippet() {  # [snippet]
       '{'*'} '*)
         tags=${line%%\} *}
         tags=${tags#\{}
-        case ",$tags," in *",$HARNESS,"*) ;; *) continue ;; esac
+        case ",$tags," in *",$HARNESS,"* | *",$RELAY_TAG,"*) ;; *) continue ;; esac
         line=${line#*\} }
         ;;
     esac

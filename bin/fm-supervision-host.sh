@@ -15,10 +15,30 @@
 # (.opencode/plugins/fm-primary-watch-arm.js), the omp watch extension
 # (.omp/extensions/fm-primary-omp-watch.ts), Grok's model-owned background arm
 # (docs/supervision-protocols/grok.md), and Codex's foreground checkpoint
-# (bin/fm-watch-checkpoint.sh). To that owner it IS an arm: it prints the
-# arm's own lines and exits only when main is needed, and stays parked across
-# every close it handled itself. Each owner passes its harness as
-# FM_SUPERVISION_HOST_PRIMARY, which the engine carries as the primary pin.
+# (bin/fm-watch-checkpoint.sh), and the T3 wake relay (bin/fm-t3-host.sh
+# relay) for a Claude primary that runs as a T3 Code thread. To that owner it
+# IS an arm: it prints the arm's own lines and exits only when main is needed,
+# and stays parked across every close it handled itself. Each owner passes its
+# harness as FM_SUPERVISION_HOST_PRIMARY, which the engine carries as the
+# primary pin.
+#
+# RELAY MODE. The T3 wake relay passes its own pid as
+# FM_SUPERVISION_HOST_T3_RELAY_PID. The relay is a long-lived service outside
+# the primary's session, which T3 can unload, so three things differ there:
+#   - ownership is the relay's record (fm_t3_relay_owns_home naming this
+#     relay, bin/fm-t3-host-lib.sh) in place of the session lock and an
+#     auto-arm generation (OWNERSHIP below); the session lock stays main's;
+#   - there is no park boundary, because no hook registration bounds the
+#     relay's wait (THE PARK BOUNDARY below);
+#   - a close main must receive is not an exit: an attended pass-through or a
+#     branch-outcome puts the text this host would have printed into the
+#     relay outbox (bin/fm-t3-host-lib.sh), and the host parks on its
+#     successor cycle. A pass-through starts that successor as the closed
+#     arm's handling successor and leaves the recovery marker at downtime, so
+#     main acknowledges the close and no successor re-announces it, the order
+#     the plain relay keeps; nothing is left for a later take-over. When the
+#     close cannot be put there, or for every other exit below, the host exits
+#     exactly as for any owner, and the relay delivers that output itself.
 #
 # OUTPUT, the contract every owner reads. The first cycle's status line
 # ("watcher: started ..." or "watcher: attached ...") is printed as soon as the
@@ -102,7 +122,7 @@
 # THE LATCH. An opted-in host persists engine health across short-lived
 # parks; docs/supervision-host.md "The broken-session latch" owns the policy.
 #
-# THE PARK BOUNDARY. Claude drops the exit 2 of a Stop hook it terminated at
+# THE PARK BOUNDARY (none in RELAY MODE). Claude drops the exit 2 of a Stop hook it terminated at
 # the hook's configured timeout (docs/verification/supervision.md), Cursor's
 # stop hook carries the same tracked 28800-second registration, and a host
 # that handles its own wakes is not shortened by them, so the host ends its
@@ -124,7 +144,8 @@
 # the host proves this session still holds the fleet lock
 # (bin/fm-session-lock-lib.sh) and, when launched by the auto-arm, that the
 # auto-arm generation it serves (FM_SUPERVISION_HOST_AUTOARM_GEN owned by
-# FM_SUPERVISION_HOST_OWNER_PID) is still current; otherwise it stands down
+# FM_SUPERVISION_HOST_OWNER_PID) is still current, or in RELAY MODE that the
+# live relay owning the home is the one that launched it; otherwise it stands down
 # with a "supervision-host:" line and leaves the decision to its owner; a
 # host that stands down before activation leaves the owner's host record,
 # processes, arms, and leases alone. The engine runs with
@@ -154,7 +175,8 @@
 # .supervision-host-health (the latch: errors, cooldown, and probe time, keyed
 # to the main session, engine, and model), and .supervision-host.log (a bounded
 # ledger of where every close went, with each engine turn's usage and
-# outcome).
+# outcome). RELAY MODE also writes the relay outbox, which bin/fm-t3-host.sh
+# owns.
 #
 # Tunables (environment): FM_SUPERVISION_HOST_PARK_SECONDS (27000; a positive
 # integer below the 28800-second registration, any other value is the default),
@@ -191,6 +213,8 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 . "$SCRIPT_DIR/fm-supervision-engine-lib.sh"
 # shellcheck source=bin/fm-afk-contract.sh
 . "$SCRIPT_DIR/fm-afk-contract.sh"
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$SCRIPT_DIR/fm-t3-host-lib.sh"
 
 FIRST_ARM_RESTART=0
 case "${1:-}" in
@@ -223,6 +247,10 @@ COOLDOWN=$FM_SUPERVISION_HOST_COOLDOWN
 COOLDOWN_MAX=3600
 AUTOARM_GEN=${FM_SUPERVISION_HOST_AUTOARM_GEN:-}
 AUTOARM_OWNER=${FM_SUPERVISION_HOST_OWNER_PID:-}
+# RELAY MODE (header): the T3 wake relay that launched this host.
+T3_RELAY=${FM_SUPERVISION_HOST_T3_RELAY_PID:-}
+case "$T3_RELAY" in *[!0-9]*) T3_RELAY= ;; esac
+RELAY_SEQ=0
 PRIMARY=${FM_SUPERVISION_HOST_PRIMARY:-}
 [ -n "$PRIMARY" ] || PRIMARY=$(fm_supervision_host_primary)
 # The owner's predecessor arm belongs to the first cycle only.
@@ -453,6 +481,11 @@ retire_arm() {  # <pid> <output-file>
 }
 
 host_still_owner() {
+  if [ -n "$T3_RELAY" ]; then
+    [ "$(sed -n 's/^pid=//p' "$STATE/.t3-relay" 2>/dev/null | head -n 1)" = "$T3_RELAY" ] \
+      && fm_t3_relay_owns_home "$STATE"
+    return
+  fi
   fm_session_lock_owned_by_self "$STATE" || return 1
   [ -n "$AUTOARM_GEN" ] || return 0
   fm_autoarm_ledger_read "$STATE" || return 1
@@ -489,6 +522,7 @@ park_elapsed() {  # Sets PARK_ELAPSED without a production clock/helper fork.
 }
 
 boundary_reached() {
+  [ -z "$T3_RELAY" ] || return 1
   park_elapsed
   [ "$PARK_ELAPSED" -ge "$PARK_SECONDS" ]
 }
@@ -496,6 +530,7 @@ boundary_reached() {
 # True when an engine turn started now could still be running at the turn
 # limit (the boundary unless the owner set a later one).
 turn_crosses_boundary() {
+  [ -z "$T3_RELAY" ] || return 1
   park_elapsed
   [ $((PARK_ELAPSED + TURN_TIMEOUT + ENGINE_GRACE)) -ge "$PARK_LIMIT" ]
 }
@@ -570,6 +605,48 @@ emit() {  # [line...]
     text=${text:+$text$'\n'}$line
   done
   [ -z "$text" ] || printf '%s\n' "$text"
+}
+
+# RELAY MODE (header): put what emit would print into the relay outbox
+# instead. Fails when there is nothing to put or it could not be written.
+relay_put() {  # [line...]
+  local text=$ARM_TEXT line
+  for line in "$@"; do
+    [ -n "$line" ] || continue
+    text=${text:+$text$'\n'}$line
+  done
+  [ -n "$text" ] || return 1
+  RELAY_SEQ=$((RELAY_SEQ + 1))
+  fm_t3_relay_outbox_put "$STATE" "$RELAY_SEQ" "$text" || return 1
+  log_line "to-relay	$(printf '%s\n' "$text" | grep -E -m 1 '^(signal:|stale:|check:|heartbeat|supervision-host:)')"
+}
+
+# Make the successor cycle the cycle this host parks on.
+park_on_successor() {
+  ARM_PID=$SUCCESSOR_PID
+  ARM_OUT=$SUCCESSOR_OUT
+  SUCCESSOR_PID=
+  SUCCESSOR_OUT=
+  ARM_TEXT=
+}
+
+# RELAY MODE pass-through: the close goes to the relay outbox while this
+# host parks on the closed arm's handling successor, which leaves the
+# recovery marker at downtime for main's acknowledgement. Returns 1, with no
+# successor running, when either step fails; the caller then exits as for any
+# owner.
+relay_pass_through() {
+  if [ -z "$SUCCESSOR_PID" ] && ! start_successor "$CLOSED_ARM_PID"; then
+    log_line "pass-through	relay	successor-unverified	$(printf '%s\n' "$REASON" | head -n 1)"
+    retire_successor
+    return 1
+  fi
+  if ! relay_put; then
+    log_line "pass-through	relay	outbox-unwritable	$(printf '%s\n' "$REASON" | head -n 1)"
+    retire_successor
+    return 1
+  fi
+  park_on_successor
 }
 
 # Stop the successor cycle: the state main's own turn end starts from without
@@ -1094,7 +1171,9 @@ while :; do
   if ! fm_afk_contract_away_present "$STATE"; then
     if ! attended_acceptor "$(printf '%s\n' "$REASON" | head -n 1)"; then
       log_line "pass-through	attended	$ATTENDED_WHY	$(printf '%s\n' "$REASON" | head -n 1)"
-      if [ "$ATTENDED_WHY" = main-only ]; then
+      if [ -n "$T3_RELAY" ]; then
+        relay_pass_through && continue
+      elif [ "$ATTENDED_WHY" = main-only ]; then
         leave_successor_for_main || true
       fi
       emit
@@ -1137,8 +1216,9 @@ while :; do
   if [ "$HANDLE_RC" -eq 2 ]; then
     log_line "pass-through	attended	$ATTENDED_WHY	$(printf '%s\n' "$REASON" | head -n 1)"
     # The successor this turn already started and confirmed stays up. Retiring
-    # it is what left no watcher after a close that became main-only.
-    detach_successor
+    # it is what left no watcher after a close that became main-only. RELAY
+    # MODE keeps it as this host's own cycle instead.
+    [ -n "$T3_RELAY" ] || detach_successor
     # Main handles this close after all, so hand back the downtime the handoff
     # above consumed: the re-arm owner delivers the close only while the
     # recovery marker reads downtime (leave_successor_for_main).
@@ -1146,6 +1226,9 @@ while :; do
       && ! fm_recovery_marker_publish "$STATE/.watcher-down" downtime >/dev/null 2>&1; then
       log_line "pass-through	downtime-unrestored	$(printf '%s\n' "$REASON" | head -n 1)"
       exit 1
+    fi
+    if [ -n "$T3_RELAY" ]; then
+      relay_pass_through && continue
     fi
     emit
     exit 0
@@ -1177,15 +1260,15 @@ while :; do
     CAPTAIN_SEQS=$(turn_captain_seqs "$LAST_TURN")
     if [ -n "$CAPTAIN_SEQS" ]; then
       ARM_TEXT=
-      exit_to_main "branch-outcome: the supervision session handled this wake and recorded captain outcomes for you (store rows $CAPTAIN_SEQS); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints" \
-        "$HEALTH_NOTE"
+      OUTCOME_WHY="branch-outcome: the supervision session handled this wake and recorded captain outcomes for you (store rows $CAPTAIN_SEQS); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints"
+      if [ -n "$T3_RELAY" ] && relay_put "supervision-host: $OUTCOME_WHY" "$HEALTH_NOTE"; then
+        park_on_successor
+        continue
+      fi
+      exit_to_main "$OUTCOME_WHY" "$HEALTH_NOTE"
     fi
   fi
 
   # Handled: park on the successor.
-  ARM_PID=$SUCCESSOR_PID
-  ARM_OUT=$SUCCESSOR_OUT
-  SUCCESSOR_PID=
-  SUCCESSOR_OUT=
-  ARM_TEXT=
+  park_on_successor
 done
