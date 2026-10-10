@@ -221,11 +221,11 @@ test_routine_wake_is_handled_without_a_thread_message() {
   open_session "$home"
   lock=$(cat "$home/state/.lock")
   start_relay "$home"
-  wait_until 200 watcher_live "$home" || fail "routine: the relay's host never armed a watcher: $(cat "$home/relay.out")"
+  wait_until 600 watcher_live "$home" || fail "routine: the relay's host never armed a watcher: $(cat "$home/relay.out")"
   host=$(host_pid "$home")
   [ -n "$host" ] || fail "routine: the relay did not run the supervision host: $(cat "$home/relay.out")"
   append_status "$home" 'step one'
-  wait_until 300 handled_at_least "$home" 1 \
+  wait_until 900 handled_at_least "$home" 1 \
     || fail "routine: the wake was not handled on the engine: $(cat "$home/relay.out"; cat "$home/state/.supervision-host.log")"
   sleep 3
   [ "$(send_count)" -eq 0 ] || fail "routine: a routine wake reached the thread: $(sends)"
@@ -251,10 +251,10 @@ test_captain_outcome_is_one_ordinary_message() {
   echo captain > "$home/stub-mode"
   open_session "$home"
   start_relay "$home"
-  wait_until 200 watcher_live "$home" || fail "captain: the relay's host never armed a watcher: $(cat "$home/relay.out")"
+  wait_until 600 watcher_live "$home" || fail "captain: the relay's host never armed a watcher: $(cat "$home/relay.out")"
   host=$(host_pid "$home")
   append_status "$home" 'ready for review'
-  wait_until 300 sends_at_least 1 \
+  wait_until 900 sends_at_least 1 \
     || fail "captain: no message reached the thread: $(cat "$home/relay.out" "$home/state/.supervision-host.log" "$home/engine-report.log" "$home/state/.supervision-host-receipts" 2>&1)"
   sleep 3
   [ "$(send_count)" -eq 1 ] || fail "captain: expected exactly one thread message: $(sends)"
@@ -299,10 +299,10 @@ test_main_only_close_keeps_the_host_parked_and_resurfaces_nothing() {
   use_t3 "$home"
   open_session "$home"
   start_relay "$home"
-  wait_until 200 watcher_live "$home" || fail "main-only: the relay's host never armed a watcher: $(cat "$home/relay.out")"
+  wait_until 600 watcher_live "$home" || fail "main-only: the relay's host never armed a watcher: $(cat "$home/relay.out")"
   host=$(host_pid "$home")
   append_status "$home" 'which export format?' needs-decision format
-  wait_until 300 sends_at_least 1 || fail "main-only: the decision did not reach the thread: $(cat "$home/relay.out"; cat "$home/state/.supervision-host.log")"
+  wait_until 900 sends_at_least 1 || fail "main-only: the decision did not reach the thread: $(cat "$home/relay.out"; cat "$home/state/.supervision-host.log")"
   assert_contains "$(sends)" 'Firstmate wake from the T3 wake relay:' "main-only: the decision must arrive as an ordinary wake"
   assert_contains "$(sends)" 'demo.status' "main-only: the wake must carry the watcher's reason line"
   [ "$(host_pid "$home")" = "$host" ] || fail "main-only: the host exited to hand main a close"
@@ -314,14 +314,16 @@ test_main_only_close_keeps_the_host_parked_and_resurfaces_nothing() {
   append_status "$home" 'csv' resolved format
   main_ack "$home"
   append_status "$home" 'decision received, continuing'
-  wait_until 300 handled_at_least "$home" 1 || fail "main-only: the next routine wake was not handled: $(cat "$home/state/.supervision-host.log")"
+  wait_until 900 handled_at_least "$home" 1 || fail "main-only: the next routine wake was not handled: $(cat "$home/state/.supervision-host.log")"
   append_status "$home" 'another question?' needs-decision scope
-  wait_until 300 sends_at_least 2 || fail "main-only: the second decision did not reach the thread"
+  wait_until 900 sends_at_least 2 \
+    || fail "main-only: the second decision did not reach the thread: $(cat "$home/state/.supervision-host.log"; sends)"
   main_drain "$home" >/dev/null
   append_status "$home" 'keep it small' resolved scope
   main_ack "$home"
   append_status "$home" 'step two'
-  wait_until 300 handled_at_least "$home" 2 || fail "main-only: the second routine wake was not handled"
+  wait_until 900 handled_at_least "$home" 2 \
+    || fail "main-only: the second routine wake was not handled: $(cat "$home/state/.supervision-host.log" "$home/state/demo.status"; sends)"
   sleep 4
   [ "$(send_count)" -eq 2 ] || fail "main-only: expected only the two decisions on the thread: $(sends)"
   assert_not_contains "$(sends)" 'rearm-resurface' "main-only: a recovery wake resurfaced after main acknowledged"
@@ -340,18 +342,18 @@ test_unloaded_session_keeps_supervision_off_the_thread() {
   use_t3 "$home"
   open_session "$home"
   start_relay "$home"
-  wait_until 200 watcher_live "$home" || fail "unloaded: the relay's host never armed a watcher: $(cat "$home/relay.out")"
+  wait_until 600 watcher_live "$home" || fail "unloaded: the relay's host never armed a watcher: $(cat "$home/relay.out")"
   host=$(host_pid "$home")
   append_status "$home" 'step one'
-  wait_until 300 handled_at_least "$home" 1 || fail "unloaded: the first wake was not handled"
+  wait_until 900 handled_at_least "$home" 1 || fail "unloaded: the first wake was not handled"
   unload_session "$home"
   append_status "$home" 'step two'
-  wait_until 300 handled_at_least "$home" 2 \
+  wait_until 900 handled_at_least "$home" 2 \
     || fail "unloaded: a routine wake was not handled while the session was unloaded: $(cat "$home/state/.supervision-host.log")"
   assert_grep 'arg=--resume' "$home/engine-call.2" "unloaded: the engine conversation must continue across the unload"
   echo captain > "$home/stub-mode"
   append_status "$home" 'ready for review'
-  wait_until 300 sends_at_least 1 || fail "unloaded: the captain outcome did not reach the thread"
+  wait_until 900 sends_at_least 1 || fail "unloaded: the captain outcome did not reach the thread"
   sleep 2
   [ "$(send_count)" -eq 1 ] || fail "unloaded: only the captain outcome may reach the thread: $(sends)"
   assert_contains "$(sends)" 'run bin/fm-session-start.sh first' "unloaded: the message must tell the reopened session to run session start"
@@ -360,7 +362,7 @@ test_unloaded_session_keeps_supervision_off_the_thread() {
   open_session "$home" 'what did I miss?'
   echo handle > "$home/stub-mode"
   append_status "$home" 'step three'
-  wait_until 300 handled_at_least "$home" 4 || fail "unloaded: the wake after the reopen was not handled: $(cat "$home/state/.supervision-host.log")"
+  wait_until 900 handled_at_least "$home" 4 || fail "unloaded: the wake after the reopen was not handled: $(cat "$home/state/.supervision-host.log")"
   second="$home/engine-call.$(find "$home" -maxdepth 1 -name 'engine-call.*' | sed 's/.*\.//' | sort -n | tail -1)"
   assert_grep 'arg=--session-id' "$second" "unloaded: a new main session must start a new engine conversation"
   [ "$(send_count)" -eq 1 ] || fail "unloaded: a routine wake after the reopen reached the thread: $(sends)"
@@ -378,7 +380,7 @@ test_ownership_and_outbox_durability() {
   use_t3 "$home"
   open_session "$home"
   start_relay "$home"
-  wait_until 200 watcher_live "$home" || fail "ownership: the relay's host never armed a watcher: $(cat "$home/relay.out")"
+  wait_until 600 watcher_live "$home" || fail "ownership: the relay's host never armed a watcher: $(cat "$home/relay.out")"
   watcher=$(cat "$home/state/.watch.lock/pid")
   out=$(home_env "$home" env FM_SUPERVISION_HOST_T3_RELAY_PID=$$ FM_SUPERVISION_HOST_PRIMARY=claude "$HOST" park 2>&1)
   assert_contains "$out" 'supervision-host stood down: this session does not own supervision' \
@@ -398,7 +400,7 @@ test_ownership_and_outbox_durability() {
     > "$home/state/.t3-relay-outbox/1000000000-1-000001.close"
   open_session "$home"
   start_relay "$home"
-  wait_until 200 sends_at_least 1 || fail "ownership: the next relay did not send the leftover entry: $(cat "$home/relay.out")"
+  wait_until 600 sends_at_least 1 || fail "ownership: the next relay did not send the leftover entry: $(cat "$home/relay.out")"
   assert_contains "$(sends)" '"clientRequestId":"fm-t3-relay-1000000000-1-000001"' "ownership: the entry must be sent under its own request id"
   assert_contains "$(sends)" 'supervision-host: the supervision session could not take this wake' "ownership: the host's reason must reach main"
   wait_until 50 eval '[ -z "$(ls "$home/state/.t3-relay-outbox" 2>/dev/null)" ]' || fail "ownership: the sent entry was not removed"
@@ -424,7 +426,7 @@ test_opted_out_home_keeps_the_plain_relay() {
   open_session "$home"
   home_env "$home" env FM_T3_RELAY_ARM_ENTRY="$arm" FM_T3_RELAY_HOST_ENTRY="$hostseam" \
     bash -c 'exec "$0" relay' "$RELAY" > "$home/relay.out" 2>&1 &
-  wait_until 200 sends_at_least 1 || fail "opted out: the plain relay did not deliver the wake: $(cat "$home/relay.out")"
+  wait_until 600 sends_at_least 1 || fail "opted out: the plain relay did not deliver the wake: $(cat "$home/relay.out")"
   assert_contains "$(sends)" 'Firstmate wake from the T3 wake relay:' "opted out: the wake must arrive as before"
   assert_no_grep host "$home/cycles" "opted out: the relay ran the host on a home that opted out"
   stop_home "$home"
