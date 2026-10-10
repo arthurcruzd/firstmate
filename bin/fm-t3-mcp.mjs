@@ -37,7 +37,9 @@
 //     own checkout). Reads the thread back and archives and refuses it unless
 //     T3 bound exactly that workspace, provider instance, and full access; a
 //     refused thread whose archive fails exits 1, because it may still be
-//     live. Without --message-file the thread is created idle.
+//     live. A read-back that fails also archives and exits 1, since the
+//     thread exists but its binding is unproven. Without --message-file the
+//     thread is created idle.
 //   fm-t3-mcp.mjs send --thread <id> --message-file <file> --client-request-id <id>
 //     t3_thread_send mode auto: start an idle thread's next turn or steer the
 //     running one. The client request id makes a retry idempotent.
@@ -99,6 +101,7 @@ export const REQUIRED_TOOLS = [
   "t3_thread_wait",
   "t3_thread_interrupt",
   "t3_thread_organize",
+  "t3_thread_list",
   "t3_project_list",
   "t3_project_create",
 ];
@@ -651,8 +654,20 @@ async function launch(flags) {
   };
   const out = await session.call("t3_thread_launch", args);
   if (!out?.threadId) throw new Refusal("launch_unconfirmed", "t3_thread_launch returned no threadId; inspect t3_thread_list before retrying", 1);
+  const archiveLaunched = () => session.call("t3_thread_organize", { threadId: out.threadId, action: "archive" }).then(() => true, () => false);
   // Prove the binding T3 recorded before anyone relies on it.
-  const t = threadOf(await session.call("t3_thread_read", { threadId: out.threadId, limit: 1, runLimit: 1 }));
+  let t;
+  try {
+    t = threadOf(await session.call("t3_thread_read", { threadId: out.threadId, limit: 1, runLimit: 1 }));
+  } catch (e) {
+    const archived = await archiveLaunched();
+    throw new Refusal(
+      "binding_unconfirmed",
+      `T3 launched thread ${out.threadId} but reading back its binding failed (${e.message}); ${archived ? "asked T3 to archive it, so confirm it is archived" : "its archive failed, so archive it"} in T3 Code`,
+      1,
+      { threadId: out.threadId },
+    );
+  }
   const problems = [];
   if (worktree ? realOrRaw(t.worktreePath ?? "") !== realOrRaw(worktree) : (t.worktreePath ?? null) !== null) {
     problems.push(`worktreePath ${t.worktreePath ?? "none"}`);
@@ -660,7 +675,7 @@ async function launch(flags) {
   if (t.runtimeMode !== "full-access") problems.push(`runtimeMode ${t.runtimeMode ?? "none"}`);
   if (t.providerInstanceId !== selection.instanceId) problems.push(`provider ${t.providerInstanceId ?? "none"}`);
   if (problems.length) {
-    const archived = await session.call("t3_thread_organize", { threadId: out.threadId, action: "archive" }).then(() => true, () => false);
+    const archived = await archiveLaunched();
     throw new Refusal(
       "binding_mismatch",
       `T3 bound thread ${out.threadId} to ${problems.join(", ")}, not the requested ${worktree ? "worktree" : "project root"} at full access; ${archived ? "archived it" : "its archive failed, so archive it in T3 Code"}`,

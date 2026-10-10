@@ -230,10 +230,16 @@ test_launch_refusals() {
   mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
   expect_code 1 "$RC" "a mis-bound thread whose archive failed is an uncertain outcome"
   assert_contains "$ERR" "archive it in T3 Code" "the uncertain refusal names the manual archive"
-  t3_fake_set 'delete w.bindRuntimeMode; w.failTools = {}; w.dropTools = { t3_thread_launch: 1 }'
+  t3_fake_set 'delete w.bindRuntimeMode; w.failTools = { t3_thread_read: { code: "thread_not_found", message: "not yet projected" } }'
+  : > "$T3_FAKE_LOG"
+  mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
+  expect_code 1 "$RC" "a launched thread whose binding read-back failed is an uncertain outcome"
+  assert_equals binding_unconfirmed "$(field "$OUT" error.code)" "read-back failure refusal code"
+  assert_contains "$(t3_fake_calls t3_thread_organize)" '"action":"archive"' "a thread with an unproven binding is archived before refusing"
+  t3_fake_set 'w.failTools = {}; w.dropTools = { t3_thread_launch: 1 }'
   mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
   expect_code 1 "$RC" "a launch whose reply was lost is an uncertain transport failure"
-  pass "fm-t3-mcp launch: refuses a binding T3 did not honor, and reports a lost or unarchivable launch as uncertain"
+  pass "fm-t3-mcp launch: refuses a binding T3 did not honor, and reports a lost, unproven, or unarchivable launch as uncertain"
 }
 
 new_thread() {  # -> thread id
