@@ -18,7 +18,10 @@
 //   bindRuntimeMode (override what a launch binds), archiveKeepsRun,
 //   waitTimesOut, waitEnds (a t3_thread_wait on an active run ends it with
 //   this status), failTools ({name: {code, message}}), dropTools ({name:
-//   count}: close the connection without a reply that many times), probePath
+//   count}: close the connection without a reply that many times),
+//   rejectSendDispatch (that many t3_thread_send calls fail at dispatch, and,
+//   as T3 does, each such request id is answered "was previously rejected"
+//   from then on), probePath
 //   (each log line records whether it exists), projects ([{id, title,
 //   workspaceRoot, defaultModelSelection, deletedAt}]), threads ({id: detail
 //   plus items and runs}).
@@ -138,7 +141,17 @@ function callTool(w, name, a) {
       if (!t) return [notFound(a.threadId), false];
       if (t.archived) return [err("thread_not_sendable", `Thread ${a.threadId} is archived and cannot receive messages.`), false];
       w.requestIds = w.requestIds ?? {};
+      w.rejectedRequestIds = w.rejectedRequestIds ?? {};
       const key = `${a.threadId}|${a.clientRequestId}`;
+      const dispatchFailure = "Failed to dispatch orchestration command message.dispatch";
+      if (a.clientRequestId && w.rejectedRequestIds[key]) {
+        return [err("command_rejected", `Command ${a.clientRequestId} was previously rejected: ${w.rejectedRequestIds[key]}`), false];
+      }
+      if ((w.rejectSendDispatch ?? 0) > 0) {
+        w.rejectSendDispatch -= 1;
+        if (a.clientRequestId) w.rejectedRequestIds[key] = dispatchFailure;
+        return [err("dispatch_failed", dispatchFailure), true];
+      }
       if (a.clientRequestId && w.requestIds[key]) return [ok(w.requestIds[key]), false];
       let delivery = "steered";
       if (t.activeRunId) t.items.push({ type: "user_message", status: "completed", text: a.message });

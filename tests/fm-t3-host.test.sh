@@ -272,8 +272,75 @@ SH
   pass "fm-t3-host.sh relay: delivers an attended wake to the recorded thread, and entering away or quiet mode mid-cycle hands the watcher to the daemon without posting the closing wake"
 }
 
+# The live wedge (2026-10-10): the first send of an outbox entry failed at
+# T3's dispatch, T3 then answered every resend of that request id "was
+# previously rejected", and the relay retried it forever, so nothing behind it
+# was delivered and no watcher cycle started. A rejected id is retried once
+# under a derived id; rejected again, the entry is parked and delivery moves
+# on, while an ordinary failure keeps resending the same id.
+test_relay_parks_a_rejected_request_instead_of_looping() {
+  local home="$TMP_ROOT/rejected" arm log relay outbox sends
+  mkdir -p "$home/state" "$home/config"
+  : > "$home/config/supervision-host-off"
+  log="$home/events.log"
+  [ -n "$T3_FAKE_PID" ] || t3_fake_start "$TMP_ROOT/server" T3CODE_TELEMETRY_ENABLED=false
+  t3_fake_case "$TMP_ROOT/case-rejected"
+  t3_fake_set 'w.threads = { "mcp:primary": { threadId: "mcp:primary", projectId: "p", status: "completed", activeRunId: null, archived: false, worktreePath: null, pendingRequestCount: 0, items: [], runs: [] } }'
+  t3_fake_set 'w.rejectSendDispatch = 2'
+  t3_fake_credential "$home/config/t3code-token"
+  arm="$TMP_ROOT/fake-arm-rejected.sh"
+  cat > "$arm" <<'SH'
+#!/usr/bin/env bash
+printf 'arm %s\n' "$$" >> "$FAKE_LOG"
+trap 'exit 0' TERM
+while :; do sleep 0.1; done
+SH
+  chmod +x "$arm"
+  printf 'thread=mcp:primary\n' > "$home/state/.t3-host"
+  printf 'window=fm-w\nbackend=t3code\n' > "$home/state/w.meta"
+  outbox="$home/state/.t3-relay-outbox"
+  mkdir -p "$outbox"
+  printf 'signal: %s/state/first.status\n' "$home" > "$outbox/1000000001-1-000001.close"
+  printf 'signal: %s/state/second.status\n' "$home" > "$outbox/1000000002-1-000002.close"
+  FM_HOME="$home" FAKE_LOG="$log" FM_T3_RELAY_ARM_ENTRY="$arm" FM_T3_RELAY_SEND_DELAY=1 \
+    FM_T3_RELAY_IDLE_POLL=1 FM_T3_RELAY_MODE_POLL=1 "$ROOT/bin/fm-t3-host.sh" relay > "$home/relay.out" 2>&1 &
+  relay=$!
+  FAKE_PIDS+=("$relay")
+  until_true 30 starts_arm_at_least "$log" 1 \
+    || fail "a rejected outbox entry kept the relay from starting a watcher cycle: $(cat "$home/relay.out")"
+  assert_contains "$(cat "$home/relay.out")" "retrying once as fm-t3-relay-1000000001-1-000001-retry" \
+    "a rejected request id was not retried under its derived id"
+  assert_contains "$(cat "$home/relay.out")" "PARKED fm-t3-relay-1000000001-1-000001" "a twice-rejected entry was not parked loudly"
+  assert_grep "first.status" "$home/state/.t3-relay-parked/fm-t3-relay-1000000001-1-000001.msg" "the parked message was not kept"
+  assert_contains "$(cat "$home/relay.out")" "delivered fm-t3-relay-1000000002-1-000002 " "the entry behind the parked one was not delivered"
+  [ -z "$(ls -A "$outbox")" ] || fail "the outbox still holds entries: $(ls -A "$outbox")"
+  sends=$(t3_fake_calls t3_thread_send)
+  [ "$(printf '%s\n' "$sends" | grep -c 'clientRequestId":"fm-t3-relay-1000000001-1-000001"')" -eq 2 ] \
+    || fail "the rejected id must be sent twice (dispatch failure, then the rejection answer): $sends"
+  [ "$(printf '%s\n' "$sends" | grep -c 'clientRequestId":"fm-t3-relay-1000000001-1-000001-retry"')" -eq 2 ] \
+    || fail "the derived id must be sent twice, then parked rather than looping: $sends"
+  kill -TERM "$relay"
+  wait "$relay" 2>/dev/null
+
+  # One transient rejection: the derived id delivers the message.
+  rm -f "$log"
+  t3_fake_set 'w.rejectSendDispatch = 1'
+  printf 'signal: %s/state/third.status\n' "$home" > "$outbox/1000000003-1-000003.close"
+  FM_HOME="$home" FAKE_LOG="$log" FM_T3_RELAY_ARM_ENTRY="$arm" FM_T3_RELAY_SEND_DELAY=1 \
+    FM_T3_RELAY_IDLE_POLL=1 FM_T3_RELAY_MODE_POLL=1 "$ROOT/bin/fm-t3-host.sh" relay > "$home/relay2.out" 2>&1 &
+  relay=$!
+  FAKE_PIDS+=("$relay")
+  until_true 30 starts_arm_at_least "$log" 1 || fail "the relay did not move on after the derived id delivered: $(cat "$home/relay2.out")"
+  assert_contains "$(cat "$home/relay2.out")" "delivered fm-t3-relay-1000000003-1-000003-retry " "the derived id did not deliver the message"
+  assert_not_contains "$(cat "$home/relay2.out")" "PARKED" "a message the derived id delivered was parked"
+  kill -TERM "$relay"
+  wait "$relay" 2>/dev/null
+  pass "fm-t3-host.sh relay: a request id T3 rejects is retried once under a derived id, then parked, and delivery and the watcher move on"
+}
+
 test_relay_ownership_predicate
 test_protocol_renders_relay_mode
 test_launch_and_adopt
 test_relay_hosts_away_daemon
 test_relay_hands_open_watcher_cycle_to_daemon
+test_relay_parks_a_rejected_request_instead_of_looping

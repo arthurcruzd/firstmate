@@ -201,6 +201,7 @@ T3 releases an idle provider session after 30 minutes, or after at most four hou
 The home therefore runs the wake relay, `bin/fm-t3-host.sh relay`, as a user service: `bin/fm-t3-host.sh install` writes a systemd user unit on Linux or an Aqua launch agent on macOS, and `uninstall` removes it.
 A [T3-hosted remote second mate](remote-secondmates.md#t3-code-endpoint) runs the same relay in its own home on its own host.
 The relay owns the watcher outside the session and sends each actionable wake to the primary's thread as an ordinary message, which also reopens an unloaded session.
+A message T3 rejects under its request id and again under one derived retry id is parked in `state/.t3-relay-parked` with a `PARKED` line in the relay's log, and the relay moves on; the wake behind it stays in the durable queue for main's next drain (`bin/fm-t3-host.sh` header).
 While a live relay owns the home the Claude Stop auto-arm stands aside, the turn-end guard accepts the relay's fresh beacon, and session start renders [`supervision-protocols/t3-relay.md`](supervision-protocols/t3-relay.md).
 
 On a home that runs the [supervision host](supervision-host.md) (by default for this Claude primary; `config/supervision-host-off` opts out), the relay runs the host as its watcher cycle, so the host's headless engine runs inside the relay's service, never inside the session T3 can unload.

@@ -53,7 +53,11 @@
 #     A session T3 reopened without its SessionStart hooks, found by a dead
 #     session-lock holder, is told to run session start first. It retries
 #     until T3 accepts each message; the durable wake queue, the outcome
-#     store, and the outbox hold the event in the meantime. It records each
+#     store, and the outbox hold the event in the meantime. A request id T3
+#     answers "was previously rejected" never succeeds again, so it retries
+#     that message once under a derived id and, rejected again, parks it in
+#     state/.t3-relay-parked with a PARKED log line and moves on; the event
+#     behind it stays in the queue or store for main's next drain. It records each
 #     message it sends (bin/fm-t3-host-lib.sh, the relay's sent record) so
 #     the dialog mirror never takes one for the captain's words. The next
 #     cycle names the closed one as its predecessor, and a host that stood
@@ -74,7 +78,8 @@
 # between need checks while the home needs no watcher, and the pause before a
 # hosted away daemon is restarted, default 15), FM_T3_RELAY_MODE_POLL
 # (seconds between state/.afk checks while the relay waits on a watcher cycle
-# or runs the away daemon, default 2).
+# or runs the away daemon, default 2), FM_T3_RELAY_SEND_DELAY (seconds before
+# a failed send is retried, doubling to 60, default 5).
 # Test seams: FM_T3_RELAY_DAEMON_ENTRY replaces bin/fm-afk-start.sh as the
 # command the relay runs for the away daemon, FM_T3_RELAY_ARM_ENTRY replaces
 # bin/fm-watch-arm.sh as its watcher cycle, and FM_T3_RELAY_HOST_ENTRY replaces
@@ -92,6 +97,8 @@ IDLE_POLL=${FM_T3_RELAY_IDLE_POLL:-15}
 case "$IDLE_POLL" in ''|*[!0-9]*|0) IDLE_POLL=15 ;; esac
 MODE_POLL=${FM_T3_RELAY_MODE_POLL:-2}
 case "$MODE_POLL" in ''|*[!0-9]*|0) MODE_POLL=2 ;; esac
+SEND_DELAY=${FM_T3_RELAY_SEND_DELAY:-5}
+case "$SEND_DELAY" in ''|*[!0-9]*|0) SEND_DELAY=5 ;; esac
 DAEMON_ENTRY=${FM_T3_RELAY_DAEMON_ENTRY:-$SCRIPT_DIR/fm-afk-start.sh}
 ARM_ENTRY=${FM_T3_RELAY_ARM_ENTRY:-$SCRIPT_DIR/fm-watch-arm.sh}
 HOST_ENTRY=${FM_T3_RELAY_HOST_ENTRY:-$SCRIPT_DIR/fm-supervision-host.sh}
@@ -216,9 +223,12 @@ cmd_adopt() {
 }
 
 # Deliver one wake to the primary thread. The request id is derived from the
-# closed arm, so a retried delivery is the same T3 message.
+# closed arm, so a retried delivery is the same T3 message. Returns 0 once T3
+# accepted it, 1 when this relay was replaced, and 2 when it was parked
+# (header): T3 keeps a rejected request id rejected, so resending that id can
+# only loop.
 deliver() {  # <request-id> <file>
-  local rid=$1 file=$2 thread delay=5 out
+  local rid=$1 file=$2 send_id=$1 thread delay=$SEND_DELAY out
   # Recorded before the send: T3 may submit it, and the mirror hook read it,
   # before the send returns.
   fm_t3_relay_sent_record "$STATE" "$rid" "$file" \
@@ -226,11 +236,21 @@ deliver() {  # <request-id> <file>
   while :; do
     thread=$(record_get "$HOST_RECORD" thread)
     if [ -n "$thread" ]; then
-      if out=$(mcp send --thread "$thread" --message-file "$file" --client-request-id "$rid" 2>&1); then
-        printf 'fm-t3-host relay: delivered %s to %s (%s)\n' "$rid" "$thread" "$(printf '%s' "$out" | json_get delivery 2>/dev/null)"
+      if out=$(mcp send --thread "$thread" --message-file "$file" --client-request-id "$send_id" 2>&1); then
+        printf 'fm-t3-host relay: delivered %s to %s (%s)\n' "$send_id" "$thread" "$(printf '%s' "$out" | json_get delivery 2>/dev/null)"
         return 0
       fi
-      printf 'fm-t3-host relay: delivery of %s failed, retrying in %ss: %s\n' "$rid" "$delay" "$(printf '%s' "$out" | tail -1)" >&2
+      case "$out" in
+        *'was previously rejected'*)
+          if [ "$send_id" != "$rid" ]; then
+            relay_park "$rid" "$file" "$(printf '%s' "$out" | tail -1)"
+            return 2
+          fi
+          send_id="$rid-retry"
+          printf 'fm-t3-host relay: T3 rejected request id %s for good; retrying once as %s in %ss\n' "$rid" "$send_id" "$delay" >&2
+          ;;
+        *) printf 'fm-t3-host relay: delivery of %s failed, retrying in %ss: %s\n' "$send_id" "$delay" "$(printf '%s' "$out" | tail -1)" >&2 ;;
+      esac
     else
       printf 'fm-t3-host relay: no primary thread recorded in %s; holding %s\n' "$HOST_RECORD" "$rid" >&2
     fi
@@ -242,6 +262,16 @@ deliver() {  # <request-id> <file>
 
 fm_t3_relay_mine() {
   [ "$(record_get "$RELAY_RECORD" pid)" = "$$" ]
+}
+
+# Keep a message T3 rejected under both its ids, for the operator, and say so
+# loudly; delivery then moves on.
+RELAY_PARKED_DIRNAME=.t3-relay-parked
+relay_park() {  # <request-id> <file> <last-error>
+  local dir="$STATE/$RELAY_PARKED_DIRNAME"
+  mkdir -p "$dir" 2>/dev/null && cp "$2" "$dir/$1.msg" 2>/dev/null || dir='(could not be kept)'
+  printf 'fm-t3-host relay: PARKED %s: T3 rejected it under %s and %s-retry, so the relay moves on; the message is in %s, and the wake behind it stays queued for main: %s\n' \
+    "$1" "$1" "$1" "$dir" "$3" >&2
 }
 
 # Write the one message a close sends to the thread into <message-file>;
@@ -281,7 +311,8 @@ relay_flush_outbox() {  # <message-file>
   for f in "$STATE/$FM_T3_RELAY_OUTBOX_DIRNAME"/*.close; do
     [ -f "$f" ] || continue
     if relay_compose "$f" "$1"; then
-      deliver "fm-t3-relay-$(basename "$f" .close)" "$1" || return 1
+      deliver "fm-t3-relay-$(basename "$f" .close)" "$1"
+      [ "$?" -ne 1 ] || return 1
     fi
     rm -f "$f"
   done
@@ -424,7 +455,8 @@ cmd_relay() {
       sleep "$IDLE_POLL"
     elif relay_compose "$out" "$msg"; then
       n=$((n + 1))
-      deliver "fm-t3-relay-$$-$pred-$n" "$msg" || break
+      deliver "fm-t3-relay-$$-$pred-$n" "$msg"
+      [ "$?" -ne 1 ] || break
     elif [ "$host" -eq 1 ] && { [ "$rc" -gt 128 ] || [ ! -s "$out" ]; }; then
       # The host died without a close; the next one stops what it left.
       printf 'fm-t3-host relay: the supervision host exited without a close (rc=%s); starting another\n' "$rc" >&2
