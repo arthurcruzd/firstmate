@@ -244,6 +244,10 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
         FM_SM_LIVE_KILL=1
         FM_SM_LIVE_CAUSE="confirmed agent absence on existing endpoint"
       else
+        # A T3 thread reads missing once archived, which T3 may still be
+        # finishing; its idempotent kill re-proves the close before a
+        # replacement thread is launched.
+        [ "$backend" != t3code ] || FM_SM_LIVE_KILL=1
         FM_SM_LIVE_CAUSE="recorded endpoint confidently missing"
       fi
       FM_SM_LIVE_WHERE="backend=$backend"
@@ -269,11 +273,12 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 # Acts on a `relaunchable` probe verdict for <id>: takes the per-home relaunch
 # lock, records the attempt, kills a confirmed-dead local endpoint if required
 # (FM_SM_LIVE_KILL), runs the guarded spawn, then records its outcome.
-# A close that cannot be proven stops there: the endpoint and its metadata stay
-# as recorded, the verdict becomes skipped, and nothing is spawned, because a
-# second endpoint beside a live one is the duplicate supervisor recovery must
-# never create. FM_SM_LIVE_RESUME instead sends the endpoint's backend resume
-# turn and spawns nothing.
+# On t3code a close that cannot be proven stops there: the thread and its
+# metadata stay as recorded, the verdict becomes skipped, and nothing is
+# spawned, because a second thread beside a live one is the duplicate
+# supervisor recovery must never create. Other backends keep their existing
+# best-effort kill. FM_SM_LIVE_RESUME instead sends the endpoint's backend
+# resume turn and spawns nothing.
 # The header owns the lock-wait bounds. A positive timeout separately
 # wraps the spawn in fm_run_timed so a watcher poll stays bounded; 124/137 mean
 # the bound fired. Returns the spawn exit status; combined spawn output is in

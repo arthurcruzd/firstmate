@@ -455,26 +455,23 @@ test_sweep_serializes_distinct_secondmate_relaunches() {
   pass "sweep: distinct secondmate relaunches serialize across the task-set lock"
 }
 
-# A close that cannot be proven must never be followed by a replacement: the
-# old endpoint may still run, and a second supervisor beside it is the worst
-# outcome recovery can produce.
-test_sweep_keeps_dead_secondmate_when_close_fails() {
+# The T3-only close refusal (fm_secondmate_liveness_relaunch) must leave every
+# other backend on its existing best-effort kill: a tmux close that fails is
+# still followed by the guarded spawn, exactly as before.
+test_sweep_keeps_tmux_best_effort_kill_when_close_fails() {
   local w fb tmuxfb log out
   w=$(new_world sweep-dead-close-fails)
   add_sm_home "$w" sm1 firstmate:fm-sm1
   fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
   log="$w/calls.log"; : > "$log"
-  cp "$w/home/state/sm1.meta" "$w/sm1.meta.before"
 
   out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log" FM_TEST_FAIL_KILL=1)
 
   assert_contains "$(cat "$log")" "kill-window -t =firstmate:=fm-sm1" "the close is attempted"
-  assert_not_contains "$(cat "$log")" "new-window" "an unproved close must not be followed by a replacement endpoint"
-  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: could not prove the old tmux endpoint" \
-    "the refusal names the unproved close"
-  cmp -s "$w/sm1.meta.before" "$w/home/state/sm1.meta" || fail "the endpoint record must be left exactly as recorded"
-  assert_grep 'failed' "$w/home/state/.secondmate-relaunch-sm1" "the refused attempt is recorded in the relaunch ledger"
-  pass "sweep: a dead secondmate whose old endpoint will not close is left in place, never replaced"
+  assert_not_contains "$out" "could not prove the old" "a non-T3 close failure must not take the T3-only refusal path"
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawn failed after confirmed agent absence on existing endpoint" \
+    "the guarded spawn still runs after a failed tmux close, as before"
+  pass "sweep: a tmux secondmate whose close fails keeps the existing best-effort kill and guarded spawn"
 }
 
 test_sweep_skips_mate_whose_liveness_lock_is_held() {
@@ -850,7 +847,7 @@ test_agent_state_dispatcher_and_compatibility
 test_sweep_respawns_confirmed_dead_secondmate
 test_sweep_recovers_the_durable_secondmate_account
 test_sweep_serializes_distinct_secondmate_relaunches
-test_sweep_keeps_dead_secondmate_when_close_fails
+test_sweep_keeps_tmux_best_effort_kill_when_close_fails
 test_sweep_leaves_alive_secondmate_untouched
 test_sweep_respawns_authoritatively_missing_pi_secondmate
 test_sweep_respawns_authoritatively_missing_pi_signed_secondmate

@@ -2020,6 +2020,42 @@ test_claude_pr_tool_clause_version_boundary() {
   pass "t3code Claude PR-tool clause: dropped only at or past the verified T3 build, kept for older or unreadable servers"
 }
 
+# A T3 secondmate whose thread reads missing (archived) re-proves the close
+# through the idempotent kill before any replacement thread is launched; when
+# that proof fails, the thread and its record stay and nothing is spawned.
+test_t3_secondmate_missing_thread_reproves_close_before_replacement() {
+  local thread=mcp:0b1c2d3e-5f6a-4b7c-8d9e-789abcdef012 root state out between
+  t3_case secondmate-missing completed
+  t3_world "$(t3_thread_json "$thread" completed true)"
+  root="$CASE_DIR/fake-root"
+  mkdir -p "$root/bin"
+  printf '#!/usr/bin/env bash\nprintf "SPAWN %%s\\n" "$*" >> "%s"\n' "$CASE_DIR/spawns" > "$root/bin/fm-spawn.sh"
+  chmod +x "$root/bin/fm-spawn.sh"
+  run_relaunch() {  # <state-dir> <js run between probe and relaunch>
+    mkdir -p "$1"
+    fm_write_meta "$1/smgone.meta" "window=fm-smgone" "kind=secondmate" "harness=claude" "backend=t3code" "t3_thread_id=$thread" "home=$CASE_DIR/sm-home"
+    STATE="$1" FM_STATE_OVERRIDE="$1" FM_CONFIG_OVERRIDE="$CONFIG" FM_HOME="$CASE_DIR/home" FM_ROOT_OVERRIDE="$root" \
+      WORLD="$T3_FAKE_WORLD" BETWEEN="$2" bash -c '
+. "$0/bin/fm-secondmate-liveness-lib.sh"
+fm_secondmate_liveness_probe "$1" smgone poll
+printf "probe=%s kill=%s\n" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_KILL"
+node -e "const fs=require(\"fs\"); let w=JSON.parse(fs.readFileSync(process.env.WORLD,\"utf8\")); eval(process.env.BETWEEN); fs.writeFileSync(process.env.WORLD, JSON.stringify(w))"
+fm_secondmate_liveness_relaunch "$1" smgone && echo relaunched=yes || echo "relaunched=no status=$FM_SM_LIVE_STATUS reason=$FM_SM_LIVE_REASON"
+' "$ROOT" "$1/smgone.meta" 2>&1
+  }
+  out=$(run_relaunch "$CASE_DIR/state-ok" '')
+  assert_contains "$out" "probe=relaunchable kill=1" "a missing T3 thread must re-prove its close before replacement: $out"
+  assert_contains "$out" "relaunched=yes" "a proven archive lets the replacement launch: $out"
+  assert_grep "SPAWN smgone --secondmate" "$CASE_DIR/spawns" "the guarded secondmate spawn runs after the proven close"
+  : > "$CASE_DIR/spawns"
+  out=$(run_relaunch "$CASE_DIR/state-fail" 'w.failTools = { t3_thread_read: { code: "unavailable", message: "read unavailable" } }')
+  assert_contains "$out" "relaunched=no status=skipped reason=could not prove the old t3code endpoint $thread closed" "an unproved close must stop recovery: $out"
+  [ ! -s "$CASE_DIR/spawns" ] || fail "no replacement may be spawned after an unproved close, got $(cat "$CASE_DIR/spawns")"
+  assert_grep "t3_thread_id=$thread" "$CASE_DIR/state-fail/smgone.meta" "the endpoint record is kept"
+  assert_grep failed "$CASE_DIR/state-fail/.secondmate-relaunch-smgone" "the refused attempt is recorded in the relaunch ledger"
+  pass "secondmate liveness backend=t3code: a missing thread re-proves its archive before replacement, and an unproved close spawns nothing"
+}
+
 if [ -n "${FM_TEST_ONLY:-}" ]; then
   "$FM_TEST_ONLY"
   exit
@@ -2056,6 +2092,7 @@ test_status_table
 test_push_wait_escalates_pending_question_once
 test_answer_script_reads_and_answers_questions
 test_failed_t3_secondmate_is_resumed_in_place
+test_t3_secondmate_missing_thread_reproves_close_before_replacement
 test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim
 test_draining_archived_t3_secondmate_is_not_relaunched
 test_kill_interrupts_then_archives_and_tolerates_gone
