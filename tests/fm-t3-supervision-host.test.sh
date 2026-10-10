@@ -193,8 +193,8 @@ handled_at_least() { [ "$(count_re '	handled	' "$1/state/.supervision-host.log")
 sends() { t3_fake_calls t3_thread_send; }
 send_count() { local n; n=$(sends | grep -c .); printf '%s\n' "${n:-0}"; }
 sends_at_least() { [ "$(send_count)" -ge "$1" ]; }
-append_status() {  # <home> <text> [verb]
-  printf '%s [at=%s]: %s\n' "${3:-working}" "$(date +%s)" "$2" >> "$1/state/demo.status"
+append_status() {  # <home> <text> [verb] [key]
+  printf '%s%s [at=%s]: %s\n' "${3:-working}" "${4:+ [key=$4]}" "$(date +%s)" "$2" >> "$1/state/demo.status"
 }
 main_drain() {  # <home>: main's drain from its session; sets MAIN_ACK
   local out
@@ -301,7 +301,7 @@ test_main_only_close_keeps_the_host_parked_and_resurfaces_nothing() {
   start_relay "$home"
   wait_until 200 watcher_live "$home" || fail "main-only: the relay's host never armed a watcher: $(cat "$home/relay.out")"
   host=$(host_pid "$home")
-  append_status "$home" 'which export format?' needs-decision
+  append_status "$home" 'which export format?' needs-decision format
   wait_until 300 sends_at_least 1 || fail "main-only: the decision did not reach the thread: $(cat "$home/relay.out"; cat "$home/state/.supervision-host.log")"
   assert_contains "$(sends)" 'Firstmate wake from the T3 wake relay:' "main-only: the decision must arrive as an ordinary wake"
   assert_contains "$(sends)" 'demo.status' "main-only: the wake must carry the watcher's reason line"
@@ -309,14 +309,16 @@ test_main_only_close_keeps_the_host_parked_and_resurfaces_nothing() {
   wait_until 100 watcher_live "$home" || fail "main-only: no watcher while main handles the close"
   assert_grep 'demo.status' "$home/state/.wake-queue" "main-only: the decision must stay queued for main"
   [ -e "$home/state/.supervision-host-left" ] && fail "main-only: the relay host left a successor for a take-over"
+  # Main answers the decision, which closes it, and acknowledges the wake.
   main_drain "$home" >/dev/null
+  append_status "$home" 'csv' resolved format
   main_ack "$home"
-  assert_no_grep 'demo.status' "$home/state/.wake-queue" "main-only: main's acknowledgement did not consume the decision"
   append_status "$home" 'decision received, continuing'
   wait_until 300 handled_at_least "$home" 1 || fail "main-only: the next routine wake was not handled: $(cat "$home/state/.supervision-host.log")"
-  append_status "$home" 'another question?' needs-decision
+  append_status "$home" 'another question?' needs-decision scope
   wait_until 300 sends_at_least 2 || fail "main-only: the second decision did not reach the thread"
   main_drain "$home" >/dev/null
+  append_status "$home" 'keep it small' resolved scope
   main_ack "$home"
   append_status "$home" 'step two'
   wait_until 300 handled_at_least "$home" 2 || fail "main-only: the second routine wake was not handled"
