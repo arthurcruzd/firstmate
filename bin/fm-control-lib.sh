@@ -39,9 +39,10 @@
 #
 # `resume` is deliberately NOT a verb: it is not deterministic across the
 # verified adapters (docs/agent-control.md owns the per-adapter resume facts).
-# `relaunch` covers the same need deterministically for every adapter, because
-# the brief on disk - not a harness-private session - is the durable
-# instruction.
+# `relaunch` uses the brief on disk rather than a harness-private session as
+# its durable instruction. The relaunch-time exception is
+# fm_control_relaunch_resume_flag below: a reference the endpoint's runtime
+# bound as its status authority is returned to a replacement with that adapter.
 
 # The complete control-plane verb allowlist, one per line.
 fm_control_verbs() {
@@ -67,11 +68,11 @@ fm_control_harnesses() {
 }
 
 fm_control_harness_supported() {  # <harness>
-  local harness
+  local harness found=1
   while read -r harness; do
-    [ "$harness" = "${1-}" ] && return 0
+    [ "$harness" = "${1-}" ] && found=0
   done < <(fm_control_harnesses)
-  return 1
+  return "$found"
 }
 
 # The verified adapter a RECORDED harness value belongs to. Every table below
@@ -234,6 +235,43 @@ fm_control_exit_command() {  # <harness>
   esac
 }
 
+# The launch argument that makes a RELAUNCH of <harness> RESUME an exact agent
+# session instead of starting a fresh one, printed only when <registered-agent>
+# is the label that session reference belongs to; nothing otherwise.
+#
+# This exists for one runtime failure, not as a general resume feature. Herdr
+# gives a pane one status authority, and for Pi with its installed integration
+# that authority is the lifecycle hooks, which also suppress Herdr's screen
+# detection for the pane. That registration outlives its agent process in the
+# crew shape - a nested worktree shell under the pane's top shell - and Herdr
+# then applies only reports carrying the session identity it bound. A
+# replacement agent started fresh in that same pane reports a NEW session, so
+# its state reports are ignored and the pane stays frozen at whatever the
+# previous agent last reported: a working crewmate reads idle until its task
+# ends (reproduced and fixed live 2026-09-21, herdr 0.9.1; the read that
+# supplies the reference is
+# bin/backends/herdr.sh's fm_backend_herdr_pane_agent_session_ref).
+#
+# So the reference is not chosen from what looks recent - it is the exact
+# identity the endpoint's own runtime recorded, which is why a matched
+# registered-agent label is required: resuming a reference reported by a
+# DIFFERENT agent would inject another agent's conversation into this launch.
+# `pi` is the label Pi and pi-signed both report, so one entry covers both.
+# Every other harness returns nothing and keeps today's fresh-session
+# relaunch, which is what the adapter tables above (and the absence of a
+# verified resume form for those harnesses) require.
+#
+# Prints the flag name only; the caller quotes and appends the reference, since
+# shell quoting belongs to the owner of the launch line (bin/fm-spawn.sh).
+fm_control_relaunch_resume_flag() {  # <harness> <registered-agent>
+  case "${1-}" in
+    pi|pi-signed)
+      [ "${2-}" = pi ] && printf -- '--session'
+      ;;
+  esac
+  return 0
+}
+
 # Which named keys a backend adapter can deliver. Every session provider
 # normalizes Enter, Ctrl+C, and the Ctrl+U composer clear; Orca's terminal API
 # exposes only an interrupt and an Enter, so it can deliver neither Escape nor
@@ -334,11 +372,22 @@ fm_control_endpoint_absence_verdict() {  # <backend> <target>
 # pointing at a retired generation. Prints zero or more absolute paths, one per
 # line: worktree-resident hook files and firstmate-owned state tokens only,
 # never a harness's own managed config.
-fm_control_harness_wiring_paths() {  # <harness> <worktree> <state-dir> <id>
-  local harness=${1-} wt=${2-} state=${3-} id=${4-}
+fm_control_harness_wiring_paths() {  # <harness> <worktree> <state-dir> <id> [kind]
+  local harness=${1-} wt=${2-} state=${3-} id=${4-} kind=${5-}
   [ -n "$wt" ] && [ -n "$state" ] && [ -n "$id" ] || return 1
   case "$harness" in
-    claude) printf '%s\n' "$wt/.claude/settings.local.json" ;;
+    # A secondmate's .claude/settings.local.json belongs to the captain.
+    # Retire only the firstmate-owned settings file the launch passes to
+    # --settings and the Stop pointer that carries the same busy generation.
+    # A crewmate's hook file is the worktree settings.local.json.
+    claude)
+      if [ "$kind" = secondmate ]; then
+        printf '%s\n' "$state/$id.claude-settings.json"
+        printf '%s\n' "$wt/.fm-busy-stop"
+      else
+        printf '%s\n' "$wt/.claude/settings.local.json"
+      fi
+      ;;
     opencode) printf '%s\n' "$wt/.opencode/plugins/fm-busy-state.js" ;;
     pi|pi-signed) printf '%s\n' "$state/$id.pi-ext.ts" ;;
     omp) printf '%s\n' "$state/$id.omp-ext.ts" ;;
