@@ -1870,25 +1870,28 @@ quiet_pass_through_successor() {  # <home>
     || fail "fixture: could not acknowledge the successor downtime"
 }
 
-resurface_noops() {  # <home>
+# The resurfaces the host kept: a no-op over an empty queue, or an engine
+# turn over rows the branch may claim.
+resurface_kept() {  # <home>
   local n
-  n=$(grep -cE '	no-op	nothing for the branch to claim	check: rearm-resurface$' "$1/state/.supervision-host.log" 2>/dev/null)
+  n=$(grep -cE '	(no-op	nothing for the branch to claim|handled	.*)	check: rearm-resurface$' "$1/state/.supervision-host.log" 2>/dev/null)
   printf '%s\n' "${n:-0}"
 }
-resurface_absorbed() { [ "$(resurface_noops "$1")" -gt "$2" ] && watcher_live "$1"; }
+resurface_settled() { host_exited "$1" || { [ "$(resurface_kept "$1")" -gt "$2" ] && watcher_live "$1"; }; }
 
 park_after_stop() {  # <home>
   local before
-  # Main drains what the stopped host left queued, so the resurface finds
-  # nothing for main and the host keeps it.
-  main_drain_and_ack "$1"
-  before=$(resurface_noops "$1")
+  before=$(resurface_kept "$1")
   rm -f "$1/host.rc"
   : > "$1/park.go"
-  wait_until 150 resurface_absorbed "$1" "$before" \
-    || fail "the watcher's downtime resurface over an empty queue was not kept off main: $(cat "$1/host.out"; tail -n 5 "$1/state/.supervision-host.log" 2>/dev/null)"
-  host_exited "$1" && fail "an idle downtime resurface reached main: $(cat "$1/host.out")"
-  return 0
+  wait_until 250 resurface_settled "$1" "$before" \
+    || fail "the watcher's downtime resurface was neither kept nor delivered: $(cat "$1/host.out"; tail -n 5 "$1/state/.supervision-host.log" 2>/dev/null)"
+  host_exited "$1" || return 0
+  # A queue holding a row main owns still sends the resurface to main.
+  assert_re '^check: rearm-resurface' "$1/host.out" "fixture: the first close after the watcher stopped was not its resurface"
+  main_drain_and_ack "$1"
+  quiet_pass_through_successor "$1"
+  park_again "$1"
 }
 
 # Dialog counts as delivered only once the turn that carried it is accepted
@@ -1922,6 +1925,9 @@ SH
   : > "$home/slow-render"
   echo 0 > "$home/park-clock"
   park_after_stop "$home"
+  host_exited "$home" && fail "an idle downtime resurface reached main: $(cat "$home/host.out")"
+  assert_re '	no-op	nothing for the branch to claim	check: rearm-resurface$' "$home/state/.supervision-host.log" \
+    "an idle downtime resurface was not kept as a no-op"
   append_status "$home" 'reaches the boundary'
   wait_until 400 host_exited "$home" || fail "mirror boundary: the host did not end its park"
   assert_re '^supervision-host: cycle boundary - ' "$home/host.out" "fixture: the second host did not exit at its boundary"
@@ -1950,9 +1956,12 @@ SH
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until 200 host_exited "$home" || fail "mirror boundary: the host did not stop mid-turn on TERM"
   echo handle > "$home/stub-mode"
+  # The stopped turn's row is still queued, and the branch may claim it, so
+  # the resurface itself is the turn after the stop.
   park_after_stop "$home"
-  append_status "$home" 'handled after the stop'
   wait_until 250 handled_at_least "$home" 3 || fail "mirror boundary: the wake after the stop was not handled: $(cat "$home/state/.supervision-host.log")"
+  assert_re '	handled	.*	check: rearm-resurface$' "$home/state/.supervision-host.log" \
+    "the resurface over the stopped turn's row was not handled on the engine"
   third="$home/engine-call.4"
   assert_re '^arg=--resume$' "$third" "fixture: the turn after the stop did not resume the conversation"
   assert_re '^\[captain\] third ask, turn stopped$' "$third" "dialog of a turn stopped before its report must reach the next turn"
