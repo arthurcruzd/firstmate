@@ -1,0 +1,5 @@
+Live process comm=watch ) ( odd; identity=174030757; kernel field 22=174030757
+Real process ownership accepted with matching ticks
+Different ticks rejected for same live pid
+No-proc fallback accepted real ps identity: Sun Oct 11 22:42:41 2026
+No-proc stale lstart rejected with ordinary status=1
