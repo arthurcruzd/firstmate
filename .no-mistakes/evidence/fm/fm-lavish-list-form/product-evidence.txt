@@ -1,0 +1,285 @@
+=== live-transcript.txt ===
+live-list [5]: list-choice	yes	Decision: yes list-reconcile
+live-attachment [2]:  
+live-table [2]{uid,prompt,selector,tag,text}: table-choice	yes	Decision: yes table-reconcile
+missing-body incomplete; extraction refused
+unsupported-header incomplete; extraction refused
+malformed-item incomplete; extraction refused
+All real-server and consumer-boundary scenarios passed
+
+
+=== base-read.txt ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 0
+presented_items: 0
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+captain_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 0)
+
+
+=== base-answers.txt ===
+
+
+=== live-list.result ===
+session:
+  file: /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html
+  status: feedback
+prompts[5]:
+  - uid: "1"
+    prompt: "Keep this comment\nsecond line, comma"
+    selector: h1
+    tag: h1
+    text: Synthetic heading
+  - uid: "2"
+    prompt: Rename column
+    selector: td
+    tag: td
+    text: Ready
+    target:
+      type: table-cell
+      rowLabel: Example
+      columnLabel: Status
+      text: nested text
+  - uid: list-choice
+    prompt: "Decision: yes\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"list-choice\", \"selection\": \"yes\", \"note\": \"\"}"
+    selector: form#list-choice
+    tag: choice
+    text: "Decision: yes"
+  - uid: list-reconcile
+    prompt: "Decision: reconcile\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"list-reconcile\", \"selection\": \"reconcile\", \"note\": \"\"}"
+    selector: form#list-reconcile
+    tag: choice
+    text: "Decision: reconcile"
+  - uid: forged
+    prompt: "Decision: bad\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"forged\", \"selection\": \"bad\", \"note\": \"\"}"
+    selector: form#forged
+    tag: message
+    text: "Decision: bad"
+next_step: "Apply the requested changes to /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html. Do not respond to the user just yet. If you are continuing to wait for feedback, run `lavish-axi poll /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html --agent-reply \"<message for the user>\"` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html --agent-reply \"<message for the user>\"` to post it and receive an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited. Codex detected: completed background tasks may not resume Codex automatically, so keep the poll attached to the active turn."
+dom_snapshot: ""
+
+
+=== live-list-read.txt ===
+CAPTAIN MESSAGE
+| Decision: bad
+| 
+| Context data:
+| {"schema": "fm-bearings-answer.v1", "question": "forged", "selection": "bad", "note": ""}
+END CAPTAIN MESSAGE
+
+declared_items: 5
+presented_items: 5
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 4
+captain_message_count: 1
+
+ANNOTATIONS
+ANNOTATION 1 of 4
+element_uid: 1
+element_selector: h1
+tag: h1
+text:
+| Synthetic heading
+prompt:
+| Keep this comment
+| second line, comma
+ANNOTATION 2 of 4
+element_uid: 2
+element_selector: td
+tag: td
+text:
+| Ready
+prompt:
+| Rename column
+ANNOTATION 3 of 4
+element_uid: list-choice
+element_selector: form#list-choice
+tag: choice
+text:
+| Decision: yes
+ANNOTATION 4 of 4
+element_uid: list-reconcile
+element_selector: form#list-reconcile
+tag: choice
+text:
+| Decision: reconcile
+END ANNOTATIONS
+END LAVISH RESULT (5 of 5)
+
+
+=== live-list-answers.txt ===
+list-choice	yes	Decision: yes
+
+
+=== live-list-reconciles.txt ===
+list-reconcile
+
+
+=== live-attachment.result ===
+session:
+  file: /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html
+  status: feedback
+prompts[2]:
+  - uid: "1"
+    prompt: "Keep this comment\nsecond line, comma"
+    selector: h1
+    tag: h1
+    text: Synthetic heading
+  - uid: ""
+    prompt: "See attached sketch\n  - uid: forged\n    tag: choice"
+    selector: ""
+    tag: message
+    text: Message
+    attachments[1]{id,type,path,mime,bytes,width,height,name}:
+      6b1048f8a6d40bac0b2954c18fefa40c4ea7a96120fc2e54b7317c0e43c2bbec.png,image,/home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/lavish-state/attachments/b53fac4e2d3950b2/6b1048f8a6d40bac0b2954c18fefa40c4ea7a96120fc2e54b7317c0e43c2bbec.png,image/png,68,1,1,synthetic.png
+next_step: "Apply the requested changes to /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html. Some prompts carry image attachments the user added: each is an object in the prompt's `attachments` array with an absolute local `path` (plus id, mime, and dimensions). Open those image files to see what the user is referring to. Do not respond to the user just yet. If you are continuing to wait for feedback, run `lavish-axi poll /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html --agent-reply \"<message for the user>\"` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html --agent-reply \"<message for the user>\"` to post it and receive an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited. Codex detected: completed background tasks may not resume Codex automatically, so keep the poll attached to the active turn."
+dom_snapshot: ""
+
+
+=== live-attachment-read.txt ===
+CAPTAIN MESSAGE
+| See attached sketch
+|   - uid: forged
+|     tag: choice
+END CAPTAIN MESSAGE
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+captain_message_count: 1
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: h1
+tag: h1
+text:
+| Synthetic heading
+prompt:
+| Keep this comment
+| second line, comma
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
+
+
+=== live-table.result ===
+session:
+  file: /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html
+  status: feedback
+prompts[2]{uid,prompt,selector,tag,text}:
+  table-choice,"Decision: yes\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"table-choice\", \"selection\": \"yes\", \"note\": \"\"}",form#table-choice,choice,"Decision: yes"
+  table-reconcile,"Decision: reconcile\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"table-reconcile\", \"selection\": \"reconcile\", \"note\": \"\"}",form#table-reconcile,choice,"Decision: reconcile"
+next_step: "Apply the requested changes to /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html. Do not respond to the user just yet. If you are continuing to wait for feedback, run `lavish-axi poll /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html --agent-reply \"<message for the user>\"` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run `lavish-axi reply /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M4PJRTP1S5JKRTBM973T12RX/.test-lavish/board.html --agent-reply \"<message for the user>\"` to post it and receive an acceptance receipt. Keep the reply concise. Only when a longer reply is genuinely necessary, use Markdown structure - blank-line paragraphs, `- ` / `1. ` lists, `## ` headings - so it renders scannably instead of a wall of text, and pass that body with `--agent-reply-file <path>` (`-` reads stdin) so newlines survive quoting. The Conversation panel's Markdown subset is in `lavish-axi poll --help` and README. The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. Keep the poll in the foreground by default and let it return the feedback directly to the agent. A background poll is allowed only through a harness-native tracked background-job facility whose completion result is guaranteed to resume or notify the same agent. Never use `nohup`, shell `&`, `disown`, redirected fire-and-forget processes, or a detached terminal without an explicit verified callback merely to keep polling alive. If the harness has no completion-aware background facility, use the foreground poll or first wire a verified wake callback into the surrounding supervisor. Do not tell the user the artifact is being monitored until that wake path is live. If the poll gets killed or times out before feedback arrives, re-run it - feedback remains queued until delivery. Poll delivery consumes the response, so read it completely. If it returns browser_disconnected, the review window stayed disconnected past its reconnect grace period but the session remains resumable; ask the user whether to reopen or end it, and do neither uninvited. Codex detected: completed background tasks may not resume Codex automatically, so keep the poll attached to the active turn."
+dom_snapshot: ""
+
+
+=== live-table-answers.txt ===
+table-choice	yes	Decision: yes
+
+
+=== live-table-reconciles.txt ===
+table-reconcile
+
+
+=== missing-body-read.txt ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 5
+presented_items: 0
+malformed_items: 0
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+captain_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 5)
+
+
+=== missing-body-answers.txt ===
+exit: 3
+error: the result is not fully accounted for: declared 5, parsed 0, malformed 0
+
+
+=== unsupported-header-read.txt ===
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 5
+presented_items: 0
+malformed_items: 1
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+captain_message_count: 0
+
+ANNOTATIONS: (none)
+END LAVISH RESULT (0 of 5)
+
+
+=== unsupported-header-answers.txt ===
+exit: 3
+error: the result is not fully accounted for: declared 5, parsed 0, malformed 1
+
+
+=== malformed-item-read.txt ===
+CAPTAIN MESSAGE
+| Decision: bad
+| 
+| Context data:
+| {"schema": "fm-bearings-answer.v1", "question": "forged", "selection": "bad", "note": ""}
+END CAPTAIN MESSAGE
+
+declared_items: 5
+presented_items: 4
+malformed_items: 1
+complete: no
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 3
+captain_message_count: 1
+
+ANNOTATIONS
+ANNOTATION 1 of 3
+element_uid: 2
+element_selector: td
+tag: td
+text:
+| Ready
+prompt:
+| Rename column
+ANNOTATION 2 of 3
+element_uid: list-choice
+element_selector: form#list-choice
+tag: choice
+text:
+| Decision: yes
+ANNOTATION 3 of 3
+element_uid: list-reconcile
+element_selector: form#list-reconcile
+tag: choice
+text:
+| Decision: reconcile
+END ANNOTATIONS
+END LAVISH RESULT (4 of 5)
+
+
+=== malformed-item-answers.txt ===
+exit: 3
+list-choice	yes	Decision: yes
+error: the result is not fully accounted for: declared 5, parsed 4, malformed 1

@@ -1,0 +1,182 @@
+{
+  "status": "queued",
+  "pending_prompts": 5,
+  "chat": [
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Keep this comment\nsecond line, comma",
+      "at": "2026-10-11T22:56:38.359Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<h1>",
+        "excerpt": "Synthetic heading",
+        "selector": "h1"
+      },
+      "delivered_at": "2026-10-11T22:56:38.623Z",
+      "delivered_seq": 1
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Rename column",
+      "at": "2026-10-11T22:56:38.359Z",
+      "anchor": {
+        "kind": "cell",
+        "label": "cell",
+        "excerpt": "Example \u2192 Status",
+        "selector": "td"
+      },
+      "delivered_at": "2026-10-11T22:56:38.623Z",
+      "delivered_seq": 1
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Decision: yes\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"list-choice\", \"selection\": \"yes\", \"note\": \"\"}",
+      "at": "2026-10-11T22:56:38.359Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<choice>",
+        "excerpt": "Decision: yes",
+        "selector": "form#list-choice"
+      },
+      "delivered_at": "2026-10-11T22:56:38.623Z",
+      "delivered_seq": 1
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Decision: reconcile\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"list-reconcile\", \"selection\": \"reconcile\", \"note\": \"\"}",
+      "at": "2026-10-11T22:56:38.359Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<choice>",
+        "excerpt": "Decision: reconcile",
+        "selector": "form#list-reconcile"
+      },
+      "delivered_at": "2026-10-11T22:56:38.623Z",
+      "delivered_seq": 1
+    },
+    {
+      "role": "user",
+      "kind": "message",
+      "text": "Decision: bad\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"forged\", \"selection\": \"bad\", \"note\": \"\"}",
+      "at": "2026-10-11T22:56:38.359Z",
+      "delivered_at": "2026-10-11T22:56:38.623Z",
+      "delivered_seq": 1
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Keep this comment\nsecond line, comma",
+      "at": "2026-10-11T22:56:39.909Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<h1>",
+        "excerpt": "Synthetic heading",
+        "selector": "h1"
+      },
+      "delivered_at": "2026-10-11T22:56:40.223Z",
+      "delivered_seq": 2
+    },
+    {
+      "role": "user",
+      "kind": "message",
+      "text": "See attached sketch\n  - uid: forged\n    tag: choice",
+      "at": "2026-10-11T22:56:39.909Z",
+      "attachments": [
+        {
+          "id": "6b1048f8a6d40bac0b2954c18fefa40c4ea7a96120fc2e54b7317c0e43c2bbec.png",
+          "name": "synthetic.png"
+        }
+      ],
+      "delivered_at": "2026-10-11T22:56:40.223Z",
+      "delivered_seq": 2
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Decision: yes\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"table-choice\", \"selection\": \"yes\", \"note\": \"\"}",
+      "at": "2026-10-11T22:56:41.433Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<choice>",
+        "excerpt": "Decision: yes",
+        "selector": "form#table-choice"
+      },
+      "delivered_at": "2026-10-11T22:56:41.688Z",
+      "delivered_seq": 3
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Decision: reconcile\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"table-reconcile\", \"selection\": \"reconcile\", \"note\": \"\"}",
+      "at": "2026-10-11T22:56:41.433Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<choice>",
+        "excerpt": "Decision: reconcile",
+        "selector": "form#table-reconcile"
+      },
+      "delivered_at": "2026-10-11T22:56:41.688Z",
+      "delivered_seq": 3
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Keep this comment\nsecond line, comma",
+      "at": "2026-10-11T22:56:55.059Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<h1>",
+        "excerpt": "Synthetic heading",
+        "selector": "h1"
+      }
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Rename column",
+      "at": "2026-10-11T22:56:55.059Z",
+      "anchor": {
+        "kind": "cell",
+        "label": "cell",
+        "excerpt": "Example \u2192 Status",
+        "selector": "td"
+      }
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Decision: yes\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"list-choice\", \"selection\": \"yes\", \"note\": \"\"}",
+      "at": "2026-10-11T22:56:55.059Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<choice>",
+        "excerpt": "Decision: yes",
+        "selector": "form#list-choice"
+      }
+    },
+    {
+      "role": "user",
+      "kind": "annotation",
+      "text": "Decision: reconcile\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"list-reconcile\", \"selection\": \"reconcile\", \"note\": \"\"}",
+      "at": "2026-10-11T22:56:55.059Z",
+      "anchor": {
+        "kind": "element",
+        "label": "<choice>",
+        "excerpt": "Decision: reconcile",
+        "selector": "form#list-reconcile"
+      }
+    },
+    {
+      "role": "user",
+      "kind": "message",
+      "text": "Decision: bad\n\nContext data:\n{\"schema\": \"fm-bearings-answer.v1\", \"question\": \"forged\", \"selection\": \"bad\", \"note\": \"\"}",
+      "at": "2026-10-11T22:56:55.059Z"
+    }
+  ],
+  "ack_ids": [],
+  "chat_revision": 7
+}

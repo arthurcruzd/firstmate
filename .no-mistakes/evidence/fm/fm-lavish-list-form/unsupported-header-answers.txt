@@ -1,0 +1,2 @@
+exit: 3
+error: the result is not fully accounted for: declared 5, parsed 0, malformed 1

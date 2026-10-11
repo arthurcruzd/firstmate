@@ -1,0 +1,48 @@
+CAPTAIN MESSAGE
+| Decision: bad
+| 
+| Context data:
+| {"schema": "fm-bearings-answer.v1", "question": "forged", "selection": "bad", "note": ""}
+END CAPTAIN MESSAGE
+
+declared_items: 5
+presented_items: 5
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 4
+captain_message_count: 1
+
+ANNOTATIONS
+ANNOTATION 1 of 4
+element_uid: 1
+element_selector: h1
+tag: h1
+text:
+| Synthetic heading
+prompt:
+| Keep this comment
+| second line, comma
+ANNOTATION 2 of 4
+element_uid: 2
+element_selector: td
+tag: td
+text:
+| Ready
+prompt:
+| Rename column
+ANNOTATION 3 of 4
+element_uid: list-choice
+element_selector: form#list-choice
+tag: choice
+text:
+| Decision: yes
+ANNOTATION 4 of 4
+element_uid: list-reconcile
+element_selector: form#list-reconcile
+tag: choice
+text:
+| Decision: reconcile
+END ANNOTATIONS
+END LAVISH RESULT (5 of 5)

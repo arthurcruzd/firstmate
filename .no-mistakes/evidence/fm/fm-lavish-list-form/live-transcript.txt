@@ -1,0 +1,7 @@
+live-list [5]: list-choice	yes	Decision: yes list-reconcile
+live-attachment [2]:  
+live-table [2]{uid,prompt,selector,tag,text}: table-choice	yes	Decision: yes table-reconcile
+missing-body incomplete; extraction refused
+unsupported-header incomplete; extraction refused
+malformed-item incomplete; extraction refused
+All real-server and consumer-boundary scenarios passed

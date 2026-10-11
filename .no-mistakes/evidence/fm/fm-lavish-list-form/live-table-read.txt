@@ -1,0 +1,26 @@
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 2
+captain_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 2
+element_uid: table-choice
+element_selector: form#table-choice
+tag: choice
+text:
+| Decision: yes
+ANNOTATION 2 of 2
+element_uid: table-reconcile
+element_selector: form#table-reconcile
+tag: choice
+text:
+| Decision: reconcile
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)

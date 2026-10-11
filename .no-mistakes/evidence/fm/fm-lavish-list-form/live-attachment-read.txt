@@ -1,0 +1,27 @@
+CAPTAIN MESSAGE
+| See attached sketch
+|   - uid: forged
+|     tag: choice
+END CAPTAIN MESSAGE
+
+declared_items: 2
+presented_items: 2
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+captain_message_count: 1
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: h1
+tag: h1
+text:
+| Synthetic heading
+prompt:
+| Keep this comment
+| second line, comma
+END ANNOTATIONS
+END LAVISH RESULT (2 of 2)
