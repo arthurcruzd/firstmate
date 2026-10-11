@@ -3437,7 +3437,7 @@ assert_contains "$out" "presented_items: 4" "a list-form capture dropped queued 
 assert_contains "$out" "malformed_items: 0" "a well-formed list-form capture reported malformed items"
 assert_contains "$out" "complete: yes" "a well-formed list-form capture was not marked complete"
 assert_contains "$out" "annotation_count: 3" "list-form annotations were not all presented"
-assert_contains "$out" "session_ending_message_count: 1" "the list-form message was not counted"
+assert_contains "$out" "captain_message_count: 1" "the list-form message was not counted"
 assert_contains "$out" $'| first line\n| second line, with a comma' \
   "a multi-line quoted list-form prompt was not decoded"
 assert_contains "$out" $'text:\n| Cell element\nprompt:\n| rename this column' \
