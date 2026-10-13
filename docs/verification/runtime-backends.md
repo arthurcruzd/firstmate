@@ -2178,6 +2178,37 @@ Claude and Codex both received per-directory environment through their native pr
 Claude required the task-worker statement in the worktree's git-excluded `CLAUDE.local.md` to accept the encoded launch brief.
 A Codex mid-turn steer joined the running turn.
 
+### Grok and Muse workers
+
+Verified live on 2026-10-13 against `t3 v0.0.46-nightly.20261011.2994` (native `@t3code/t3-linux-x64`) on Linux 7.0 x86_64, with grok 1.0.52 (`grok-4.6`, low effort) on provider instance `grok` and Muse Code 1.4.7 (`muse-spark-1.3`, low effort) on provider instance `muse`.
+The run used real `bin/fm-spawn.sh`, `bin/fm-send.sh`, `bin/fm-control.sh`, and `bin/fm-teardown.sh` in a scratch Firstmate home against a scratch project, one trivial scout per harness:
+
+```sh
+FM_HOME=<scratch> bin/fm-spawn.sh <id> <project> grok --scout --backend t3code --model grok-4.6 --effort low
+FM_HOME=<scratch> bin/fm-spawn.sh <id> <project> muse --scout --backend t3code --model muse-spark-1.3 --effort low
+FM_HOME=<scratch> bin/fm-send.sh <muse-id> "<steer>"
+FM_HOME=<scratch> bin/fm-control.sh <grok-id> interrupt
+FM_HOME=<scratch> bin/fm-control.sh <grok-id> exit
+FM_HOME=<scratch> bin/fm-teardown.sh <id>
+```
+
+```text
+interrupt-delivered <grok-id> harness=grok backend=t3code verified=agent-alive cancel=not-running
+stopped <grok-id> harness=grok backend=t3code endpoint=<thread> ...
+```
+
+| Check | Result |
+|---|---|
+| Launch | Each thread launched full-access on its own instance with the effort as `reasoningEffort`, followed the encoded launch brief, wrote its report, and appended its own `done:` status line. |
+| Environment | Each worker's shell had no `FM_TASK_ID`; the brief's absolute status, inbox, and report paths carried the protocol. |
+| Turn end | The adapter's push touched `state/<id>.turn-ended` 17 ms (Grok) and 10 ms (Muse, after a steer) after the run went terminal. |
+| Steer | The Muse worker read and acknowledged the `fm-send.sh` inbox message delivered by its T3 doorbell. |
+| Exit | Archiving ended `muse serve --trust-workspace --disable-sandbox` within one second. |
+| Teardown | Every thread read back `archived:true` with no active run before its slot returned. |
+
+T3 launches `grok agent --always-approve stdio` and `muse serve --trust-workspace --disable-sandbox` for these instances.
+With default user configuration, grok 1.0.52 did not apply an `env` block from a project's `.claude/settings.local.json` or a `.envrc`, and Muse Code 1.4.7 did not apply an `env` block from `.claude/settings.local.json` or `.muse/settings.json`, which is why the backend writes no environment for them.
+
 ### WSL host driving Windows programs
 
 Verified on 2026-10-09 against `t3 v0.0.46-nightly.20261008.2849` (native `@t3code/t3-linux-x64`) in WSL2 Ubuntu 24.04 on Windows 10.0.26200, with Claude Code 2.1.295, codex-cli 0.161.0, node 26.8.2, and treehouse 2.3.0.
