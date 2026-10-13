@@ -317,8 +317,23 @@ test_model_selection_table() {
     || fail "model default should take the project default and still apply effort, got '$out'"
   out=$(t3_run 'fm_backend_t3code_model_selection codex gpt-5.6-sol max proj-1' 2>&1) && fail "codex max must be refused"
   assert_contains "$out" "cannot pass effort 'max' to harness 'codex'" "the codex max refusal must name the harness and value"
+  out=$(t3_run 'fm_backend_t3code_model_selection grok grok-4.7 xhigh proj-1')
+  [ "$out" = '{"instanceId":"grok","model":"grok-4.7","options":[{"id":"reasoningEffort","value":"xhigh"}]}' ] \
+    || fail "grok effort should ride options id reasoningEffort on the grok instance, got '$out'"
+  out=$(t3_run 'fm_backend_t3code_model_selection grok grok-4.7 max proj-1' 2>&1) && fail "grok max must be refused"
+  assert_contains "$out" "cannot pass effort 'max' to harness 'grok'" "the grok max refusal must name the harness and value"
+  out=$(t3_run 'fm_backend_t3code_model_selection muse muse-spark-1.3 low proj-1')
+  [ "$out" = '{"instanceId":"muse","model":"muse-spark-1.3","options":[{"id":"reasoningEffort","value":"low"}]}' ] \
+    || fail "muse effort should ride options id reasoningEffort on the muse instance, got '$out'"
+  out=$(t3_run 'fm_backend_t3code_model_selection muse muse-spark-1.3 max proj-1')
+  [ "$out" = '{"instanceId":"muse","model":"muse-spark-1.3","options":[{"id":"reasoningEffort","value":"max"}]}' ] \
+    || fail "an explicit muse max should pass through as max, got '$out'"
+  out=$(t3_run 'fm_backend_t3code_model_selection muse muse-spark-1.3 default proj-1')
+  [ "$out" = '{"instanceId":"muse","model":"muse-spark-1.3"}' ] || fail "a muse default effort must omit options, got '$out'"
+  out=$(t3_run 'fm_backend_t3code_model_selection muse muse-spark-1.3 minimal proj-1' 2>&1) && fail "muse minimal must be refused"
+  assert_contains "$out" "cannot pass effort 'minimal' to harness 'muse'" "the muse refusal must name the harness and value"
   out=$(t3_run 'fm_backend_t3code_model_selection pi x high proj-1' 2>&1) && fail "a non-T3 harness must be refused"
-  assert_contains "$out" "only the claude and codex harnesses" "the harness refusal must name the supported set"
+  assert_contains "$out" "only the claude, codex, grok, and muse harnesses" "the harness refusal must name the supported set"
   t3_world_set 'w.projects[0].defaultModelSelection = null'
   out=$(t3_run 'fm_backend_t3code_model_selection claude default default proj-1' 2>&1) && fail "model default with no project default must be refused"
   assert_contains "$out" "has no default model; pass --model" "the default-model refusal must name the fix"
@@ -328,6 +343,9 @@ test_model_selection_table() {
   assert_contains "$out" "pass --model explicitly" "mismatched default must name the remedy"
   out=$(t3_run 'fm_backend_t3code_model_selection claude claude-fable-5-1 default proj-1')
   [ "$out" = '{"instanceId":"claude-pool","model":"claude-fable-5-1"}' ] || fail "config/t3code-instances must override the instance id, got '$out'"
+  printf 'grok=grok-team\nmuse=muse-team\n' >> "$CONFIG/t3code-instances"
+  [ "$(t3_run 'fm_backend_t3code_instance_id grok'):$(t3_run 'fm_backend_t3code_instance_id muse')" = grok-team:muse-team ] \
+    || fail "config/t3code-instances must override the grok and muse instance ids"
   t3_world_set 'w.projects[0].defaultModelSelection.instanceId = "claude-pool"'
   out=$(t3_run 'fm_backend_t3code_model_selection claude default default proj-1')
   [ "$out" = '{"instanceId":"claude-pool","model":"claude-sonnet-5"}' ] || fail "matching default must use the configured instance, got '$out'"
@@ -677,8 +695,10 @@ test_harness_admission_and_typing_refusals() {
   [ "$out" = 'error: backend=t3code has no pane to type into' ] || fail "the typing refusal changed: $out"
   [ ! -s "$LOG" ] || fail 'refused typing must not dispatch or read a thread'
   t3_run 'fm_backend_send_key t3code thread-live Enter' || fail 'runtime Enter remains a no-op'
-  t3_run 'fm_backend_validate_harness t3code claude; fm_backend_validate_harness t3code codex' || fail 'T3 supported harnesses changed'
-  for op in opencode pi pi-signed grok kimi cursor gemini muse rovo omp agy devin; do
+  for op in claude codex grok muse; do
+    t3_run 'fm_backend_validate_harness t3code "$1"' "$op" || fail "T3 must admit harness $op"
+  done
+  for op in opencode pi pi-signed kimi cursor gemini rovo omp agy devin; do
     if out=$(t3_run 'fm_backend_validate_harness t3code "$1"' "$op" 2>&1); then fail "T3 must refuse harness $op"; fi
     assert_contains "$out" "not '$op'" 'harness refusal must name the unsupported adapter'
   done
@@ -1849,6 +1869,89 @@ t3_worker_spawn() {
     "$ROOT/bin/fm-spawn.sh" "$id" "$WORKER_PROJ" "$harness" --scout --backend t3code "$@" 2>&1
 }
 
+# A grok or muse worker on T3: the same thread lifecycle as claude and codex,
+# with no per-directory environment because neither CLI reads one. Muse's spawn
+# preflight needs a muse binary and a stored credential, so the case gives it
+# a stub and an isolated XDG home.
+test_grok_muse_worker_lifecycle_on_t3() {  # <harness> <model> <effort> <other-harness>
+  local harness=$1 model=$2 effort=$3 other=$4 id out rc thread launch neutral fb new_thread
+  id="t3${harness}z1"
+  t3_case "lifecycle-$harness"
+  local -x XDG_CONFIG_HOME="$CASE_DIR/xdg-config" XDG_DATA_HOME="$CASE_DIR/xdg-data" PATH="$CASE_DIR/musebin:$PATH"
+  mkdir -p "$XDG_CONFIG_HOME/muse" "$XDG_DATA_HOME" "$CASE_DIR/musebin"
+  printf '{"stub":true}\n' > "$XDG_CONFIG_HOME/muse/auth.json"
+  fm_fake_exit0 "$CASE_DIR/musebin" muse
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" "$harness" --model "$model" --effort "$effort"); rc=$?
+  expect_code 0 "$rc" "a $harness scout on t3code should spawn against the fake T3 server"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = "t3_thread_launch t3_thread_send" ] || fail "$harness spawn must launch then send the brief, got '$(t3_dispatch_types)'"
+  launch=$(t3_log_line_of 'r.tool === "t3_thread_launch"')
+  [ "$(t3_request "$launch" 'r.arguments.modelSelection')" = "{\"instanceId\":\"$harness\",\"model\":\"$model\",\"options\":[{\"id\":\"reasoningEffort\",\"value\":\"$effort\"}]}" ] \
+    || fail "$harness must launch on its own instance with reasoningEffort, got '$(t3_request "$launch" 'r.arguments.modelSelection')'"
+  [ "$(t3_request "$launch" 'r.arguments.runtimeMode')" = full-access ] || fail "$harness must launch full-access"
+  assert_contains "$(t3_request "$(t3_log_line_of 'r.tool === "t3_thread_send"')" 'r.arguments.message')" "FIRSTMATE_OP: v1 launch-brief:" "the $harness thread's first message must be the launch brief"
+  assert_absent "$WORKER_WT/.claude/settings.local.json" "$harness reads no Claude settings environment, so none is written"
+  assert_absent "$WORKER_WT/.codex/config.toml" "$harness reads no Codex config, so none is written"
+  assert_absent "$WORKER_WT/CLAUDE.local.md" "$harness gets no Claude channel statement"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$id.meta")
+  out=$(FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$CASE_DIR/state" FM_CONFIG_OVERRIDE="$CONFIG" "$ROOT/bin/fm-crew-state.sh" "$id" 2>&1)
+  assert_contains "$out" "t3code-native" "a $harness thread's busy state must come from T3's native status"
+  : > "$LOG"
+  out=$(t3_relaunch_control "$id" interrupt); rc=$?
+  expect_code 0 "$rc" "interrupt on a $harness T3 thread should succeed"$'\n'"$out"
+  assert_contains "$out" "cancel=confirmed" "a $harness interrupt is T3's own confirmed cancellation"
+  [ "$(t3_dispatch_types)" = t3_thread_interrupt ] || fail "a $harness interrupt is one t3_thread_interrupt, got '$(t3_dispatch_types)'"
+  : > "$LOG"
+  out=$(t3_relaunch_control "$id" exit); rc=$?
+  expect_code 0 "$rc" "exit on a $harness T3 thread should stop it"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = t3_thread_organize ] || fail "exiting an idle $harness thread archives it, got '$(t3_dispatch_types)'"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = dead ] || fail "an exited $harness thread reads dead"
+  : > "$LOG"
+  out=$(t3_relaunch_control "$id" relaunch --harness "$other" --model "$other-model" --note "switch runtime"); rc=$?
+  expect_code 0 "$rc" "relaunching a $harness thread onto $other should launch a new thread"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = "t3_thread_launch t3_thread_send" ] \
+    || fail "a relaunch onto another provider instance must launch a new thread, got '$(t3_dispatch_types)'"
+  launch=$(t3_log_line_of 'r.tool === "t3_thread_launch"')
+  [ "$(t3_request "$launch" 'r.arguments.modelSelection.instanceId')" = "$other" ] || fail "the replacement thread must run on the $other instance"
+  [ "$(t3_request "$launch" 'r.arguments.workspaceStrategy.worktreePath')" = "$WORKER_WT" ] || fail "the replacement thread must bind the same worktree"
+  new_thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$id.meta")
+  [ -n "$new_thread" ] && [ "$new_thread" != "$thread" ] || fail "the record must rebind to the new thread, got '$new_thread'"
+  printf 'report\n' > "$CASE_DIR/data/$id/report.md"
+  printf 'decisions_reviewed=1\ndecision_keys=\n' >> "$CASE_DIR/state/$id.meta"
+  : > "$LOG"
+  fb=$(make_treehouse_fakebin "$CASE_DIR")
+  neutral=$(neutral_fm_root "$CASE_DIR/neutral")
+  out=$( HOME="$SPAWN_HOME" PATH="$fb:$PATH" FM_T3_TREEHOUSE_LOG="$LOG" FM_T3_TREEHOUSE_WT="$WORKER_WT" \
+    FM_ROOT_OVERRIDE="$neutral" FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$CASE_DIR/state" FM_DATA_OVERRIDE="$CASE_DIR/data" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$ROOT/bin/fm-teardown.sh" "$id" 2>&1 ); rc=$?
+  expect_code 0 "$rc" "teardown of the relaunched task should succeed"$'\n'"$out"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$new_thread")" = dead ] || fail "teardown must archive the live thread"
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt 0 ] || fail "teardown must return the slot"
+  assert_absent "$WORKER_WT/.fm-grok-turnend" "teardown must remove any grok turn-end pointer"
+  assert_absent "$CASE_DIR/state/$id.meta" "teardown should remove task metadata"
+  rm -rf "/tmp/fm-$id"
+  pass "backend=t3code $harness: launches on its own instance with reasoningEffort and no env files, reads native busy state, interrupts, exits, relaunches onto $other in a new thread, and tears down"
+}
+
+test_spawn_refuses_t3_grok_and_muse_secondmates() {
+  local harness id home out rc
+  for harness in grok muse; do
+    id="t3sm${harness}z1"
+    t3_case "spawn-secondmate-$harness"
+    home="$CASE_DIR/sm-home"
+    make_t3_secondmate_home "$home" "$id"
+    out=$(spawn_t3_secondmate "$id" "$home" "$harness" "$harness-model"); rc=$?
+    expect_code 1 "$rc" "a $harness secondmate on t3code must be refused"$'\n'"$out"
+    case "$harness" in
+      grok) assert_contains "$out" "runs a secondmate only on the claude or codex harness, not 'grok'" "the grok refusal must name the T3 secondmate harnesses" ;;
+      muse) assert_contains "$out" "muse is a verified crewmate/scout adapter only" "muse keeps its crewmate/scout-only refusal" ;;
+    esac
+    [ -z "$(t3_dispatch_types)" ] || fail "a refused $harness secondmate must not reach T3, got '$(t3_dispatch_types)'"
+    assert_absent "$CASE_DIR/home/state/$id.meta" "a refused secondmate records nothing"
+  done
+  pass "fm-spawn.sh --backend t3code --secondmate: grok and muse are refused before any T3 mutation"
+}
+
 test_spawn_refuses_launch_settings_t3_cannot_honor() {  # <config-file> <content> <expected-error>
   local file=$1 content=$2 expect=$3 id out rc
   id="t3cfgz-$file"
@@ -2105,6 +2208,9 @@ test_control_lib_tables
 test_control_exit_interrupts_then_archives
 test_control_relaunch_resumes_the_same_thread
 test_control_relaunch_rebinds_across_provider_instances
+test_grok_muse_worker_lifecycle_on_t3 grok grok-4.7 xhigh muse
+test_grok_muse_worker_lifecycle_on_t3 muse muse-spark-1.3 max grok
+test_spawn_refuses_t3_grok_and_muse_secondmates
 test_spawn_leases_slot_creates_thread_and_starts_launch_turn
 test_spawn_codex_preserves_tracked_codex_config
 test_tracked_codex_overlay_recovery

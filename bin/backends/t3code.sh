@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bin/backends/t3code.sh - the T3 Code orchestration-server adapter.
 #
-# T3 owns the agent session (it launches Claude or Codex itself) while
+# T3 owns the agent session (it launches Claude, Codex, Grok, or Muse itself) while
 # Treehouse still owns the task worktree. Firstmate drives the T3 server only
 # through its Orchestrator V2 `/mcp` endpoint, signed in as an OAuth
 # `mcp-client`; bin/fm-t3-mcp.mjs owns that transport, the credential, the
@@ -19,12 +19,14 @@
 # instead as per-directory harness config that bin/fm-spawn.sh writes into the
 # launch directory before the first turn: `.claude/settings.local.json` `env`
 # for Claude, `.codex/config.toml` `[shell_environment_policy] set` for Codex.
+# Grok and Muse read no per-directory environment, so their workers get none
+# and rely on the brief's absolute paths (docs/t3code-backend.md).
 #
 # Config (gitignored config/ of the active home):
 #   t3code-token      the mcp-client credential the captain's
 #                     `bin/fm-t3-mcp.mjs login` writes, mode 0600
 #   t3code-instances  optional `harness=instanceId` lines (claude=claudeAgent,
-#                     codex=codex by default)
+#                     codex=codex, grok=grok, muse=muse by default)
 
 # T3 has no composer, but the shared submit dispatcher in bin/fm-backend.sh
 # prepares and reads the composer dialog sink around every adapter, so this
@@ -92,14 +94,19 @@ fm_backend_t3code_project_ensure() {  # <project-path> -> project id
   fm_backend_t3code_mcp project-ensure --root "$real" --title "fm-$(basename "$real")" | fm_backend_t3code_json_get projectId
 }
 
-# The harness -> T3 provider-option id table. Codex takes reasoningEffort and
-# refuses max; Claude takes effort up to max. Anything else is not a T3 harness.
+# The harness -> T3 provider-option id table. Claude takes effort up to max;
+# Codex and Grok take reasoningEffort and refuse max; Muse takes
+# reasoningEffort and reaches max only as an explicit value, because an
+# omitted effort leaves the instance on its own default. Anything else is not a
+# T3 harness.
 fm_backend_t3code_effort_option() {  # <harness> <effort> -> "<option-id> <value>"
   case "$1:$2" in
     claude:low|claude:medium|claude:high|claude:xhigh|claude:max) printf 'effort %s' "$2" ;;
     codex:low|codex:medium|codex:high|codex:xhigh) printf 'reasoningEffort %s' "$2" ;;
-    claude:*|codex:*) echo "error: backend=t3code cannot pass effort '$2' to harness '$1' (claude: low|medium|high|xhigh|max; codex: low|medium|high|xhigh)" >&2; return 1 ;;
-    *) echo "error: backend=t3code supports only the claude and codex harnesses, not '$1'" >&2; return 1 ;;
+    grok:low|grok:medium|grok:high|grok:xhigh) printf 'reasoningEffort %s' "$2" ;;
+    muse:low|muse:medium|muse:high|muse:xhigh|muse:max) printf 'reasoningEffort %s' "$2" ;;
+    claude:*|codex:*|grok:*|muse:*) echo "error: backend=t3code cannot pass effort '$2' to harness '$1' (claude: low|medium|high|xhigh|max; codex: low|medium|high|xhigh; grok: low|medium|high|xhigh; muse: low|medium|high|xhigh|max)" >&2; return 1 ;;
+    *) echo "error: backend=t3code supports only the claude, codex, grok, and muse harnesses, not '$1'" >&2; return 1 ;;
   esac
 }
 
@@ -108,7 +115,9 @@ fm_backend_t3code_instance_id() {  # <harness>
   case "$harness" in
     claude) value=claudeAgent ;;
     codex) value=codex ;;
-    *) echo "error: backend=t3code supports only the claude and codex harnesses, not '$harness'" >&2; return 1 ;;
+    grok) value=grok ;;
+    muse) value=muse ;;
+    *) echo "error: backend=t3code supports only the claude, codex, grok, and muse harnesses, not '$harness'" >&2; return 1 ;;
   esac
   file="$(fm_backend_t3code_config_dir)/t3code-instances"
   if [ -f "$file" ]; then
@@ -532,10 +541,12 @@ fm_backend_t3code_clear_transition() {  # <state-dir> <thread-id>
   rm -f "$(fm_backend_t3code_escalation_marker "$1" "$2")" "$(fm_backend_t3code_turn_marker "$1" "$2")"
 }
 
+# Ship and scout workers; bin/fm-spawn.sh keeps a secondmate to claude and
+# codex, the harnesses with a verified T3 supervision path.
 fm_backend_t3code_validate_harness() {  # <harness>
   case "$1" in
-    claude|codex) return 0 ;;
-    *) echo "error: backend=t3code runs only the claude and codex harnesses, not '$1'" >&2; return 1 ;;
+    claude|codex|grok|muse) return 0 ;;
+    *) echo "error: backend=t3code runs only the claude, codex, grok, and muse harnesses, not '$1'" >&2; return 1 ;;
   esac
 }
 

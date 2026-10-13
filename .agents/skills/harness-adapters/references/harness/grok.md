@@ -6,6 +6,8 @@ Launch shape: `grok --always-approve "$(cat <brief>)"`.
 
 ## Operating facts
 
+These command-line and terminal facts apply to pane-backed sessions; for T3 Code, which runs Grok ship and scout workers only, read the [native lifecycle](../../../../../docs/t3code-backend.md#current-lifecycle-and-safety) and [provider-command limits](../../../../../docs/t3code-backend.md#active-limits).
+
 | Fact | Value |
 |---|---|
 | Busy state | The last rendered-tail fallback, isolated to Grok pending a semantic source: ASCII mid-turn `Ctrl+c:cancel`, absent from idle bar `Shift+Tab:mode │ Ctrl+.:shortcuts`, never the locale-fragile braille spinner. |

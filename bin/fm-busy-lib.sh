@@ -1023,8 +1023,8 @@ fm_busy_launch_prompt_parked() {  # <harness>
 fm_busy_classify() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
   local backend=$1 target=$2 harness=$3 id=$4 state=$5 tail40=${6-}
   local out rc r_state r_source native log
-  # t3code first: the T3 server reports the session status for claude and
-  # codex alike. Native uncertainty must not fall through to a stale idle
+  # t3code first: the T3 server reports the session status for every harness
+  # it runs. Native uncertainty must not fall through to a stale idle
   # record or a harness-specific fallback.
   if [ "$backend" = t3code ] && command -v fm_backend_busy_state >/dev/null 2>&1; then
     native=$(fm_backend_busy_state "$backend" "$target" 2>/dev/null || true)

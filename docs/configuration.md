@@ -445,7 +445,7 @@ T3 Code, Zellij, and Orca are never auto-detected; select them by putting the na
 ### Accepted backends and secondmate limits
 
 Any value other than `tmux`, `herdr`, `zellij`, `orca`, `cmux`, or `t3code` is rejected until another adapter is implemented and verified.
-`fm-spawn.sh` accepts all six for ship and scout tasks; `backend=orca` and `backend=cmux` still refuse `--secondmate`, while `backend=t3code` supports secondmates and runs only the `claude` and `codex` harnesses.
+`fm-spawn.sh` accepts all six for ship and scout tasks; `backend=orca` and `backend=cmux` still refuse `--secondmate`, while `backend=t3code` supports secondmates on the `claude` and `codex` harnesses and also runs `grok` and `muse` ship and scout workers.
 
 `codex-app` is not an accepted runtime backend yet; [`docs/codex-app-backend.md`](codex-app-backend.md) owns the Codex App boundary.
 
