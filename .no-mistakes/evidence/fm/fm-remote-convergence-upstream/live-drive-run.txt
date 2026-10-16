@@ -1,0 +1,372 @@
+Note: switching to '31555f8d0ff56fb65c7bfd989bd607e0b8b55210'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+Note: switching to '31555f8d0ff56fb65c7bfd989bd607e0b8b55210'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+Note: switching to '31555f8d0ff56fb65c7bfd989bd607e0b8b55210'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+Note: switching to '31555f8d0ff56fb65c7bfd989bd607e0b8b55210'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+==== LIVE SETUP OK work=/tmp/fm-live-conv.RHHX2b lab=/tmp/fm-lab.vSAi19 primary=/tmp/fm-live-conv.RHHX2b/primary sshd=2085208 ====
+PASS unchanged-home-not-nudged: current home produced no nudge; marker present
+FAIL instruction-change-nudges: remote home HEAD 1a6714f297c31c6495dc5f6124b963b2b6d3a7da did not advance to 31555f8d0ff56fb65c7bfd989bd607e0b8b55210
+BOOTSTRAP_INFO: remote secondmate sm already live (host=host-sm)
+SECONDMATE_LIVENESS: secondmate sm: skipped: remote reply source could not be registered
+SECONDMATE_SYNC: secondmate sm: skipped: remote tracked-file sync failed on host-sm: error: remote secondmate home sync skipped: cannot determine default branch
+PASS partial-push-keeps-owed: owed=1 survived unchanged retry (send has no live pane)
+PASS config-push-partial-keeps-owed: config-push retry delivered the owed reread
+PASS unknown-completion-keeps-owed: exit-255 sync kept the re-read owed across retry
+FAIL kill-during-mutation-keeps-owed: bootstrap never entered inherit hang
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+PASS hung-mate-budget-isolates: hung bravo skipped in 56s and kept owed=1
+PASS inherit-push-overlaps: inheritance items overlapped (max in flight 4)
+pass=6 fail=2
+unchanged-home-not-nudged|pass|current home produced no nudge; marker present
+instruction-change-nudges|fail|remote home HEAD 1a6714f297c31c6495dc5f6124b963b2b6d3a7da did not advance to 31555f8d0ff56fb65c7bfd989bd607e0b8b55210
+BOOTSTRAP_INFO: remote secondmate sm already live (host=host-sm)
+SECONDMATE_LIVENESS: secondmate sm: skipped: remote reply source could not be registered
+SECONDMATE_SYNC: secondmate sm: skipped: remote tracked-file sync failed on host-sm: error: remote secondmate home sync skipped: cannot determine default branch
+partial-push-keeps-owed|pass|owed=1 survived unchanged retry (send has no live pane)
+config-push-partial-keeps-owed|pass|config-push retry delivered the owed reread
+unknown-completion-keeps-owed|pass|exit-255 sync kept the re-read owed across retry
+kill-during-mutation-keeps-owed|fail|bootstrap never entered inherit hang
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/dispatch-never-send
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/crew-dispatch.json
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/crew-harness
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/backlog-backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=config/backend
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/herdr-presentation-spaces
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/startup-memory-budget
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/launch-env-allowlist
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/claude-permission-mode
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/lavish-axi-host
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/keep-ai-trailers
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/supervision-host-off
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=absent item=config/firstmate-role
+CMD home=home-sm cmd=fm-remote-inherit.sh sub=put item=data/captain-shared.md
+CMD home=home-sm cmd=fm-remote-doctor.sh sub= item=
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=state item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=route item=sm
+CMD home=home-sm cmd=fm-remote-secondmate-control.sh sub=sync item=sm
+hung-mate-budget-isolates|pass|hung bravo skipped in 56s and kept owed=1
+inherit-push-overlaps|pass|inheritance items overlapped (max in flight 4)

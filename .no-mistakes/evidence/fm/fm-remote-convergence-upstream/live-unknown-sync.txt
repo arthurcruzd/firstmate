@@ -1,0 +1,3 @@
+BOOTSTRAP_INFO: remote secondmate sm already live (host=host-sm)
+SECONDMATE_LIVENESS: secondmate sm: skipped: remote reply source could not be registered
+SECONDMATE_SYNC: secondmate sm: skipped: remote tracked-file sync failed on host-sm: 

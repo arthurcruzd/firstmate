@@ -1,0 +1,1 @@
+BOOTSTRAP_INFO: remote secondmate sm already live (host=host-sm)

@@ -1,0 +1,19 @@
+WARNING: watcher still down (same stale episode; last beat: 267s ago, grace 300s) - full banner already printed this episode.
+config-push: /tmp/fm-lab.vSAi19 -> live secondmate homes
+secondmate sm (host-sm:/tmp/fm-live-conv.RHHX2b/home-sm):
+  unchanged: config/crew-dispatch.json
+  unchanged: config/dispatch-never-send
+  unchanged: config/crew-harness
+  unchanged: config/backlog-backend
+  pushed: config/backend
+  unchanged: config/herdr-presentation-spaces
+  unchanged: config/startup-memory-budget
+  unchanged: config/trace-context
+  unchanged: config/launch-env-allowlist
+  unchanged: config/claude-permission-mode
+  unchanged: config/lavish-axi-host
+  unchanged: config/keep-ai-trailers
+  unchanged: config/supervision-host-off
+  unchanged: config/firstmate-role
+  unchanged: data/captain-shared.md
+  config-reread: send failed; retry retained

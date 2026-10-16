@@ -1,0 +1,8 @@
+WARNING: watcher still down (same stale episode; last beat: 245s ago, grace 300s) - full banner already printed this episode.
+config-push: /tmp/fm-lab.vSAi19 -> live secondmate homes
+secondmate sm (host-sm:/tmp/fm-live-conv.RHHX2b/home-sm):
+  unchanged: config/crew-dispatch.json
+  unchanged: config/dispatch-never-send
+  pushed: config/crew-harness
+  unchanged: config/backlog-backend
+  error: synthetic refusal of config/backend

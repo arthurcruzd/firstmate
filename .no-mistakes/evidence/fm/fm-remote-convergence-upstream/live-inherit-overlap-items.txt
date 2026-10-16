@@ -1,0 +1,29 @@
+START inherit config/dispatch-never-send 1792133385176340244
+START inherit config/dispatch-never-send 1792133385196637551
+START inherit config/dispatch-never-send 1792133385206166554
+START inherit config/dispatch-never-send 1792133385221410590
+END inherit config/dispatch-never-send rc=0 1792133391741832483
+START inherit config/backend 1792133392355343243
+END inherit config/dispatch-never-send rc=0 1792133395999056746
+START inherit config/herdr-presentation-spaces 1792133396261913551
+END inherit config/dispatch-never-send rc=0 1792133398469050881
+START inherit config/startup-memory-budget 1792133398686922198
+END inherit config/dispatch-never-send rc=0 1792133401302723014
+START inherit config/launch-env-allowlist 1792133401956815599
+END inherit config/backend rc=0 1792133404852361045
+START inherit config/claude-permission-mode 1792133405081794608
+END inherit config/herdr-presentation-spaces rc=0 1792133407572881228
+START inherit config/lavish-axi-host 1792133407846047196
+END inherit config/startup-memory-budget rc=0 1792133410543301132
+START inherit config/keep-ai-trailers 1792133410918913946
+END inherit config/launch-env-allowlist rc=0 1792133414325044174
+START inherit config/supervision-host-off 1792133414907436443
+END inherit config/claude-permission-mode rc=0 1792133417548011167
+START inherit config/firstmate-role 1792133417964473116
+END inherit config/lavish-axi-host rc=0 1792133420599763400
+START inherit data/captain-shared.md 1792133420996439262
+END inherit config/keep-ai-trailers rc=0 1792133423821846733
+END inherit config/supervision-host-off rc=0 1792133426185071568
+END inherit config/firstmate-role rc=0 1792133428639340196
+END inherit data/captain-shared.md rc=0 1792133430214474200
+max_overlap=4

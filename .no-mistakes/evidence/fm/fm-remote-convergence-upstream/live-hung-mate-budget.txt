@@ -1,0 +1,8 @@
+BOOTSTRAP_INFO: remote secondmate bravo already live (host=host-bravo)
+BOOTSTRAP_INFO: remote secondmate sm already live (host=host-sm)
+SECONDMATE_LIVENESS: secondmate bravo: skipped: remote reply source could not be registered
+SECONDMATE_SYNC: secondmate bravo: skipped: remote tracked-file sync failed on host-bravo: no answer within the 12s per-mate convergence budget
+SECONDMATE_SYNC: secondmate bravo: skipped: remote inheritance failed on host-bravo: no answer within the 12s per-mate convergence budget
+SECONDMATE_LIVENESS: secondmate sm: skipped: remote reply source could not be registered
+SECONDMATE_SYNC: secondmate sm: skipped: remote tracked-file sync failed on host-sm: no answer within the 12s per-mate convergence budget
+SECONDMATE_SYNC: secondmate sm: skipped: remote inheritance failed on host-sm: no answer within the 12s per-mate convergence budget

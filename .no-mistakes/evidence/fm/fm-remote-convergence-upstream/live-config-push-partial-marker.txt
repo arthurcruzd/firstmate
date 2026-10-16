@@ -1,0 +1,8 @@
+id=sm
+selector=fm-sm
+home=/tmp/fm-live-conv.RHHX2b/home-sm
+commit=
+instructions=remote
+message=Firstmate instructions or inherited config changed on this host. Re-read AGENTS.md and the inherited config files before further work.
+remote=1
+owed=1
