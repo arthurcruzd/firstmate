@@ -1,0 +1,149 @@
+$ stat -c %W|%w /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/.tz-live-cgon3n0k/BRT3-UTC0/state/mate.status TZ=BRT3
+1792124119|2026-10-16 01:15:19.078203071 -0300
+
+$ stat -c %W|%w /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/.tz-live-cgon3n0k/BRT3-UTC0/state/mate.status TZ=UTC0
+1792124119|2026-10-16 04:15:19.078203071 +0000
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=BRT3
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+mate note: first presentation
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=old] needs-decision: choose old target
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+
+Cursor after first presentation:
+mate	strong:2049:3828791:2026-10-16 04:15:19.078203071 +0000	69	0
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=UTC0
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+mate note: new across timezone
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=BRT3
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=BRT3
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+mate note: held context presented
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=held] needs-decision: older held call
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+
+$ node /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-branch-dispatch.mjs scope TZ=UTC0
+status=safe
+corrupted=0
+rows=1
+tasks=mate
+unscoped=0
+
+$ node /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-branch-dispatch.mjs offer TZ=UTC0
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=mate
+unscoped=0
+
+$ node /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-branch-dispatch.mjs scope TZ=UTC0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+
+$ node /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-branch-dispatch.mjs offer TZ=UTC0
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=UTC0
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+mate note: new file note
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=replacement] needs-decision: new file decision
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ASSERTIONS PASSED: BRT3 -> UTC0: no replay, resolution, append, routing, blocker, replacement.
+
+$ stat -c %W|%w /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/.tz-live-cgon3n0k/UTC0-BRT3/state/mate.status TZ=UTC0
+1792124176|2026-10-16 04:16:16.235364858 +0000
+
+$ stat -c %W|%w /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/.tz-live-cgon3n0k/UTC0-BRT3/state/mate.status TZ=BRT3
+1792124176|2026-10-16 01:16:16.235364858 -0300
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=UTC0
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+mate note: first presentation
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=old] needs-decision: choose old target
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+
+Cursor after first presentation:
+mate	strong:2049:3828804:2026-10-16 04:16:16.235364858 +0000	69	0
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=BRT3
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+mate note: new across timezone
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=UTC0
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=UTC0
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+mate note: held context presented
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=held] needs-decision: older held call
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+
+$ node /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-branch-dispatch.mjs scope TZ=BRT3
+status=safe
+corrupted=0
+rows=1
+tasks=mate
+unscoped=0
+
+$ node /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-branch-dispatch.mjs offer TZ=BRT3
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=mate
+unscoped=0
+
+$ node /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-branch-dispatch.mjs scope TZ=BRT3
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+
+$ node /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-branch-dispatch.mjs offer TZ=BRT3
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+
+$ bash /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51EHJWSESFXEWMPFWV70T09/bin/fm-wake-drain.sh TZ=BRT3
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+mate note: new file note
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=replacement] needs-decision: new file decision
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ASSERTIONS PASSED: UTC0 -> BRT3: no replay, resolution, append, routing, blocker, replacement.
