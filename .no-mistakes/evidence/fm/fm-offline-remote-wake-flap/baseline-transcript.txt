@@ -1,0 +1,31 @@
+$ fm-procevent.sh register lavish outage-live -- /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-tob9bypm/transport.sh /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-tob9bypm/release /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-tob9bypm/ssh-exit
+exit=0 registered: outage-live (lavish) 
+registration device:inode = 2049:4061883
+Fault injection: remove registered argv in place; launches cannot claim.
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=0 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061883-1348732569']
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=0 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061883-1348732569']
+$ fm-procevent.sh register lavish outage-live -- /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-tob9bypm/transport.sh /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-tob9bypm/release /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-tob9bypm/ssh-exit
+exit=0 registered: outage-live (lavish) 
+registration device:inode = 2049:4061901
+$ fm-procevent.sh reconcile
+exit=0 reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0 
+$ fm-procevent.sh reconcile
+exit=0 reconciled: published=0 started=0 stopped=0 uncertain=0 failed=0 
+
+STATE: claimed and blocked; outage must remain open marker= absent
+$ fm-procevent.sh list
+exit=0 SOURCE                       ADAPTER      OWNER      PENDING
+outage-live                  lavish       live       0 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061883-1348732569']
+$ fm-procevent.sh retire outage-live
+exit=0 retired: outage-live 
+Disposable home removed.
+Traceback (most recent call last):
+  File "/home/fm/.no-mistakes/evidence/01M51H767V0TKZRM24K24DAX9C/drive.py", line 68, in <module>
+    assert marker.exists() and marker.read_text()==first
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

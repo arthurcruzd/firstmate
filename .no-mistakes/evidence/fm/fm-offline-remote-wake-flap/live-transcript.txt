@@ -1,0 +1,104 @@
+$ fm-procevent.sh register lavish outage-live -- /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/transport.sh /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/release /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/ssh-exit
+exit=0 registered: outage-live (lavish) 
+registration device:inode = 2049:4061640
+Fault injection: remove registered argv in place; launches cannot claim.
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=0 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021']
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=0 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021']
+$ fm-procevent.sh register lavish outage-live -- /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/transport.sh /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/release /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/ssh-exit
+exit=0 registered: outage-live (lavish) 
+registration device:inode = 2049:4061645
+$ fm-procevent.sh reconcile
+exit=0 reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0 
+$ fm-procevent.sh reconcile
+exit=0 reconciled: published=0 started=0 stopped=0 uncertain=0 failed=0 
+
+STATE: claimed and blocked; outage must remain open marker= 2049-4061640 167421021
+$ fm-procevent.sh list
+exit=0 SOURCE                       ADAPTER      OWNER      PENDING
+outage-live                  lavish       live       0 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021']
+Fault injection: remove registered argv in place; launches cannot claim.
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=0 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021']
+$ fm-procevent.sh register lavish outage-live -- /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/transport.sh /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/release /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/ssh-exit
+exit=0 registered: outage-live (lavish) 
+registration device:inode = 2049:4061649
+Fault injection: remove registered argv in place; launches cannot claim.
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=0 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021']
+
+STATE: continuous outage across re-registrations and SSH failure marker= 2049-4061640 167421021
+$ fm-procevent.sh list
+exit=0 SOURCE                       ADAPTER      OWNER      PENDING
+outage-live                  lavish       none       0 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021']
+PASS: one continuous outage, retries unchanged, one announcement
+$ fm-procevent.sh register lavish outage-live -- /usr/bin/printf recovered payload
+exit=0 registered: outage-live (lavish) 
+registration device:inode = 2049:4061650
+$ fm-procevent.sh reconcile
+exit=0 reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0 
+CAPTURE: recovered payload
+Fault injection: remove registered argv in place; launches cannot claim.
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=1 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021', 'procevent:outage-live:launch-failed:2049-4061650-1029719178']
+
+STATE: new outage after durable capture marker= 2049-4061650 1029719178
+$ fm-procevent.sh list
+exit=0 SOURCE                       ADAPTER      OWNER      PENDING
+outage-live                  lavish       none       1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021', 'procevent:outage-live:launch-failed:2049-4061650-1029719178']
+PASS: captured recovery enables a second distinct announcement
+$ fm-procevent.sh register remote-reply outage-live -- /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/empty.sh /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/round /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/relistened /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/finish-empty
+exit=0 registered: outage-live (remote-reply) 
+registration device:inode = 2049:4061886
+$ fm-procevent.sh reconcile
+exit=0 reconciled: published=1 started=1 stopped=0 uncertain=0 failed=0 
+
+STATE: clean empty window relistens and clears episode marker= absent
+$ fm-procevent.sh list
+exit=0 SOURCE                       ADAPTER      OWNER      PENDING
+outage-live                  remote-reply live       1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021', 'procevent:outage-live:launch-failed:2049-4061650-1029719178']
+Fault injection: remove registered argv in place; launches cannot claim.
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=1 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021', 'procevent:outage-live:launch-failed:2049-4061650-1029719178', 'procevent:outage-live:launch-failed:2049-4061886-18666776']
+PASS: clean empty relisten enables a new announcement
+$ fm-procevent.sh retire outage-live
+exit=0 retired: outage-live 
+$ fm-procevent.sh register lavish outage-live -- /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/transport.sh /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/release /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M51H767V0TKZRM24K24DAX9C/.outage-live-inmkobru/ssh-exit
+exit=0 registered: outage-live (lavish) 
+registration device:inode = 2049:4061886
+Fault injection: remove registered argv in place; launches cannot claim.
+$ fm-procevent.sh reconcile
+exit=1 reconciled: published=1 started=0 stopped=0 uncertain=0 failed=1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021', 'procevent:outage-live:launch-failed:2049-4061650-1029719178', 'procevent:outage-live:launch-failed:2049-4061886-18666776', 'procevent:outage-live:launch-failed:2049-4061886-208754173']
+
+STATE: retire then re-arm starts fresh episode marker= 2049-4061886 208754173
+$ fm-procevent.sh list
+exit=0 SOURCE                       ADAPTER      OWNER      PENDING
+outage-live                  lavish       none       1 
+launch-failed wake keys: ['procevent:outage-live:launch-failed:2049-4061640-167421021', 'procevent:outage-live:launch-failed:2049-4061650-1029719178', 'procevent:outage-live:launch-failed:2049-4061886-18666776', 'procevent:outage-live:launch-failed:2049-4061886-208754173']
+PASS: retirement clears outage marker
+FINAL WAKE QUEUE:
+1792126913	1	check	procevent:outage-live:launch-failed:2049-4061640-167421021	check: process-event source outage-live is registered but its launch did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS, so nothing is confirmed to be collecting from it; reconcile reports that as failed= and keeps launching it every supervision cycle. If it stays that way, check the source command and the adapter binary the registration names, and run an attached bin/fm-procevent.sh start outage-live to reproduce a refusal on its stderr - the detached launch discards it, and a hand-run reconcile only counts it as failed=. This is announced once per outage, not once per relaunch or re-registration: the episode ends on its own when a runner of this source returns a result or a clean empty window, so a runner that was merely slow to claim, or a host that comes back, needs nothing from you.
+1792126927	2	check	procevent:outage-live:1	check: procevent lavish outage-live 1
+1792126929	3	check	procevent:outage-live:1	check: procevent lavish outage-live 1
+1792126933	4	check	procevent:outage-live:launch-failed:2049-4061650-1029719178	check: process-event source outage-live is registered but its launch did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS, so nothing is confirmed to be collecting from it; reconcile reports that as failed= and keeps launching it every supervision cycle. If it stays that way, check the source command and the adapter binary the registration names, and run an attached bin/fm-procevent.sh start outage-live to reproduce a refusal on its stderr - the detached launch discards it, and a hand-run reconcile only counts it as failed=. This is announced once per outage, not once per relaunch or re-registration: the episode ends on its own when a runner of this source returns a result or a clean empty window, so a runner that was merely slow to claim, or a host that comes back, needs nothing from you.
+1792126935	5	check	procevent:outage-live:1	check: procevent lavish outage-live 1
+1792126941	6	check	procevent:outage-live:1	check: procevent lavish outage-live 1
+1792126944	7	check	procevent:outage-live:launch-failed:2049-4061886-18666776	check: process-event source outage-live is registered but its launch did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS, so nothing is confirmed to be collecting from it; reconcile reports that as failed= and keeps launching it every supervision cycle. If it stays that way, check the source command and the adapter binary the registration names, and run an attached bin/fm-procevent.sh start outage-live to reproduce a refusal on its stderr - the detached launch discards it, and a hand-run reconcile only counts it as failed=. This is announced once per outage, not once per relaunch or re-registration: the episode ends on its own when a runner of this source returns a result or a clean empty window, so a runner that was merely slow to claim, or a host that comes back, needs nothing from you.
+1792126946	8	check	procevent:outage-live:1	check: procevent lavish outage-live 1
+1792126949	9	check	procevent:outage-live:launch-failed:2049-4061886-208754173	check: process-event source outage-live is registered but its launch did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS, so nothing is confirmed to be collecting from it; reconcile reports that as failed= and keeps launching it every supervision cycle. If it stays that way, check the source command and the adapter binary the registration names, and run an attached bin/fm-procevent.sh start outage-live to reproduce a refusal on its stderr - the detached launch discards it, and a hand-run reconcile only counts it as failed=. This is announced once per outage, not once per relaunch or re-registration: the episode ends on its own when a runner of this source returns a result or a clean empty window, so a runner that was merely slow to claim, or a host that comes back, needs nothing from you.
+
+$ fm-procevent.sh retire outage-live
+exit=0 retired: outage-live 
+Disposable home removed.
