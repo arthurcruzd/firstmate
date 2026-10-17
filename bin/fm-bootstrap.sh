@@ -636,29 +636,19 @@ secondmate_sync() {
       return 0
     fi
     remote_marker=$(secondmate_nudge_marker_path "$id" 2>/dev/null || true)
-    # Only a reread a previous attempt left owed carries over; owed=0 only
-    # covered an attempt in progress and does not itself owe a nudge.
+    # Only a reread a previous attempt left owed carries over. The record is
+    # written owed before any step can change the home (write-ahead), so a kill
+    # at any point leaves it owed; an attempt whose outcome proves nothing
+    # changed writes it back below (bin/fm-secondmate-nudge-lib.sh).
     remote_pending=0
     if fm_secondmate_remote_nudge_owed "$STATE" "$id"; then remote_pending=1; fi
     if ! secondmate_write_nudge_marker "$id" "$_home" "" remote \
-      "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 "$remote_pending"; then
+      "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1; then
       echo "NUDGE_SECONDMATES: secondmate $id: send failed: cannot record remote retry marker"
       fm_lock_release "$remote_lock" || true
       return 0
     fi
-    nudge_needed=0
-    owe_remote_reread() {
-      nudge_needed=1
-      [ "$remote_pending" -eq 0 ] || return 0
-      if secondmate_write_nudge_marker "$id" "$_home" "" remote \
-        "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1; then
-        remote_pending=1
-      else
-        echo "NUDGE_SECONDMATES: secondmate $id: send failed: cannot record remote retry marker"
-      fi
-    }
-    trap 'secondmate_write_nudge_marker "$id" "$_home" "" remote "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1 || true; exit 143' TERM
-    trap 'secondmate_write_nudge_marker "$id" "$_home" "" remote "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1 || true; exit 130' INT
+    nudge_needed=$remote_pending
     converged=1
     sync_rc=0
     left=$(( deadline - $(date +%s) ))
@@ -670,11 +660,11 @@ secondmate_sync() {
     else
       sync_rc=$?
     fi
-    if fm_secondmate_remote_sync_changed "$sync_out" || [ "$sync_rc" -eq 255 ]; then owe_remote_reread; fi
+    if fm_secondmate_remote_sync_changed "$sync_out" || [ "$sync_rc" -eq 255 ]; then nudge_needed=1; fi
     if fm_timed_out "$sync_rc"; then
       echo "SECONDMATE_SYNC: secondmate $id: skipped: remote tracked-file sync failed on $remote_host: no answer within the ${budget}s per-mate convergence budget"
       converged=0
-      owe_remote_reread
+      nudge_needed=1
     elif [ "$sync_rc" -ne 0 ]; then
       echo "SECONDMATE_SYNC: secondmate $id: skipped: remote tracked-file sync failed on $remote_host: $(remote_sync_failure_reason "$sync_rc" "$sync_out")"
       converged=0
@@ -690,18 +680,15 @@ secondmate_sync() {
       inherit_rc=$?
     fi
     # Items a failed push applied before it stopped changed the home too.
-    if [ "$inherit_rc" -eq 255 ] || printf '%s\n' "${inherit_out:-}" | grep -Eq '^(pushed|removed):'; then owe_remote_reread; fi
+    if [ "$inherit_rc" -eq 255 ] || printf '%s\n' "${inherit_out:-}" | grep -Eq '^(pushed|removed):'; then nudge_needed=1; fi
     if fm_timed_out "$inherit_rc"; then
       echo "SECONDMATE_SYNC: secondmate $id: skipped: remote inheritance failed on $remote_host: no answer within the ${budget}s per-mate convergence budget"
       converged=0
-      owe_remote_reread
+      nudge_needed=1
     elif [ "$inherit_rc" -ne 0 ]; then
       echo "SECONDMATE_SYNC: secondmate $id: skipped: remote inheritance failed on $remote_host: $(remote_inherit_failure_reason "$inherit_out")"
       converged=0
     fi
-    [ "$remote_pending" -eq 0 ] || nudge_needed=1
-    trap - TERM INT
-    unset -f owe_remote_reread
     if [ "$converged" -eq 1 ] && [ "$nudge_needed" -eq 1 ]; then
       if out=$(FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_STATE_OVERRIDE="$STATE" \
         "$SCRIPT_DIR/fm-send.sh" "fm-$id" "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 2>&1); then
@@ -712,6 +699,9 @@ secondmate_sync() {
       fi
     elif [ "$converged" -eq 1 ]; then
       rm -f "$remote_marker"
+    elif [ "$nudge_needed" -eq 0 ] && ! secondmate_write_nudge_marker "$id" "$_home" "" remote \
+      "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 0; then
+      echo "NUDGE_SECONDMATES: secondmate $id: send failed: cannot record remote retry marker"
     fi
     fm_lock_release "$remote_lock" || true
     return 0

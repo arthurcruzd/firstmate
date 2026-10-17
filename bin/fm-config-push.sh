@@ -12,7 +12,7 @@
 # routes receive the generation-specific literal-content pointer from
 # fm-config-inherit-lib.sh. Remote routes receive one durable marked reread nudge
 # through their SSH route when the transfer changed the home, and keep that
-# obligation across a partial or unknown completion. Unchanged homes send no
+# obligation across a partial, unknown, or killed completion. Unchanged homes send no
 # reread unless a previous reread is still owed. For local routes only,
 # data/captain-shared.md-only updates send no new reread pointer.
 # Warnings-only skips exit 0; real propagation or reread-send errors exit non-zero.
@@ -140,16 +140,16 @@ while IFS='|' read -r id home _window meta; do
     remote_marker=$(fm_secondmate_nudge_marker_path "$STATE" "$id" 2>/dev/null || true)
     remote_pending=0
     if fm_secondmate_remote_nudge_owed "$STATE" "$id"; then remote_pending=1; fi
+    # Write-ahead: the reread is owed before the push can change the home, so
+    # a kill at any point leaves it owed (bin/fm-secondmate-nudge-lib.sh).
     if ! fm_secondmate_nudge_write "$STATE" "$id" "$home" "" remote \
-      "$FM_REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 "$remote_pending"; then
+      "$FM_REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1; then
       echo "  config-reread: retry marker failed"
       errors=1
       fm_lock_release "$remote_lock" || true
       continue
     fi
     remote_nudge=$remote_pending
-    trap 'fm_secondmate_nudge_write "$STATE" "$id" "$home" "" remote "$FM_REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1 || true; exit 143' TERM
-    trap 'fm_secondmate_nudge_write "$STATE" "$id" "$home" "" remote "$FM_REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1 || true; exit 130' INT
     remote_rc=0
     remote_out=$(FM_CONFIG_INHERIT_LIVE=1 \
       "$SCRIPT_DIR/fm-remote-inherit-push.sh" "$id" "$remote_generation" 2>&1) || remote_rc=$?
@@ -157,11 +157,10 @@ while IFS='|' read -r id home _window meta; do
     if [ "$remote_rc" -eq 255 ] || printf '%s\n' "$remote_out" | grep -Eq '^(pushed|removed):'; then
       remote_nudge=1
     fi
-    if [ "$remote_nudge" -eq 1 ] && [ "$remote_pending" -eq 0 ]; then
+    if [ "$remote_rc" -ne 0 ] && [ "$remote_nudge" -eq 0 ]; then
       fm_secondmate_nudge_write "$STATE" "$id" "$home" "" remote \
-        "$FM_REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1 || echo "  config-reread: retry marker update failed"
+        "$FM_REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 0 || echo "  config-reread: retry marker update failed"
     fi
-    trap - TERM INT
     if [ "$remote_rc" -eq 0 ]; then
       if [ "$remote_nudge" -eq 1 ]; then
         if FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_STATE_OVERRIDE="$STATE" \

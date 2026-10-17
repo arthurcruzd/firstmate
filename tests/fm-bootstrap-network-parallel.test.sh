@@ -702,8 +702,12 @@ test_parallel_unknown_completion_overrides_known_failure() {
   pass "parallel push preserves unknown completion status"
 }
 
+# The startup network bound stops its stage the way `timeout -k 1` does: TERM to
+# the stage's process group, then KILL one second later. The remote call itself
+# runs in its own timed process group, so the stage dies while that call is
+# still in flight and may yet change the home.
 test_kill_during_remote_call_keeps_the_reread_owed() {
-  local script pid marker waited started
+  local script pid marker waited started pg own_pg
   for script in fm-bootstrap.sh fm-config-push.sh; do
     convergence_fixture "$TMP_ROOT/kill-$script" sm:host-sm
     marker="$CF_HOME/state/.secondmate-nudge-pending/sm.pending"
@@ -737,7 +741,13 @@ SH
     grep -q "$started" "$CF_LOG" \
       || fail "$script never started a remote mutation"$'\n'"$(cat "$CF_LOG")"
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    sleep 1
+    kill -KILL -- "-$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
+    own_pg=$(ps -o pgid= -p $$ | tr -d ' ')
+    for pg in $(ps -eo pgid=,args= | awk -v f="$CF_FAKEBIN/fake-ssh" 'index($0, f) { print $1 }' | sort -u); do
+      [ "$pg" = "$own_pg" ] || kill -KILL -- "-$pg" 2>/dev/null || true
+    done
     assert_grep 'owed=1' "$marker" \
       "$script killed mid-mutation must keep the re-read owed"
     assert_owed_reread_survives_unchanged_retry "$script" \

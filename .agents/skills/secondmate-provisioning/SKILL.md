@@ -148,7 +148,7 @@ Quarantined pre-relaunch generations are retained in bounded private history, an
 Successfully delivered generations are retained only within a bounded per-home state history, while pending generations remain until delivery succeeds or a launch supersedes them.
 A remote home receives the same allowlisted bytes through `fm-remote-inherit.sh` and gets one marked re-read instruction after successful convergence when a transfer or tracked instruction-surface change requires it, or an earlier re-read remains owed.
 An unchanged transfer or a tracked advance outside `AGENTS.md`, `bin/`, and `.agents/skills/` creates no new re-read obligation.
-The parent records that nudge before delivery, retains it after a failed send, a partial apply, or unknown completion, and retries the exact same route during locked bootstrap convergence.
+The parent records that nudge before delivery, retains it after a failed send, a partial apply, unknown completion, or an attempt killed before it reported, and retries the exact same route during locked bootstrap convergence.
 [`fm-secondmate-nudge-lib.sh`](../../../bin/fm-secondmate-nudge-lib.sh) owns the durable obligation record and compatibility behavior.
 It does not receive a pointer to a primary-local generation path that cannot exist on that host.
 Inherited harness and runtime-backend defaults must not harden `fm-spawn` to reject a deliberate runtime choice that differs from those defaults.
