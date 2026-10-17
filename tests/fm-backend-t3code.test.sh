@@ -2031,7 +2031,7 @@ test_claude_pr_tool_clause_version_boundary() {
 # through the idempotent kill before any replacement thread is launched; when
 # that proof fails, the thread and its record stay and nothing is spawned.
 test_t3_secondmate_missing_thread_reproves_close_before_replacement() {
-  local thread=mcp:0b1c2d3e-5f6a-4b7c-8d9e-789abcdef012 root state out between
+  local thread=mcp:0b1c2d3e-5f6a-4b7c-8d9e-789abcdef012 root state out
   t3_case secondmate-missing completed
   t3_world "$(t3_thread_json "$thread" completed true)"
   root="$CASE_DIR/fake-root"
