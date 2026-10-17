@@ -1,0 +1,9 @@
+Production bootstrap output from the simulated-transport regression (not live SSH):
+SECONDMATE_LIVENESS: secondmate bravo: skipped: remote host unavailable or endpoint state unknown; route preserved on host-bravo
+SECONDMATE_SYNC: secondmate alpha: skipped: remote tracked-file sync failed on host-alpha: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate alpha: skipped: remote inheritance failed on host-alpha: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate bravo: skipped: remote tracked-file sync failed on host-bravo: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate bravo: skipped: remote inheritance failed on host-bravo: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate charlie: skipped: remote tracked-file sync failed on host-charlie: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate charlie: skipped: remote inheritance failed on host-charlie: no answer within the 75s per-mate convergence budget
+FLEET_SYNC: fleet: skipped: bootstrap refresh timed out (timeout=20s elapsed=20s)

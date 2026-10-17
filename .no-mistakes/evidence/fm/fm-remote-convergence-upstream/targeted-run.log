@@ -1,0 +1,84 @@
+FM_TEST_BEGIN 2026-10-17T22:06:50Z tests/fm-bootstrap-network-parallel.test.sh family=session-bootstrap expected_gate_skip=none
+not ok - the dirty mate's skip line must still name dirtiness (missing: 'dirty')
+--- output ---
+SECONDMATE_LIVENESS: secondmate bravo: skipped: remote host unavailable or endpoint state unknown; route preserved on host-bravo
+SECONDMATE_SYNC: secondmate alpha: skipped: remote tracked-file sync failed on host-alpha: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate alpha: skipped: remote inheritance failed on host-alpha: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate bravo: skipped: remote tracked-file sync failed on host-bravo: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate bravo: skipped: remote inheritance failed on host-bravo: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate charlie: skipped: remote tracked-file sync failed on host-charlie: no answer within the 75s per-mate convergence budget
+SECONDMATE_SYNC: secondmate charlie: skipped: remote inheritance failed on host-charlie: no answer within the 75s per-mate convergence budget
+FLEET_SYNC: fleet: skipped: bootstrap refresh timed out (timeout=20s elapsed=20s)
+FM_TEST_END 2026-10-17T22:11:51Z tests/fm-bootstrap-network-parallel.test.sh exit=1 duration_ms=300890 gate_skip=false
+FM_TEST_BEGIN 2026-10-17T22:11:51Z tests/fm-secondmate-sync.test.sh family=secondmate expected_gate_skip=none
+ok - T1 updated: a behind home fast-forwards to the primary's local HEAD
+ok - T2 current: an already-current home is a no-op and reports no instruction change
+ok - T3 dirty: an uncommitted home is skipped, its edit preserved
+ok - scratchpad2/ does not mark a secondmate home dirty for the sync guard
+ok - T4 diverged: a home that is not an ancestor of the primary's HEAD is skipped
+ok - T5 in-flight: a home on a feature branch is skipped, its work preserved
+ok - T6 no fetch: the local-HEAD sync never invokes git fetch
+ok - T7 sweep nudges on a real instruction change only, but still fast-forwards
+ok - T8 bootstrap sweeps live homes and sends exactly one marked nudge for the instruction change
+ok - T8a bootstrap nudge send respects FM_STATE_OVERRIDE
+ok - T8f bootstrap nudge retry rejects malformed marker ids
+ok - T8c failed bootstrap nudge is surfaced and recorded for retry
+ok - T8d bootstrap nudge retry is idempotent after success
+ok - T8e bootstrap nudge retry refuses a changed home instead of guessing
+ok - T8b a stale herdr endpoint cannot lose a durably enqueued nudge, and fm-<id> resolves through post-respawn metadata
+ok - T9 bootstrap surfaces a skipped dirty live secondmate home
+ok - T10 spawn fast-forwards a secondmate worktree to the primary's local HEAD before launch
+ok - T11 spawn warns when pre-launch sync is skipped
+ok - T12 gitignored marker: a freshly seeded home reads clean to fleet-sync and the ff sweep
+ok - T13 gitignored marker: an existing marker-only-dirty home converges, then reads clean
+ok - T14 marker tolerance does not mask a genuinely dirty home
+ok - R1 a remote home ahead of the host's Firstmate copy still advances to the primary's commit
+ok - R1b a remote sync names exactly which instruction paths its advance changed
+ok - R2 a missing target is imported from the host's Firstmate copy without moving it
+ok - R3 a target neither side holds is imported from the home's own origin
+ok - R4 an already-present target advances the home with no fetch available
+ok - R5 a target neither the host copy nor the origin holds skips with an actionable reason
+ok - R6 dirty, diverged, and feature-branch remote homes skip and are left untouched
+ok - R7 a sync with no target still follows the host's own refreshed Firstmate copy
+ok - R8 session start converges a remote home on the primary's default-branch commit
+ok - R10 a host too old for a parent-targeted sync is reported with the command that fixes it
+ok - R11 a remote home is nudged only for an owed reread or a real instruction change, never for a cut-off attempt that changed nothing
+not ok - tests/fm-secondmate-sync.test.sh exceeded the per-script bound of 540s and was terminated
+FM_TEST_END 2026-10-17T22:20:53Z tests/fm-secondmate-sync.test.sh exit=124 duration_ms=540918 gate_skip=false
+FM_TEST_BEGIN 2026-10-17T22:20:53Z tests/fm-secondmate-harness.test.sh family=secondmate expected_gate_skip=none
+ok - A1 fm-harness.sh secondmate resolves the fallback chain; crew mode unchanged
+ok - fm-harness detects only Cursor Agent CLI's exact invocation marker
+ok - C1 fm-harness.sh secondmate-model/secondmate-effort resolve the optional tokens; bare harness stays empty (backward-compat)
+ok - pi-signed identity: authoritative launch selection distinguishes shared wrapper ancestry
+ok - harness identity: dash-leading ps command names are basename operands, not options
+ok - B1 propagate_inheritable_config: copy, idempotence, convergence, absence-mirror, exclusion, no-op, skip diagnostics
+ok - B2 spawn: secondmate runs the secondmate harness; its home inherits declared config
+ok - B3 spawn: an absent secondmate-harness falls back to the crew harness (backward-compat)
+ok - B4 spawn: no config at all -> own harness and no propagation side effects
+ok - B5 spawn: an explicit per-spawn harness arg overrides config/secondmate-harness
+ok - B6 spawn: an unverified resolved secondmate harness is refused (guard intact)
+skip: cursor executable not resolvable in this environment, so the launch could not be built
+ok - B5b spawn: FM_BACKEND wins over inherited config/backend
+ok - B5c spawn: explicit --backend wins over FM_BACKEND and inherited config/backend
+ok - C2 spawn: a bare harness-only secondmate-harness file launches with no model/effort flag (backward-compat)
+ok - C3 spawn: config/secondmate-harness's model token threads --model into the launch and meta
+ok - C4 spawn: config/secondmate-harness's model+effort tokens thread into the launch and meta
+ok - C5 spawn: an explicit --model overrides config/secondmate-harness's model token; the file's effort token still applies
+ok - C6 spawn: an explicit --effort overrides config/secondmate-harness's effort token; the file's model token still applies
+ok - C7 spawn: an explicit --harness starts with clean model/effort defaults
+ok - C8 spawn: an explicit --harness still honors explicit model/effort flags
+ok - C9 spawn: secondmate launch pins supervision to its own harness
+ok - C9 spawn: the harness fallback chain still resolves with no tokens; crew/scout launches are unaffected by this feature
+ok - B7 bootstrap sweep pushes, re-converges, and mirrors absence; never inherits secondmate-harness
+ok - B8 bootstrap sweep propagates config even when the home's tracked files are already current
+ok - B9 bootstrap sweep defers new inherited config until the home ignores it
+ok - B10 bootstrap sweep materializes and inherits the startup-memory default while fast-forwarding
+not ok - tests/fm-secondmate-harness.test.sh exceeded the per-script bound of 540s and was terminated
+FM_TEST_END 2026-10-17T22:29:54Z tests/fm-secondmate-harness.test.sh exit=124 duration_ms=540604 gate_skip=false
+FM_TEST_SUMMARY total=3 failed=3 skipped_gate=0 duration_ms=1384398
+FM_TEST_SUMMARY_FAMILY family=secondmate count=2 duration_ms=1081522 failed=2
+FM_TEST_SUMMARY_FAMILY family=session-bootstrap count=1 duration_ms=300890 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-secondmate-sync.test.sh duration_ms=540918
+FM_TEST_SLOWEST rank=2 script=tests/fm-secondmate-harness.test.sh duration_ms=540604
+FM_TEST_SLOWEST rank=3 script=tests/fm-bootstrap-network-parallel.test.sh duration_ms=300890
+fm-test-run: wrote timing artifact: /home/fm/.no-mistakes/evidence/01M55YA8AVJQK1MJFEFZYEHRHS/targeted-results.json
