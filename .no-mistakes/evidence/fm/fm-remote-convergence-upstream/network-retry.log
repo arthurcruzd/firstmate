@@ -1,0 +1,9 @@
+FM_TEST_BEGIN 2026-10-17T18:53:06Z tests/fm-bootstrap-network-parallel.test.sh family=session-bootstrap expected_gate_skip=none
+ok - bootstrap network (parallel): per-mate output stays intact, fail-closed, and correctly sequenced
+ok - bootstrap network (fallback): per-mate output stays intact, fail-closed, and correctly sequenced
+not ok - tests/fm-bootstrap-network-parallel.test.sh exceeded the per-script bound of 240s and was terminated
+FM_TEST_END 2026-10-17T18:57:07Z tests/fm-bootstrap-network-parallel.test.sh exit=124 duration_ms=240613 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=242009
+FM_TEST_SUMMARY_FAMILY family=session-bootstrap count=1 duration_ms=240613 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-bootstrap-network-parallel.test.sh duration_ms=240613
+fm-test-run: wrote timing artifact: /home/fm/.no-mistakes/evidence/01M55HYTVM4CFNG7K7MRHJGJFW/network-retry.json
