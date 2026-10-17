@@ -117,7 +117,9 @@ A decision-owned event surfaced by `bin/fm-watch.sh`'s signal path gets the same
 
 A second mate's status log is one shared channel carrying many independently keyed decisions, so its signal row is judged by the lines presented since the last drain rather than by the whole log.
 The row is excluded when one of those lines is a decision, blocked, or captain-held line, resolves a decision open just before it, or declares, in the status parser's key positions, the key of a decision still open in that log.
+Two lines that only echo what main already holds stay routine: a decision line that re-records a decision still open under the same key with the same note, and a resolution this home appended itself (main's own `fm-send --resolve-key` close, recorded in `bin/fm-classify-lib.sh`'s home-appends ledger).
 A resolution that closes nothing, key-less beside only keyed decisions or keyed for a key never open, stays routine.
+A second mate's row the watcher marked `needs-decision:` stays main's unless a cursor-bounded span explains the mark as such an unchanged re-record and holds nothing decision-owned.
 A key-less line otherwise falls back to its verb; an unrelated open decision alone leaves a routine span eligible, while a mixed span goes wholly to main.
 The status-presentation cursor bounds that span, and a missing or unmatched cursor falls back to the whole log.
 Single-task crewmate signals keep their existing Pi payload and attended-host whole-log rules, except that the TypeScript decision fold now ignores bare transition words without a colon or complete key token, matching `bin/fm-classify-lib.sh` on both crewmate and second-mate logs.

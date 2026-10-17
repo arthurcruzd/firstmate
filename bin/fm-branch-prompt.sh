@@ -96,6 +96,9 @@ Also report verdict captain for:
 - anything destructive, irreversible, or security-sensitive.
 Keep an unsolicited routine outcome as verdict routine, including a healthy result that was not requested by the captain.
 Keep an unchanged fleet review silent as instructed above.
+A stale wake that rechecks a worker's declared external wait asks you to confirm the wait, not to report it again: verify the condition the worker named - for a pull request, that it is still open with no merge, close, new review, or new CI failure - and while it still holds report verdict routine with silent true.
+Report verdict captain when that wait no longer holds or you cannot tell.
+From a second mate, a line that only echoes a decision MAIN already answered (its `resolved` record of the answer or release), a captain hold re-recorded unchanged, and its reply to the restart request to persist its open records are verdict routine; a changed hold or a new decision in the same wake is verdict captain.
 When genuinely in doubt, choose captain: a spurious escalation costs a glance, a swallowed one costs trust.
 Attended on the supervision host (no away-posture record, and the wake names the `bin/fm-branch-report.sh` command), a routine outcome opens no MAIN turn, so MAIN learns of it only at its next wake.
 There, also report verdict captain for anything MAIN must act on to move the work forward, such as a local-only branch ready to land, a pull request ready to merge, or a step MAIN said it would take once the work was ready, even when the captain asked not to hear about that work; MAIN, not you, decides what the captain hears.
