@@ -483,6 +483,36 @@ test_dispatch_offer_judges_the_resurface_by_its_queue() {
   pass "dispatch entry: the watcher's downtime resurface is judged by the queue it re-presents"
 }
 
+# A T3 Code task's stale rows are keyed by its thread id, so the offer must
+# resolve that key to the task: a declared external-wait recheck is then the
+# host's, like any other backend's, and no longer an unresolvable row that
+# sends it and every co-queued row to main. A task with an open decision still
+# keeps its stale close on main.
+test_dispatch_offer_takes_a_t3_task_declared_wait_recheck() {
+  local home state out reason
+  home="$TMP_ROOT/dispatch-t3-stale"
+  state="$home/state"
+  mkdir -p "$state"
+  printf 'window=fm-demo\nproject=demo\nkind=ship\nbackend=t3code\nt3_thread_id=mcp:9f4edb7e-0000\n' > "$state/demo.meta"
+  printf 'project=demo\nwindow=fm-other\n' > "$state/other.meta"
+  printf 'paused [at=1792128972]: PR https://example.invalid/pull/1 still open, waiting on upstream maintainers\n' > "$state/demo.status"
+  reason="stale: mcp:9f4edb7e-0000 (paused 73149s, awaiting external - declared pause, rechecked on a long cadence not a wedge; confirm the wait still holds)"
+  append_wake "$state" stale mcp:9f4edb7e-0000 "$reason"
+  append_wake "$state" signal other.status "signal: $state/other.status"
+
+  out=$(printf '%s\n' "$reason" | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=1" "a T3 task's declared-wait recheck must be the host's"
+  assert_contains "$out" "corrupted=0" "a T3 thread-id stale key must resolve, not corrupt the scan"
+  assert_contains "$out" "rows=1 2" "the T3 stale row must not veto a co-queued routine row"
+  assert_contains "$out" "tasks=demo other" "the T3 stale row must resolve to its task"
+
+  printf 'needs-decision [key=pick] [at=1792129000]: choose a base branch\n' >> "$state/demo.status"
+  out=$(printf '%s\n' "$reason" | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a T3 task with an open decision must keep its stale close on main"
+  assert_contains "$out" "rows=2" "only the unrelated routine row stays claimable"
+  pass "dispatch entry: a T3 task's declared-wait recheck is the host's unless the task holds an open decision"
+}
+
 # --- host loop ----------------------------------------------------------------
 
 
@@ -3025,6 +3055,7 @@ test_report_surface_enforces_actor_turn_and_scope
 test_report_after_the_return_is_queued_for_main
 test_dispatch_entry_scopes_rows_and_renders_the_away_tail
 test_dispatch_offer_judges_the_resurface_by_its_queue
+test_dispatch_offer_takes_a_t3_task_declared_wait_recheck
 test_branch_outcomes_only_on_a_host_home_off_pi
 test_branch_outcomes_put_captain_first_and_collapse_routine_overflow
 test_branch_outcomes_collapse_repeated_captain_outcomes_per_task
