@@ -12,9 +12,8 @@
 // Usage:
 //   fm-t3-mcp.mjs login --access full-access [--url <origin>] [--t3 <t3-bin>] [--base-dir <t3-base-dir>] [--label <label>]
 //     Captain-run sign-in. Mints a two-minute one-time pairing code with the
-//     operator's own `t3 auth pairing create --scope orchestration:read
-//     --scope orchestration:operate`, spends it on T3's OAuth decision API at
-//     the chosen ceiling, exchanges the code with a PKCE verifier, and writes
+//     operator's own `t3 auth pairing create` scoped to SCOPES, spends it on
+//     T3's OAuth decision API at the chosen ceiling, exchanges the code with a PKCE verifier, and writes
 //     the credential, the server's origin, its environment id, and its version
 //     to the token file (mode 0600). The token and pairing code are never
 //     printed. Only the full-access ceiling is accepted. The origin defaults to
@@ -157,7 +156,10 @@ const ENVIRONMENT_TOOL = "t3_environment_read";
 const EXPIRY_WARN_DAYS = 5;
 const DAY_MS = 86_400_000;
 const REQUEST_TIMEOUT_MS = 30_000;
-const SCOPES = ["orchestration:read", "orchestration:operate"];
+// The pairing code must cover every scope T3 grants a full-access mcp-client:
+// T3 0.1.0 adds settings:write and source-control:write to the read and
+// operate scopes of the 0.0.46 nightlies, and refuses a code that lacks one.
+const SCOPES = ["orchestration:read", "orchestration:operate", "settings:write", "source-control:write"];
 const ACCESS_CEILINGS = ["full-access"];
 const TERMINAL_RUN = new Set(["completed", "failed", "cancelled", "interrupted", "rolled_back"]);
 const ACTIVE_STATUSES = ["preparing", "queued", "starting", "running", "waiting"];

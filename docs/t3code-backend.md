@@ -41,7 +41,8 @@ bin/fm-t3-mcp.mjs login --access full-access
 
 The server origin defaults to `FM_T3CODE_ORIGIN`, else the `origin` in `~/.t3/userdata/server-runtime.json`; `--url <origin>` names it explicitly.
 Add `--t3 <path>` when `t3` is not on `PATH`, and `--base-dir <dir>` when the server runs with a non-default T3 base directory.
-The sign-in mints a two-minute one-time pairing code with the operator's own `t3 auth pairing create`, scoped to `orchestration:read` and `orchestration:operate`, and spends it to approve Firstmate as an OAuth `mcp-client` at the full-access ceiling.
+The sign-in mints a two-minute one-time pairing code with the operator's own `t3 auth pairing create`, scoped to `orchestration:read`, `orchestration:operate`, `settings:write`, and `source-control:write`, and spends it to approve Firstmate as an OAuth `mcp-client` at the full-access ceiling.
+T3 0.1.0 grants a full-access `mcp-client` all four scopes and refuses a pairing code that lacks one.
 No browser is involved, and the token and pairing code are never printed.
 
 Full access is required because a worker writes its status lines outside its worktree.

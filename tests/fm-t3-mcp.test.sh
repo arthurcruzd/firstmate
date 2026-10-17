@@ -54,8 +54,8 @@ test_login_writes_private_credential_and_never_prints_token() {
   [ "$(stat -c %a "$CRED" 2>/dev/null || stat -f %Lp "$CRED")" = 600 ] || fail "credential file must be mode 0600"
   assert_grep '"environment_id":"env-fake-1"' "$CRED" "credential must record the environment id"
   assert_grep '"origin":"'"$T3_FAKE_URL"'"' "$CRED" "credential must record the origin"
-  assert_grep "auth pairing create --base-dir $TMP_ROOT/t3home --scope orchestration:read --scope orchestration:operate --ttl 2m" "$TMP_ROOT/cli/t3-cli.log" \
-    "sign-in must mint a two-minute pairing code scoped to orchestration read and operate"
+  assert_grep "auth pairing create --base-dir $TMP_ROOT/t3home --scope orchestration:read --scope orchestration:operate --scope settings:write --scope source-control:write --ttl 2m" "$TMP_ROOT/cli/t3-cli.log" \
+    "sign-in must mint a two-minute pairing code covering every scope T3 grants a full-access mcp-client"
   assert_grep '"access":"full-access"' "$T3_FAKE_LOG" "the OAuth decision must carry the full-access ceiling"
   assert_grep '"pkce":true' "$T3_FAKE_LOG" "the token exchange must prove the PKCE verifier"
   pass "fm-t3-mcp login: PKCE sign-in writes a 0600 credential with the environment id and prints no secret"

@@ -2559,6 +2559,39 @@ Live facts this run added:
 - A launch's `t3_thread_configuration` reads back the requested instance, model, and options.
 - The provider process of an idle secondmate thread stays running in its home until after the archive reads back.
 
+### Stable 0.1.0
+
+The backend was verified live on 2026-10-17 against stable `t3 v0.1.0` (npm launcher plus native `@t3code/t3-darwin-arm64`), run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.302, node v26.8.2, and treehouse v2.3.0 on macOS 26.3 arm64.
+It used a scratch Firstmate home with `config/backend` `t3code`, a scratch project with a bare origin, and a private Treehouse pool root; the lab credential was revoked and the server stopped afterwards.
+T3 0.1.0 grants a full-access `mcp-client` `orchestration:read`, `orchestration:operate`, `settings:write`, and `source-control:write`, and its OAuth decision refuses a pairing code that does not cover all four, which the 0.0.46 nightlies did not require.
+
+```sh
+bin/fm-t3-mcp.mjs login --url http://127.0.0.1:<port> --access full-access --t3 <t3> --base-dir <t3-base-dir>
+bin/fm-spawn.sh lab1 projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+bin/fm-send.sh lab1 "<steer>"
+bin/fm-control.sh lab1 interrupt
+bin/fm-control.sh lab1 exit
+bin/fm-teardown.sh lab1
+```
+
+```text
+{"ok":false,"error":{"code":"oauth_failed","message":"/oauth/mcp/decision failed: That pairing code cannot grant this access, and it is now used up. Create one with the standard scopes, or choose Read only with a new code."}}
+{"ok":true,...,"access":"full-access","scope":"orchestration:read orchestration:operate settings:write source-control:write",...,"serverVersion":"0.1.0"}
+interrupt-delivered lab1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+{"ok":true,...,"exists":true,"archived":true,"status":"interrupted","activeRunId":null,...}
+```
+
+The first line is the sign-in with only the read and operate scopes; the second is the sign-in with all four.
+
+| Step | Result |
+| --- | --- |
+| Spawn of a Claude scout, including the Treehouse lease and the launch turn | 9.3 s |
+| Claude scout from spawn to its `done` line and report | 28.3 s |
+| Inbox steer send to the worker's `handled/` acknowledgement | 7.8 s |
+| `fm-control.sh interrupt` during a running `python3` tool call | 2.0 s, `cancel=confirmed`; the child was gone 2 s later and the thread read `interrupted` |
+| `fm-control.sh exit` | refused before anything was sent |
+| Teardown, including the archive read-back and slot return | 23.5 s; the thread read `archived:true` with no active run, the record was removed, and the slot read `available` |
+
 ### Claude pull-request tools
 
 T3's `link_pull_request`, `list_thread_pull_requests`, and `unlink_pull_request` tools crashed a Claude session on a pre-V2 T3 build, so Claude workers were told not to call them.
@@ -2583,10 +2616,10 @@ FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live
 ```
 
 ```text
-ok - t3 live transport: T3 0.0.46-nightly.20261008.2833 environment <id> passes the gate (telemetry=off)
+ok - t3code live transport: T3 0.1.0 environment <id> passes the gate (telemetry=off)
 ```
 
-That result is from the standalone guard of the 2026-10-08 run, which made the same gate and missing-thread checks; refresh it with the command above after signing in.
+That result is from the 2026-10-17 stable 0.1.0 lab run; refresh it with the command above after signing in.
 
 ### Portable regression coverage
 
