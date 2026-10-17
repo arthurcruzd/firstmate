@@ -138,9 +138,9 @@
 #          remote convergence workers run concurrently, because convergence
 #          consumes respawned ids. Worker output is captured separately and
 #          replayed in spawn order; failure to create that private capture
-#          directory selects the sequential fallback. Each remote convergence
-#          worker runs under its own FM_SECONDMATE_CONVERGENCE_TIMEOUT budget
-#          (secondmate_sync_remote_one owns it).
+#          directory selects the sequential fallback. Remote tracked-file sync
+#          and inheritance share a per-mate FM_SECONDMATE_CONVERGENCE_TIMEOUT
+#          budget (secondmate_sync_remote_one owns it).
 #          A relaunch that the liveness sweep performs during an `only` run is
 #          always reported, because a digest composed before that run already
 #          printed the superseded endpoint record.
@@ -602,13 +602,14 @@ secondmate_sync() {
   # individually timed; every `return` here was a `continue` and still means
   # "move on to the next secondmate".
   # Each mate has its own budget, FM_SECONDMATE_CONVERGENCE_TIMEOUT seconds
-  # (default 75), so one slow or hung host is reported as that mate's skip
-  # instead of running the whole deferred network stage into its bound. The
-  # tracked-file sync and the inheritance push run under what is left of it; a
+  # (default 75), measured from entry to secondmate_sync_remote_one. Only the
+  # tracked-file sync and inheritance push are timed against that deadline;
+  # lock acquisition, reply-source arming, and nudge delivery are not wrapped
+  # by this budget. The deferred network stage retains its aggregate bound. A
   # step that hits it, or finds nothing left, fails like any other failed step,
   # which leaves the mate unconverged with its retry marker kept. A step cut off
   # by the budget may already have changed the home without reporting it, so it
-  # also marks the re-read as owed; the next convergence then nudges the mate.
+  # also keeps the re-read owed under bin/fm-secondmate-nudge-lib.sh's contract.
   remote_convergence_budget() {
     local budget=${FM_SECONDMATE_CONVERGENCE_TIMEOUT:-75}
     case "$budget" in ''|*[!0-9]*|0) budget=75 ;; esac
