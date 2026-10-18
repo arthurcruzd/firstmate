@@ -4,12 +4,15 @@
 # Both local tracked-file convergence and remote inherited-material transfer
 # publish the same bounded record before delivery. A failed send leaves the
 # record for the locked bootstrap retry; a successful send removes it.
-# A remote route writes its record before each convergence attempt, so the
-# record's owed= field says whether a reread is actually owed: 1 once that
-# attempt (or an earlier one) changed the home's instructions or inherited
-# material, 0 while it only covers an attempt in progress. An attempt that is
-# cut off or fails before changing anything therefore leaves a record that owes
-# nothing, and the next attempt does not nudge for it.
+# A remote route writes its record with owed=1 before each convergence attempt
+# can change the home (write-ahead), so a kill at any point, including the
+# startup network bound's TERM followed by KILL, leaves the reread owed. Once
+# the attempt reports, the record stays owed when that attempt (or an earlier
+# one) changed the home's instructions or inherited material, or when
+# completion is unknown (transport 255 or a per-mate budget cut-off). An
+# attempt whose outcome proves nothing changed, with no earlier reread owed, is
+# written back to owed=0 when it failed or removed when it converged; an owed
+# reread survives unchanged retries until a successful send.
 
 FM_SECOND_MATE_NUDGE_MESSAGE='firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'
 FM_REMOTE_SECOND_MATE_NUDGE_MESSAGE='Firstmate instructions or inherited config changed on this host. Re-read AGENTS.md and the inherited config files before further work.'

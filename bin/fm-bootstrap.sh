@@ -138,9 +138,9 @@
 #          remote convergence workers run concurrently, because convergence
 #          consumes respawned ids. Worker output is captured separately and
 #          replayed in spawn order; failure to create that private capture
-#          directory selects the sequential fallback. Each remote convergence
-#          worker runs under its own FM_SECONDMATE_CONVERGENCE_TIMEOUT budget
-#          (secondmate_sync_remote_one owns it).
+#          directory selects the sequential fallback. Remote tracked-file sync
+#          and inheritance share a per-mate FM_SECONDMATE_CONVERGENCE_TIMEOUT
+#          budget (secondmate_sync_remote_one owns it).
 #          A relaunch that the liveness sweep performs during an `only` run is
 #          always reported, because a digest composed before that run already
 #          printed the superseded endpoint record.
@@ -239,7 +239,7 @@ network_sweep_authorized() {
   if network_mutation_authorized; then
     return 0
   fi
-  echo "NETWORK_CHECKS: fleet lock ownership changed before $label, so this stale worker skipped that sweep"
+  echo "NETWORK_CHECKS: the recorded fleet lock holder changed before $label, so this stale worker skipped that sweep"
   return 1
 }
 
@@ -602,13 +602,14 @@ secondmate_sync() {
   # individually timed; every `return` here was a `continue` and still means
   # "move on to the next secondmate".
   # Each mate has its own budget, FM_SECONDMATE_CONVERGENCE_TIMEOUT seconds
-  # (default 75), so one slow or hung host is reported as that mate's skip
-  # instead of running the whole deferred network stage into its bound. The
-  # tracked-file sync and the inheritance push run under what is left of it; a
+  # (default 75), measured from entry to secondmate_sync_remote_one. Only the
+  # tracked-file sync and inheritance push are timed against that deadline;
+  # lock acquisition, reply-source arming, and nudge delivery are not wrapped
+  # by this budget. The deferred network stage retains its aggregate bound. A
   # step that hits it, or finds nothing left, fails like any other failed step,
   # which leaves the mate unconverged with its retry marker kept. A step cut off
   # by the budget may already have changed the home without reporting it, so it
-  # also marks the re-read as owed; the next convergence then nudges the mate.
+  # also keeps the re-read owed under bin/fm-secondmate-nudge-lib.sh's contract.
   remote_convergence_budget() {
     local budget=${FM_SECONDMATE_CONVERGENCE_TIMEOUT:-75}
     case "$budget" in ''|*[!0-9]*|0) budget=75 ;; esac
@@ -617,7 +618,7 @@ secondmate_sync() {
 
   secondmate_sync_remote_one() {  # <id> <home> <remote-host>
     local id=$1 _home=$2 remote_host=$3
-    local sync_out sync_rc inherit_out='' inherit_rc nudge_needed remote_marker remote_pending converged out remote_lock remote_generation
+    local sync_out='' sync_rc inherit_out='' inherit_rc nudge_needed remote_marker remote_pending converged out remote_lock remote_generation
     local budget deadline left
     budget=$(remote_convergence_budget)
     deadline=$(( $(date +%s) + budget ))
@@ -636,17 +637,19 @@ secondmate_sync() {
       return 0
     fi
     remote_marker=$(secondmate_nudge_marker_path "$id" 2>/dev/null || true)
-    # Only a reread a previous attempt left owed carries over; a record that
-    # merely covered an interrupted or failed attempt owes nothing.
+    # Only a reread a previous attempt left owed carries over. The record is
+    # written owed before any step can change the home (write-ahead), so a kill
+    # at any point leaves it owed; an attempt whose outcome proves nothing
+    # changed writes it back below (bin/fm-secondmate-nudge-lib.sh).
     remote_pending=0
     if fm_secondmate_remote_nudge_owed "$STATE" "$id"; then remote_pending=1; fi
     if ! secondmate_write_nudge_marker "$id" "$_home" "" remote \
-      "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 "$remote_pending"; then
+      "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1; then
       echo "NUDGE_SECONDMATES: secondmate $id: send failed: cannot record remote retry marker"
       fm_lock_release "$remote_lock" || true
       return 0
     fi
-    nudge_needed=0
+    nudge_needed=$remote_pending
     converged=1
     sync_rc=0
     left=$(( deadline - $(date +%s) ))
@@ -654,10 +657,11 @@ secondmate_sync() {
       sync_rc=124
     elif sync_out=$(fm_run_timed "$left" "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh sync "$id" \
       "$primary_head" < /dev/null 2>&1); then
-      if fm_secondmate_remote_sync_changed "$sync_out"; then nudge_needed=1; fi
+      :
     else
       sync_rc=$?
     fi
+    if fm_secondmate_remote_sync_changed "$sync_out" || [ "$sync_rc" -eq 255 ]; then nudge_needed=1; fi
     if fm_timed_out "$sync_rc"; then
       echo "SECONDMATE_SYNC: secondmate $id: skipped: remote tracked-file sync failed on $remote_host: no answer within the ${budget}s per-mate convergence budget"
       converged=0
@@ -677,7 +681,7 @@ secondmate_sync() {
       inherit_rc=$?
     fi
     # Items a failed push applied before it stopped changed the home too.
-    if printf '%s\n' "${inherit_out:-}" | grep -Eq '^(pushed|removed):'; then nudge_needed=1; fi
+    if [ "$inherit_rc" -eq 255 ] || printf '%s\n' "${inherit_out:-}" | grep -Eq '^(pushed|removed):'; then nudge_needed=1; fi
     if fm_timed_out "$inherit_rc"; then
       echo "SECONDMATE_SYNC: secondmate $id: skipped: remote inheritance failed on $remote_host: no answer within the ${budget}s per-mate convergence budget"
       converged=0
@@ -686,12 +690,6 @@ secondmate_sync() {
       echo "SECONDMATE_SYNC: secondmate $id: skipped: remote inheritance failed on $remote_host: $(remote_inherit_failure_reason "$inherit_out")"
       converged=0
     fi
-    if [ "$nudge_needed" -eq 1 ] && [ "$remote_pending" -eq 0 ] \
-      && ! secondmate_write_nudge_marker "$id" "$_home" "" remote \
-        "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 1; then
-      echo "NUDGE_SECONDMATES: secondmate $id: send failed: cannot record remote retry marker"
-    fi
-    [ "$remote_pending" -eq 0 ] || nudge_needed=1
     if [ "$converged" -eq 1 ] && [ "$nudge_needed" -eq 1 ]; then
       if out=$(FM_HOME="$FM_HOME" FM_ROOT_OVERRIDE="$FM_ROOT" FM_STATE_OVERRIDE="$STATE" \
         "$SCRIPT_DIR/fm-send.sh" "fm-$id" "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 2>&1); then
@@ -702,6 +700,9 @@ secondmate_sync() {
       fi
     elif [ "$converged" -eq 1 ]; then
       rm -f "$remote_marker"
+    elif [ "$nudge_needed" -eq 0 ] && ! secondmate_write_nudge_marker "$id" "$_home" "" remote \
+      "$REMOTE_SECOND_MATE_NUDGE_MESSAGE" 1 0; then
+      echo "NUDGE_SECONDMATES: secondmate $id: send failed: cannot record remote retry marker"
     fi
     fm_lock_release "$remote_lock" || true
     return 0
@@ -1115,7 +1116,7 @@ crew_dispatch_validate() {
   if $typed_active; then
     verified_harnesses=$(fm_control_harnesses | jq -Rsc 'split("\n") | map(select(length > 0))')
   else
-    verified_harnesses='["claude","codex","opencode","pi","pi-signed","grok","kimi","cursor","agy","muse","rovo","omp","devin","commandcode"]'
+    verified_harnesses='["claude","codex","opencode","pi","pi-signed","grok","kimi","cursor","agy","muse","rovo","omp","devin","commandcode","polytoken"]'
   fi
   err=$(jq -r --argjson typed "$typed_active" --argjson verified_harnesses "$verified_harnesses" --arg provider_re "$FM_QUOTA_PROVIDER_ID_RE" '
     def verified($h): $verified_harnesses | index($h);
