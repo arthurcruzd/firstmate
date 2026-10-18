@@ -503,7 +503,11 @@ function inactiveDoneAlreadyReported(
   try {
     if (!lstatSync(statusPath).isFile()) return null;
     const contents = readFileSync(statusPath);
-    const doneEnd = spanLines(contents, 0).findLast((line) => statusLineVerb(line.text) === "done")?.end;
+    const lines = spanLines(contents, 0);
+    let doneEnd: number | undefined;
+    for (let index = lines.length - 1; index >= 0 && doneEnd === undefined; index -= 1) {
+      if (statusLineVerb(lines[index].text) === "done") doneEnd = lines[index].end;
+    }
     if (doneEnd === undefined) return null;
     const ident = statusFileIdentity(statusPath);
     const rows = storeRows();
