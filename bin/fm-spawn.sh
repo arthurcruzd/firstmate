@@ -3054,6 +3054,10 @@ WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT_ROOT%%$'\t'*}
 # account and environment, so a launch setting only a Firstmate-built command
 # line can apply refuses here instead of being silently widened or dropped.
 if [ "$BACKEND" = t3code ]; then
+  if [ "$RAW_LAUNCH" = 1 ]; then
+    echo "error: backend=t3code cannot run a raw launch command because T3 starts the agent itself; pass a harness name or choose another backend" >&2
+    exit 1
+  fi
   if [ "$HARNESS" = claude ] && [ "$CLAUDE_PERMISSION_MODE" != bypass ]; then
     echo "error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=$CLAUDE_PERMISSION_MODE; remove that file or choose another backend" >&2
     exit 1

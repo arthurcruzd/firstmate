@@ -1578,6 +1578,19 @@ test_spawn_refuses_launch_settings_t3_cannot_honor() {  # <config-file> <content
   pass "fm-spawn.sh --backend t3code: refuses config/$file it cannot honor before any mutation"
 }
 
+test_spawn_refuses_raw_launch_command() {
+  local id=t3rawz out rc
+  t3_case spawn-refuse-raw-launch
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" 'claude --dangerously-skip-permissions --verbose'); rc=$?
+  expect_code 1 "$rc" "a t3code spawn must refuse a raw launch command"$'\n'"$out"
+  assert_contains "$out" "backend=t3code cannot run a raw launch command" "the refusal must name the raw launch command"
+  [ -z "$(t3_dispatch_types)" ] || fail "the refusal must come before any T3 mutation, got '$(t3_dispatch_types)'"
+  [ "$(t3_log_line_of 'r.tool === "treehouse"')" -eq 0 ] || fail "the refusal must come before the slot is leased"
+  assert_absent "$CASE_DIR/state/$id.meta" "a refused spawn records nothing"
+  pass "fm-spawn.sh --backend t3code: refuses a raw launch command before any mutation"
+}
+
 test_spawn_abort_returns_lease_only_after_archive() {  # <ok|fail>
   local archive=$1 id out rc return_line
   id="t3abortz$archive"
@@ -2128,6 +2141,7 @@ test_pooled_t3_secondmate_home_returned_only_after_provider_exits
 test_teardown_refuses_when_t3_is_unreachable
 test_spawn_refuses_launch_settings_t3_cannot_honor claude-permission-mode auto "config/claude-permission-mode=auto"
 test_spawn_refuses_launch_settings_t3_cannot_honor launch-env-allowlist HOME "config/launch-env-allowlist"
+test_spawn_refuses_raw_launch_command
 test_spawn_abort_returns_lease_only_after_archive ok
 test_spawn_abort_returns_lease_only_after_archive fail
 test_uncertain_thread_launch_keeps_lease
