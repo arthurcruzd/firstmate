@@ -1808,15 +1808,21 @@ test_remote_host_release_removes_t3_env() {
   cp "$CONFIG/t3code-token" "$home/config/t3code-token"
   chmod 600 "$home/config/t3code-token"
   touch "$CASE_DIR/home/state/.last-watcher-beat" 2>/dev/null || true
+  # Review finding 10 (C9/F07): the operator's own env entries survive both
+  # the install and the release of the T3 launch environment.
+  mkdir -p "$home/.claude"
+  printf '{"env":{"CAPTAIN_OWN":"keep-me","FM_BACKEND":"stale"}}\n' > "$home/.claude/settings.local.json"
   out=$(HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code \
     FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$ROOT" FM_STATE_OVERRIDE="$home/state/parent-route" FM_DATA_OVERRIDE="$home/data/.parent-route" \
     FM_CONFIG_OVERRIDE="$home/config" FM_SKIP_SECONDMATE_INHERIT=1 FM_SKIP_SECONDMATE_SYNC=1 FM_SPAWN_NO_GUARD=1 \
     "$ROOT/bin/fm-spawn.sh" "$id" "$home" claude --model claude-sonnet-5 --backend t3code --secondmate 2>&1)
   expect_code 0 $? "a host-local T3 mate launch should succeed"$'\n'"$out"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env.CAPTAIN_OWN')" = keep-me ] || fail "the install must keep the operator's own env entries"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env.FM_BACKEND')" = t3code ] || fail "the install must replace a stale value under a name Firstmate owns"
   meta="$home/state/parent-route/$id.meta"
   thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$meta")
   FM_T3_ID="$thread" t3_fake_set 'w.threads[process.env.FM_T3_ID].status = "idle"; w.threads[process.env.FM_T3_ID].activeRunId = null;'
-  node -e 'const fs=require("fs"),f=process.argv[1],d=JSON.parse(fs.readFileSync(f,"utf8"));d.permissions={allow:["Bash(ls)"]};fs.writeFileSync(f,JSON.stringify(d))' "$home/.claude/settings.local.json"
+  node -e 'const fs=require("fs"),f=process.argv[1],d=JSON.parse(fs.readFileSync(f,"utf8"));d.permissions={allow:["Bash(ls)"]};d.env.LATER_OWN="added-while-active";fs.writeFileSync(f,JSON.stringify(d))' "$home/.claude/settings.local.json"
   printf 'thread=%s\n' "$thread" > "$home/state/.t3-host"
   svc="$CASE_DIR/svc.log"
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$svc" > "$FAKEBIN/systemctl"
@@ -1829,7 +1835,8 @@ test_remote_host_release_removes_t3_env() {
   [ "$(t3_json_field "$T3_FAKE_WORLD" "d.threads[\"$thread\"].archived")" = true ] || fail "release must archive the mate's thread"
   assert_absent "$meta" "release must set the endpoint record aside"
   ls "$meta".released-* >/dev/null 2>&1 || fail "release must keep the endpoint record as a released-<stamp> file"
-  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env')" = undefined ] || fail "release must strip the T3 launch environment from the home"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'Object.keys(d.env).sort().join(" ")')" = "CAPTAIN_OWN LATER_OWN" ] \
+    || fail "release must strip exactly the T3 launch environment from the home, got env '$(t3_json_field "$home/.claude/settings.local.json" 'JSON.stringify(d.env)')'"
   [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.permissions.allow[0]')" = 'Bash(ls)' ] || fail "release must keep the home's other local settings"
   assert_absent "$home/state/.t3-host" "release must drop the home's T3 host record"
   # The relay service is a systemd user unit on Linux and an Aqua launch agent

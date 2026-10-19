@@ -579,6 +579,42 @@ fm_backend_t3code_admit() {
   fi
 }
 
+# The Claude environment channel: the env block of a launch directory's
+# .claude/settings.local.json, which a worktree's or a home's other local
+# settings share. Firstmate owns exactly these names in it, so an install
+# replaces only them and a release removes only them; every other entry is the
+# operator's and survives both. An install that names anything else refuses,
+# so a new launch fact cannot be written without being owned here.
+FM_T3CODE_CLAUDE_ENV_NAMES="GOTMPDIR COMPACT_ADVISER_DISABLE FM_TASK_INBOX GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 LAVISH_AXI_HOST FM_TASK_ID TRACEPARENT FM_ROOT_OVERRIDE FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_PROJECTS_OVERRIDE FM_CONFIG_OVERRIDE FM_PUBLIC_FOLLOWUP_PRIMARY_HOME FM_HOME FM_TRACE_CONTEXT FM_SUPERVISION_MODEL FM_SUPERVISOR_BACKEND FM_SUPERVISOR_TARGET FM_BACKEND"
+
+# fm_backend_t3code_claude_env <settings-file> [NAME=VALUE...]: install the
+# given entries (replacing the owned names), or with none, release them. A
+# release that leaves the file empty removes it.
+fm_backend_t3code_claude_env() {
+  local file=$1
+  shift
+  # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions.
+  node -e '
+const fs = require("fs");
+const [file, names, ...pairs] = process.argv.slice(1);
+const owned = new Set(names.split(" "));
+let data = {};
+try { data = JSON.parse(fs.readFileSync(file, "utf8")); }
+catch (err) { if (err.code !== "ENOENT") throw err; if (pairs.length === 0) process.exit(0); }
+const env = { ...(data.env ?? {}) };
+for (const name of Object.keys(env)) if (owned.has(name)) delete env[name];
+for (const pair of pairs) {
+  const eq = pair.indexOf("=");
+  const name = pair.slice(0, eq);
+  if (!owned.has(name)) { console.error(`error: ${name} is not a T3 launch environment name Firstmate owns`); process.exit(1); }
+  env[name] = pair.slice(eq + 1);
+}
+if (Object.keys(env).length) data.env = env; else delete data.env;
+if (pairs.length === 0 && Object.keys(data).length === 0) fs.unlinkSync(file);
+else fs.writeFileSync(file, JSON.stringify(data) + "\n");
+' "$file" "$FM_T3CODE_CLAUDE_ENV_NAMES" "$@"
+}
+
 # There is no pane: bin/fm-spawn.sh's launch-time typing helpers land here.
 fm_backend_t3code_send_literal() {
   echo "error: backend=t3code has no pane to type into" >&2

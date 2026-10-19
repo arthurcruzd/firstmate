@@ -308,14 +308,8 @@ t3_host_attach() { # <id>
 t3_env_remove() {
   local settings="$TARGET_HOME/.claude/settings.local.json"
   if [ -f "$settings" ]; then
-    node -e '
-const fs = require("fs");
-const file = process.argv[1];
-const data = JSON.parse(fs.readFileSync(file, "utf8"));
-delete data.env;
-if (Object.keys(data).length === 0) fs.unlinkSync(file);
-else fs.writeFileSync(file, JSON.stringify(data) + "\n");
-' "$settings" || return 1
+    fm_backend_source t3code || return 1
+    fm_backend_t3code_claude_env "$settings" || return 1
   fi
   "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$TARGET_HOME" || return 1
   rm -f "$TARGET_HOME/state/.t3-host"

@@ -5436,8 +5436,9 @@ exclude_path() {
 # provider instance, never per thread, but each harness reads its own
 # per-directory config from the thread's cwd ($WT): Claude's
 # .claude/settings.local.json `env` block (merged into the file so the busy
-# hooks written above survive; the env block itself is replaced wholesale so a
-# respawn never inherits a stale value) and Codex's .codex/config.toml
+# hooks written above survive; fm_backend_t3code_claude_env replaces exactly
+# the names Firstmate owns, so a respawn never inherits a stale value and the
+# operator's own entries survive) and Codex's .codex/config.toml
 # `[shell_environment_policy] set` table (TOML basic strings). Both files are
 # git-excluded when untracked; tracked Codex overlays are owned by
 # fm-t3code-codex-env.sh, including their Git protection and exact restoration.
@@ -5477,16 +5478,7 @@ spawn_t3code_env_install() {
   case "$harness" in
     claude)
       mkdir -p "$WT/.claude"
-      node -e '
-const fs = require("fs");
-const [file, ...pairs] = process.argv.slice(1);
-let data = {};
-try { data = JSON.parse(fs.readFileSync(file, "utf8")); }
-catch (err) { if (err.code !== "ENOENT") throw err; }
-data.env = {};
-for (const pair of pairs) { const eq = pair.indexOf("="); data.env[pair.slice(0, eq)] = pair.slice(eq + 1); }
-fs.writeFileSync(file, JSON.stringify(data) + "\n");
-' "$WT/.claude/settings.local.json" "$@" || return 1
+      fm_backend_t3code_claude_env "$WT/.claude/settings.local.json" "$@" || return 1
       exclude_path '.claude/settings.local.json'
       ;;
     codex)

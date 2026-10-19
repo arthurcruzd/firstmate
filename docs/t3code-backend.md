@@ -103,7 +103,7 @@ The normal isolation and unlanded-work refusal rules still apply.
 
 T3 sets environment variables per provider instance, never per thread, so nothing can be typed into a pane before launch.
 Claude and Codex read their own configuration from the thread's working directory instead, and Firstmate writes the facts a pane would have exported into that directory before the launch turn.
-For `claude` that is an `env` block in the directory's `.claude/settings.local.json`, merged alongside the busy hooks a worker already carries there; for `codex` it is a `.codex/config.toml` holding a `[shell_environment_policy]` `set` table.
+For `claude` that is an `env` block in the directory's `.claude/settings.local.json`, merged alongside the busy hooks a worker already carries there, in which Firstmate replaces or removes only the names it owns, so the operator's own entries survive an install and a release (`fm_backend_t3code_claude_env` in `bin/backends/t3code.sh`); for `codex` it is a `.codex/config.toml` holding a `[shell_environment_policy]` `set` table.
 Firstmate-created untracked environment files are git-excluded and removed at teardown.
 An existing untracked `.codex/config.toml` without Firstmate's marker is preserved and refused.
 For a tracked `.codex/config.toml`, Firstmate preserves the project bytes and appends its policy only if the file does not already define `shell_environment_policy`, including through dotted or quoted keys.
