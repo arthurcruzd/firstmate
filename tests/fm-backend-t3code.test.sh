@@ -1416,7 +1416,11 @@ test_codex_worker_ignores_untracked_config_in_main_checkout() {
   local id=t3codexmainz out rc
   t3_case codex-main-untracked
   t3_worker_setup "$id"
-  mkdir -p "$WORKER_PROJ/.codex"
+  # The project tracks other .codex content, but not the config itself.
+  mkdir -p "$WORKER_PROJ/.codex/skills/x"
+  printf '# Skill\n' > "$WORKER_PROJ/.codex/skills/x/SKILL.md"
+  git -C "$WORKER_PROJ" add .codex/skills/x/SKILL.md
+  git -C "$WORKER_PROJ" -c user.name=t -c user.email=t@example.invalid commit -qm skill
   printf 'model = "personal-model"\n' > "$WORKER_PROJ/.codex/config.toml"
   out=$(t3_worker_spawn "$id" codex --model gpt-5.6-sol); rc=$?
   expect_code 0 "$rc" "an untracked Codex config in the main checkout must not refuse a worker spawn"$'\n'"$out"
