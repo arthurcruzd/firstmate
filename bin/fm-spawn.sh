@@ -1503,6 +1503,7 @@ ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
 T3CODE_ABORT_CLEANUP=0
 T3CODE_LEASED=0
+T3CODE_CLAUDE_CHANNEL_WRITTEN=0
 T3CODE_CREATE_UNCERTAIN=0
 T3CODE_LAUNCH_UNCONFIRMED=0
 T3CODE_PROJECT_ID=
@@ -1697,9 +1698,13 @@ spawn_abort_cleanup() {
   fi
   if [ "$T3CODE_LEASED" = 1 ] && [ -n "${WT:-}" ]; then
     T3CODE_LEASED=0
-    rm -f "$WT/.claude/settings.local.json" "$WT/CLAUDE.local.md" 2>/dev/null || true
+    rm -f "$WT/.claude/settings.local.json" 2>/dev/null || true
+    # Only a CLAUDE.local.md this spawn wrote: the channel install refuses one
+    # already in the slot, and that one stays as found.
+    [ "$T3CODE_CLAUDE_CHANNEL_WRITTEN" != 1 ] || rm -f "$WT/CLAUDE.local.md" 2>/dev/null || true
     if ! "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$WT" \
-      || [ -e "$WT/.claude/settings.local.json" ] || [ -e "$WT/CLAUDE.local.md" ]; then
+      || [ -e "$WT/.claude/settings.local.json" ] \
+      || { [ "$T3CODE_CLAUDE_CHANNEL_WRITTEN" = 1 ] && [ -e "$WT/CLAUDE.local.md" ]; }; then
       echo "warning: could not remove the T3 environment files this spawn wrote into $WT for $ID, so it stays leased; remove them, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
     else
       (cd "$PROJ_ABS" && treehouse return --force "$WT") >/dev/null 2>&1 \
@@ -5645,6 +5650,7 @@ spawn_t3code_claude_channel_install() {
     fi
   } > "$tmp" || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$channel" || { rm -f "$tmp"; return 1; }
+  T3CODE_CLAUDE_CHANNEL_WRITTEN=1
   exclude_path 'CLAUDE.local.md'
 }
 spawn_t3code_env_install() {
