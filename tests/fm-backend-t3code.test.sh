@@ -1716,24 +1716,37 @@ test_uncertain_thread_launch_keeps_lease() {
   pass "fm-spawn.sh --backend t3code: a launch whose response was lost keeps the lease"
 }
 
-test_spawn_appends_git_hook_after_inherited_git_config() {
-  local id=t3gitcfgz out rc settings pair
-  local -a git_env=()
-  t3_case spawn-git-config
-  t3_worker_setup "$id"
-  out=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=fm-test-helper \
-    t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
-  expect_code 0 "$rc" "a spawn with inherited Git config entries should succeed"$'\n'"$out"
+# Inherited Git config can carry credentials (an extraheader bearer token, a
+# url.insteadOf with an embedded token), so the T3 env file carries only
+# Firstmate's own hook entry, for every harness's file.
+test_spawn_never_writes_inherited_git_config() {
+  local harness model id out rc settings secret=fm-inherited-secret-7f3a
+  for harness in claude codex; do
+    case "$harness" in claude) model=claude-sonnet-5 ;; codex) model=gpt-5.6-sol ;; esac
+    id="t3gitcfgz$harness"
+    t3_case "spawn-git-config-$harness"
+    t3_worker_setup "$id"
+    out=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://example.invalid/.extraheader \
+      GIT_CONFIG_VALUE_0="AUTHORIZATION: bearer $secret" \
+      t3_worker_spawn "$id" "$harness" --model "$model"); rc=$?
+    expect_code 0 "$rc" "a $harness spawn with inherited Git config entries should succeed"$'\n'"$out"
+    if grep -rqF "$secret" "$WORKER_WT" "$CASE_DIR/state"; then
+      fail "an inherited GIT_CONFIG_VALUE must never be written to disk by a $harness spawn: $(grep -rlF "$secret" "$WORKER_WT" "$CASE_DIR/state")"
+    fi
+  done
+  t3_case spawn-git-config-entries
+  t3_worker_setup t3gitcfgzentries
+  out=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=fm-inherited-helper \
+    t3_worker_spawn t3gitcfgzentries claude --model claude-sonnet-5); rc=$?
+  expect_code 0 "$rc" "a claude spawn with an inherited credential helper should succeed"$'\n'"$out"
   settings="$WORKER_WT/.claude/settings.local.json"
-  while IFS= read -r -d '' pair; do git_env+=("$pair"); done < <(node -e '
-const env = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).env;
-for (const [k, v] of Object.entries(env)) if (k.startsWith("GIT_CONFIG_")) process.stdout.write(`${k}=${v}\0`);
-' "$settings")
-  [ "$(env "${git_env[@]}" git -C "$WORKER_WT" config --get credential.helper)" = fm-test-helper ] \
-    || fail "the inherited credential.helper must survive the T3 Git hook override, env: ${git_env[*]}"
-  [ "$(env "${git_env[@]}" git -C "$WORKER_WT" config --get core.hooksPath)" = "$CASE_DIR/state/$id.git-hooks" ] \
-    || fail "the T3 Git hook override must still select the installed hook, env: ${git_env[*]}"
-  pass "fm-spawn.sh --backend t3code: the Git hook override is appended after inherited GIT_CONFIG entries"
+  [ "$(t3_json_field "$settings" 'Object.keys(d.env).filter((k) => k.startsWith("GIT_CONFIG_")).sort().join(" ")')" = \
+    "GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0" ] || fail "the env file carries exactly one Git config entry, got $(t3_json_field "$settings" 'd.env')"
+  [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_COUNT')" = 1 ] || fail "the env file's Git config count is Firstmate's one hook entry"
+  [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_KEY_0')" = core.hooksPath ] || fail "the env file's one Git config entry is core.hooksPath"
+  [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_VALUE_0')" = "$CASE_DIR/state/t3gitcfgzentries.git-hooks" ] \
+    || fail "the env file's hook entry selects the installed hook"
+  pass "fm-spawn.sh --backend t3code: inherited Git config values never reach the env file, which carries only Firstmate's hook entry"
 }
 
 test_spawn_secondmate_refuses_symlinked_claude_settings() {
@@ -2301,7 +2314,7 @@ test_spawn_refuses_raw_launch_command
 test_spawn_abort_returns_lease_only_after_archive ok
 test_spawn_abort_returns_lease_only_after_archive fail
 test_uncertain_thread_launch_keeps_lease
-test_spawn_appends_git_hook_after_inherited_git_config
+test_spawn_never_writes_inherited_git_config
 test_spawn_secondmate_refuses_symlinked_claude_settings
 test_launch_gate_failure_returns_lease
 test_refused_launch_turn_archives_thread_and_returns_lease

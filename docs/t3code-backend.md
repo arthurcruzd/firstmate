@@ -93,7 +93,8 @@ T3 sets environment variables per provider instance, never per thread, so nothin
 Each harness reads its own configuration from the thread's working directory instead, and Firstmate writes the facts a pane would have exported into that directory before the launch turn.
 For `claude` that is an `env` block in the directory's `.claude/settings.local.json`, merged alongside the busy hooks a worker already carries there; for `codex` it is a `.codex/config.toml` holding a `[shell_environment_policy]` `set` table.
 The Claude `env` block keeps entries Firstmate did not write, such as a secondmate home's own, and lists the keys Firstmate wrote in `FM_T3CODE_ENV_KEYS` so a respawn replaces exactly those; a symlinked `.claude/settings.local.json` is refused.
-The Git hook override is appended after any `GIT_CONFIG_*` entries the spawning Firstmate inherited, which are carried into the block, so an inherited `credential.helper` survives.
+The thread's `GIT_CONFIG_*` entries are Firstmate's own `core.hooksPath` hook entry only: inherited `GIT_CONFIG_*` values, or any other inherited environment value, are never written to these files, because they can carry credentials, and the hook entry replaces any `GIT_CONFIG_*` entries in the T3 server's environment.
+A T3 server whose agents need extra Git config, such as a `credential.helper`, supplies it through its own service environment's Git config files, for example the service user's global config or `GIT_CONFIG_GLOBAL`.
 Firstmate-created untracked environment files are git-excluded and removed at teardown.
 An existing untracked `.codex/config.toml` without Firstmate's marker is preserved and refused.
 A symlinked `.codex` directory, config file, or tracked-overlay journal is refused.

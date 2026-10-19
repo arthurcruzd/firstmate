@@ -6933,25 +6933,7 @@ if [ "$BACKEND" = t3code ]; then
   # keeps by unsetting it when the record fails.
   T3CODE_ENV=("GOTMPDIR=$TASK_TMP/gotmp" COMPACT_ADVISER_DISABLE=1 "FM_TASK_INBOX=$STATE_REAL/$ID.inbox")
   if [ "$GIT_HOOKS_INSTALLED" = 1 ]; then
-    case "${GIT_CONFIG_COUNT:-0}" in
-      *[!0-9]*|???????????*)
-        echo "error: invalid inherited GIT_CONFIG_COUNT; refusing to write the $HARNESS Git config for $ID" >&2
-        exit 1
-        ;;
-    esac
-    t3_git_count=$((10#${GIT_CONFIG_COUNT:-0}))
-    t3_git_i=0
-    while [ "$t3_git_i" -lt "$t3_git_count" ]; do
-      t3_git_key="GIT_CONFIG_KEY_$t3_git_i"
-      t3_git_value="GIT_CONFIG_VALUE_$t3_git_i"
-      [ -n "${!t3_git_key:-}" ] || {
-        echo "error: inherited GIT_CONFIG_COUNT=$GIT_CONFIG_COUNT has no $t3_git_key; refusing to write the $HARNESS Git config for $ID" >&2
-        exit 1
-      }
-      T3CODE_ENV+=("$t3_git_key=${!t3_git_key}" "$t3_git_value=${!t3_git_value-}")
-      t3_git_i=$((t3_git_i + 1))
-    done
-    T3CODE_ENV+=("GIT_CONFIG_COUNT=$((t3_git_count + 1))" "GIT_CONFIG_KEY_$t3_git_count=core.hooksPath" "GIT_CONFIG_VALUE_$t3_git_count=$GIT_HOOKS_DIR")
+    T3CODE_ENV+=(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath "GIT_CONFIG_VALUE_0=$GIT_HOOKS_DIR")
   fi
   if [ "$LAVISH_AXI_HOST_CONFIG_PRESENT" = 1 ]; then
     T3CODE_ENV+=("LAVISH_AXI_HOST=$LAVISH_AXI_HOST")
