@@ -193,28 +193,41 @@ process.stdout.write(require("crypto").createHash("sha256").update(require("fs")
 # including one before the request went out, leaves the earlier attempt
 # unproven and reads 7.
 fm_backend_t3code_turn_start() {  # <thread-id> <text> [model-selection-json]
-  local thread=$1 text=$2 file dir record='' id out rc=0 held=0
+  local thread=$1 text=$2 file='' dir record='' id='' out rc=0 held=0
   dir="${FM_STATE_OVERRIDE:-$FM_HOME/state}/t3code-sends"
-  mkdir -p "$dir" || return 1
-  find "$dir" -maxdepth 1 -name '*.accepted' -mmin +1440 -delete 2>/dev/null
   if [ -n "${FM_T3CODE_CLIENT_REQUEST_ID:-}" ]; then
     id=$FM_T3CODE_CLIENT_REQUEST_ID
     held=1
+  fi
+  if mkdir -p "$dir"; then
+    find "$dir" -maxdepth 1 -name '*.accepted' -mmin +1440 -delete 2>/dev/null
   else
-    record=$(fm_backend_t3code_send_record "$thread" "$text") || return 1
-    if [ -n "$(find "$record" -mmin -60 2>/dev/null)" ] && id=$(cat "$record" 2>/dev/null) && [ -n "$id" ]; then
+    rc=1
+  fi
+  if [ "$rc" -eq 0 ] && [ "$held" = 0 ]; then
+    if ! record=$(fm_backend_t3code_send_record "$thread" "$text"); then
+      record=''
+      held=1
+      rc=1
+    elif [ -n "$(find "$record" -mmin -60 2>/dev/null)" ] && id=$(cat "$record" 2>/dev/null) && [ -n "$id" ]; then
       held=1
     else
       id=$(printf 'fm-%s-%s-%s' "$(date +%s)" "${BASHPID:-$$}" "$RANDOM")
-      { printf '%s' "$id" > "$record.$$.tmp" && mv -f "$record.$$.tmp" "$record"; } || { rm -f "$record.$$.tmp"; return 1; }
+      { printf '%s' "$id" > "$record.$$.tmp" && mv -f "$record.$$.tmp" "$record"; } || { rm -f "$record.$$.tmp"; record=''; rc=1; }
     fi
   fi
   # The brief rides a file: it is the one value too large to trust to argv.
-  file=$(mktemp "${TMPDIR:-/tmp}/fm-t3code-msg.XXXXXX") || return 1
-  printf '%s' "$text" > "$file" || { rm -f "$file"; return 1; }
-  out=$(fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" \
-    --client-request-id "$id") || rc=$?
-  rm -f "$file"
+  if [ "$rc" -eq 0 ]; then
+    file=$(mktemp "${TMPDIR:-/tmp}/fm-t3code-msg.XXXXXX") || { file=''; rc=1; }
+  fi
+  if [ "$rc" -eq 0 ] && ! printf '%s' "$text" > "$file"; then
+    rc=1
+  fi
+  if [ "$rc" -eq 0 ]; then
+    out=$(fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" \
+      --client-request-id "$id") || rc=$?
+  fi
+  [ -z "$file" ] || rm -f "$file"
   if [ "$rc" -eq 0 ] && { ! printf '%s\n' "$out" > "$dir/$id.accepted.$$.tmp" \
     || ! mv -f "$dir/$id.accepted.$$.tmp" "$dir/$id.accepted"; }; then
     rm -f "$dir/$id.accepted.$$.tmp"

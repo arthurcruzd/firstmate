@@ -605,6 +605,28 @@ test_watch_is_event_driven_and_bounded() {
   pass "fm-t3-mcp watch: exact-run waits end on a terminal run, idle threads never wait, and pending requests block once per signature"
 }
 
+# A request that gets no reply, as from a server that shuts down cleanly before
+# answering, proves nothing: a send stays unconfirmed under its request id,
+# and a read fails instead of reading as an empty thread.
+test_empty_reply_is_never_success() {
+  local thread
+  fresh_case empty-reply
+  thread=$(new_thread)
+  printf 'hello once' > "$TMP_ROOT/msg-empty"
+  t3_fake_set 'w.emptyReplyTools = { t3_thread_send: 1 }'
+  mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-empty" --client-request-id req-empty
+  expect_code 7 "$RC" "an empty reply to a send is unconfirmed, not a delivery, got '$OUT'"
+  assert_equals delivery_unconfirmed "$(field "$OUT" error.code)" "the empty reply is reported as unconfirmed delivery"
+  assert_equals 0 "$(t3_fake_items "$thread" "hello once")" "the server committed nothing"
+  mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-empty" --client-request-id req-empty
+  expect_code 0 "$RC" "a retry under the same request id delivers: $ERR"
+  assert_equals 1 "$(t3_fake_items "$thread" "hello once")" "the retried request lands once"
+  t3_fake_set 'w.emptyReplyTools = { t3_thread_read: 1 }'
+  mcp state --thread "$thread"
+  [ "$RC" -ne 0 ] || fail "an empty reply to a thread read must fail, not read as an empty thread, got '$OUT'"
+  pass "fm-t3-mcp: an empty reply is never success: a send stays unconfirmed and a read fails"
+}
+
 test_helper_runs_through_symlinked_path() {
   ln -sfn "$ROOT/bin" "$TMP_ROOT/bin-link"
   OUT=$(node "$TMP_ROOT/bin-link/fm-t3-mcp.mjs" status --token-file "$TMP_ROOT/no-such-token" 2>"$TMP_ROOT/stderr")
@@ -656,3 +678,4 @@ test_requests_and_respond
 test_watch_is_event_driven_and_bounded
 test_watch_reports_failed_waits_not_timeout
 test_helper_runs_through_symlinked_path
+test_empty_reply_is_never_success

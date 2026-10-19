@@ -34,7 +34,9 @@
 //   (text a queued run starts with once an interrupt lands), failTools
 //   ({name: {code, message}}), dropTools ({name: count}: close the connection
 //   without a reply or effect that many times), dropReplyTools ({name:
-//   count}: apply the call, then close without a reply), probePath (each log
+//   count}: apply the call, then close without a reply), emptyReplyTools
+//   ({name: count}: answer 200 with an empty event stream and no effect, as a
+//   server that shuts down cleanly before replying), probePath (each log
 //   line records whether it exists), providers (the orchestrator_capabilities
 //   catalog; default FAKE_PROVIDERS), projects ([{id, title, workspaceRoot,
 //   defaultModelSelection, deletedAt}]), threads ({id: detail plus items,
@@ -337,6 +339,13 @@ async function mcp(req, res) {
     saveWorld(w);
     log(w, { ...entry, dropped: true });
     return req.socket.destroy();
+  }
+  if (msg.method === "tools/call" && (w.emptyReplyTools ?? {})[msg.params.name] > 0) {
+    w.emptyReplyTools[msg.params.name]--;
+    saveWorld(w);
+    log(w, { ...entry, emptyReply: true });
+    res.writeHead(200, { "content-type": "text/event-stream", "mcp-session-id": "sess-fake" });
+    return res.end();
   }
   let result;
   if (msg.method === "initialize") {

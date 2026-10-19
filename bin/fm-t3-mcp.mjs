@@ -358,7 +358,8 @@ export class McpSession {
     if (!res.ok && res.status !== 202) {
       throw new Refusal("transport", `T3 /mcp answered HTTP ${res.status}`, 1);
     }
-    if (notify || res.status === 202 || text.length === 0) return null;
+    if (notify) return null;
+    if (res.status === 202 || text.length === 0) throw new Refusal("transport", `T3 /mcp returned no reply to ${method}`, 1);
     let msg = null;
     if ((res.headers.get("content-type") ?? "").includes("text/event-stream")) {
       for (const line of text.split("\n")) {
@@ -377,8 +378,9 @@ export class McpSession {
       } catch {
         throw new Refusal("transport", "T3 /mcp returned a body that is not JSON", 1);
       }
+      if (msg?.id !== body.id) msg = null;
     }
-    if (!msg) throw new Refusal("transport", `T3 /mcp returned no reply to ${method}`, 1);
+    if (!msg || !("result" in msg || msg.error)) throw new Refusal("transport", `T3 /mcp returned no reply to ${method}`, 1);
     if (msg.error) {
       throw new Refusal(String(msg.error.code ?? "rpc_error"), `T3 ${method} failed: ${msg.error.message ?? "unknown error"}`, 3);
     }

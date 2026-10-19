@@ -2083,6 +2083,30 @@ t3_item_count() {
   node -e 'const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(String((w.threads[process.argv[2]].items || []).filter((i) => i.text === process.argv[3]).length))' "$T3_FAKE_WORLD" "$1" "$2"
 }
 
+# A request id that may already be in flight stays unproven when the next
+# attempt fails locally before its request goes out, so the logical delivery
+# is retried under the same id instead of being rebuilt under a new one.
+test_held_send_local_failure_stays_unconfirmed() {
+  local thread=mcp:7e8f9a0b-2c3d-4e5f-9a0b-456789abcdef rc out
+  t3_case send-held-local-failure
+  t3_world "$(t3_thread_json "$thread" completed false)"
+  t3_run 'FM_T3CODE_CLIENT_REQUEST_ID=req-held TMPDIR="$2/no-such-dir" fm_backend_t3code_turn_start "$1" "frozen digest"' \
+    "$thread" "$CASE_DIR" 2>/dev/null; rc=$?
+  expect_code 7 "$rc" "a caller-held request id must stay unconfirmed when the attempt fails before its request goes out"
+  t3_run 'TMPDIR="$2/no-such-dir" fm_backend_t3code_turn_start "$1" "fresh text"' "$thread" "$CASE_DIR" 2>/dev/null; rc=$?
+  expect_code 1 "$rc" "a fresh delivery that fails before its request goes out is proven non-delivery"
+  [ -z "$(t3_dispatch_types)" ] || fail "no send may go out when the attempt fails locally, got '$(t3_dispatch_types)'"
+  t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
+  out=$(t3_run 'fm_backend_t3code_send_text_submit "$1" "deliver once" 3 0.01 0.01' "$thread" 2>/dev/null)
+  [ "$out" = unconfirmed ] || fail "a reply lost after commit must read unconfirmed, got '$out'"
+  out=$(t3_run 'TMPDIR="$2/no-such-dir" fm_backend_t3code_send_text_submit "$1" "deliver once" 3 0.01 0.01' "$thread" "$CASE_DIR" 2>/dev/null)
+  [ "$out" = unconfirmed ] || fail "a retry of a recorded request id that fails locally must stay unconfirmed, got '$out'"
+  out=$(t3_run 'fm_backend_t3code_send_text_submit "$1" "deliver once" 3 0.01 0.01' "$thread" 2>/dev/null)
+  [ "$out" = empty ] || fail "the next retry under the recorded id must be accepted, got '$out'"
+  [ "$(t3_item_count "$thread" "deliver once")" = 1 ] || fail "the retried logical delivery must land once"
+  pass "t3code send: a held request id stays unconfirmed when the next attempt fails locally, and the retry lands once"
+}
+
 # T3 commits a send before replying. A reply lost after the request went out
 # must read unconfirmed, through the adapter and through fm-send, and a resend
 # must reuse the request id so the message lands once.
@@ -2398,6 +2422,7 @@ test_capture_renders_activity_and_status
 test_send_key_mapping
 test_send_text_submit_verdicts
 test_lost_send_reply_is_unconfirmed_and_resend_is_idempotent
+test_held_send_local_failure_stays_unconfirmed
 test_lost_send_reply_to_secondmate_names_armed_correlation
 test_status_table
 test_push_wait_escalates_pending_question_once
