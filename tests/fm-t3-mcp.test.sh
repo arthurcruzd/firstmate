@@ -111,6 +111,15 @@ test_gate_refuses_missing_tools() {
   t3_fake_set 'w.tools = ["t3_thread_launch","t3_thread_send","t3_thread_read","t3_thread_wait","t3_thread_interrupt","t3_thread_organize","t3_project_list","t3_project_create"]'
   mcp status
   expect_code 4 "$RC" "a server without t3_environment_read cannot prove its identity"
+  # Review finding 8 (A8/F10): resume configures and supervisor discovery
+  # lists, so a server without either is refused before any mutation.
+  local tool
+  for tool in t3_thread_configure t3_thread_list; do
+    FM_T3_DROP="$tool" t3_fake_set 'w.tools = ["t3_thread_launch","t3_thread_send","t3_thread_read","t3_thread_wait","t3_thread_interrupt","t3_thread_organize","t3_thread_list","t3_thread_configure","t3_project_list","t3_project_create","t3_environment_read"].filter((t) => t !== process.env.FM_T3_DROP)'
+    mcp status
+    expect_code 4 "$RC" "a server without $tool must be refused"
+    assert_contains "$ERR" "$tool" "the refusal should name $tool"
+  done
   pass "fm-t3-mcp gate: refuses a server missing a required tool or its identity tool"
 }
 
@@ -346,7 +355,16 @@ test_resume_prepares_the_same_thread() {
   assert_equals false "$(field "$OUT" resumed)" "another instance reads resumed=false"
   assert_equals claudeAgent "$(field "$OUT" providerInstanceId)" "the bound instance is reported"
   [ -z "$(t3_fake_mutations)" ] || fail "a thread on another instance is left untouched, got '$(t3_fake_mutations)'"
-  pass "fm-t3-mcp resume: refuses an active run or another workspace, unarchives and reconfigures the same thread, reports another instance untouched"
+  # Review finding 8 (A8/C3): a configure failure after the unarchive archives
+  # the thread again instead of leaving it active.
+  mcp archive --thread "$thread"
+  t3_fake_set 'w.failTools = { t3_thread_configure: { code: "invalid_request", message: "configure refused" } }'
+  mcp resume --thread "$thread" --model-selection '{"instanceId":"claudeAgent","model":"claude-sonnet-5-5"}' --worktree "$WT"
+  expect_code 3 "$RC" "a refused configure must fail the resume"
+  t3_fake_set 'w.failTools = {}'
+  mcp state --thread "$thread"
+  assert_equals true "$(field "$OUT" archived)" "a resume that failed after unarchiving must leave the thread archived"
+  pass "fm-t3-mcp resume: refuses an active run or another workspace, unarchives and reconfigures the same thread, reports another instance untouched, and re-archives on a failed configure"
 }
 
 test_watch_triggers() {

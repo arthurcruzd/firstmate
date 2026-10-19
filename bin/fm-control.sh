@@ -1019,8 +1019,22 @@ resolve_relaunch_profile() {
   local account_model=$TARGET_MODEL account_mate=
   [ "$account_model" != default ] || account_model=
   [ "$KIND" != secondmate ] || account_mate=$ID
-  fm_worker_account_select "$TARGET_HARNESS" "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" \
-    "$account_model" "$TARGET_HARNESS" "" "$account_mate" >/dev/null || return 1
+  local worker_account
+  worker_account=$(fm_worker_account_select "$TARGET_HARNESS" "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" \
+    "$account_model" "$TARGET_HARNESS" "" "$account_mate") || return 1
+  # Likewise the launch settings a T3 endpoint can run
+  # (fm_backend_t3code_admit owns them).
+  if [ "$BACKEND" = t3code ]; then
+    local config_dir="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" permission_mode=bypass launch_env=0
+    if [ -e "$config_dir/claude-permission-mode" ] || [ -L "$config_dir/claude-permission-mode" ]; then
+      permission_mode=$(tr -d '[:space:]' <"$config_dir/claude-permission-mode" 2>/dev/null || true)
+    fi
+    if [ -e "$config_dir/launch-env-allowlist" ] || [ -L "$config_dir/launch-env-allowlist" ]; then
+      launch_env=1
+    fi
+    fm_backend_source t3code || return 1
+    fm_backend_t3code_admit "$TARGET_HARNESS" "$KIND" "$permission_mode" "$launch_env" "$worker_account" || return 1
+  fi
   # Likewise polytoken's launch profile and wiring refusals
   # (bin/fm-polytoken-lib.sh owns them). The launch owner retires the prior
   # incarnation's own generated hook layer, so only one it did not generate

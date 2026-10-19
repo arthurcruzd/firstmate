@@ -1305,6 +1305,49 @@ test_control_relaunch_resumes_the_same_thread() {
   pass "fm-control.sh relaunch backend=t3code: unarchives and reconfigures the same thread and sends the relaunch brief"
 }
 
+# Review finding 8 (C2): a relaunch onto a launch T3 cannot run refuses before
+# it stops the running agent, not after.
+test_control_relaunch_refuses_t3_inadmissible_before_stop() {
+  local id=t3relaunchz3 out rc thread
+  t3_case control-relaunch-admit
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 0 "$rc" "the fixture spawn should succeed"$'\n'"$out"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$id.meta")
+  FM_T3_ID="$thread" t3_world_set '
+const t = w.threads[process.env.FM_T3_ID];
+if (t.activeRunId) { t.runs[0].status = "completed"; t.runs[0].completedAt = new Date().toISOString(); t.activeRunId = null; t.status = "completed"; }'
+  : > "$LOG"
+  out=$(t3_relaunch_control "$id" relaunch --harness opencode --note "switching runtime"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch onto a harness T3 cannot run must be refused"$'\n'"$out"
+  assert_contains "$out" "backend=t3code runs only the claude, codex, grok, and muse harnesses" "the refusal must name the T3 harness rule"
+  printf 'auto\n' > "$CONFIG/claude-permission-mode"
+  out=$(t3_relaunch_control "$id" relaunch --note "same runtime"); rc=$?
+  rm -f "$CONFIG/claude-permission-mode"
+  [ "$rc" -ne 0 ] || fail "a relaunch under a permission mode T3 cannot honor must be refused"$'\n'"$out"
+  assert_contains "$out" "cannot honor config/claude-permission-mode=auto" "the refusal must name the permission rule"
+  [ -z "$(t3_dispatch_types)" ] || fail "a refused relaunch must not stop or touch the thread, got '$(t3_dispatch_types)'"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = alive ] || fail "the running worker must stay alive after a refused relaunch"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-control.sh relaunch backend=t3code: a replacement T3 cannot run is refused before the running agent is stopped"
+}
+
+# Review finding 8 (C3, A8): a relaunch whose resume fails after T3 unarchived
+# the thread leaves it archived and keeps the previous channel statement.
+test_control_relaunch_failed_resume_keeps_thread_archived_and_wiring() {
+  local id=t3relaunchz4 out rc
+  t3_relaunch_fixture control-relaunch-failed-resume "$id" claudeAgent
+  assert_present "$WORKER_WT/CLAUDE.local.md" "the fixture worker has its channel statement"
+  t3_world_set 'w.failTools = { t3_thread_configure: { code: "invalid_request", message: "configure refused" } }'
+  out=$(t3_relaunch_control "$id" relaunch --note "pick up after the restart"); rc=$?
+  t3_world_set 'w.failTools = {}'
+  [ "$rc" -ne 0 ] || fail "a relaunch whose configure fails must fail"$'\n'"$out"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$RELAUNCH_THREAD")" = dead ] || fail "a failed resume must leave the thread archived"
+  assert_present "$WORKER_WT/CLAUDE.local.md" "a failed resume must keep the previous channel statement"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-control.sh relaunch backend=t3code: a resume that fails after unarchiving leaves the thread archived and its wiring in place"
+}
+
 test_control_relaunch_rebinds_across_provider_instances() {
   local id=t3relaunchz2 out rc thread launch
   t3_relaunch_fixture control-relaunch-rebind "$id" codex
@@ -2281,6 +2324,8 @@ test_control_lib_tables
 test_control_exit_interrupts_then_archives
 test_control_relaunch_resumes_the_same_thread
 test_control_relaunch_rebinds_across_provider_instances
+test_control_relaunch_failed_resume_keeps_thread_archived_and_wiring
+test_control_relaunch_refuses_t3_inadmissible_before_stop
 test_grok_muse_worker_lifecycle_on_t3 grok grok-4.7 xhigh muse
 test_grok_muse_worker_lifecycle_on_t3 muse muse-spark-1.3 max grok
 test_spawn_refuses_t3_grok_and_muse_secondmates

@@ -550,6 +550,35 @@ fm_backend_t3code_validate_harness() {  # <harness>
   esac
 }
 
+# fm_backend_t3code_admit <harness> <kind> <claude-permission-mode>
+#   <launch-env-enabled 0|1> <worker-account>: the one owner of the launch
+# settings T3 can run. T3 starts the agent itself, at full access, with its
+# provider instance's own account and environment, so a launch setting only a
+# Firstmate-built command line can apply refuses instead of being silently
+# widened or dropped. bin/fm-spawn.sh applies it before any mutation, and
+# bin/fm-control.sh before a relaunch stops the running agent.
+fm_backend_t3code_admit() {
+  fm_backend_t3code_validate_harness "$1" || return 1
+  # Grok and Muse run T3 ship and scout workers only: a secondmate needs the
+  # supervision path verified for claude and codex threads.
+  if [ "$2" = secondmate ] && [ "$1" != claude ] && [ "$1" != codex ]; then
+    echo "error: backend=t3code runs a secondmate only on the claude or codex harness, not '$1'" >&2
+    return 1
+  fi
+  if [ "$1" = claude ] && [ "$3" != bypass ]; then
+    echo "error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=$3; remove that file or choose another backend" >&2
+    return 1
+  fi
+  if [ "$4" = 1 ]; then
+    echo "error: backend=t3code cannot apply config/launch-env-allowlist because T3 starts the agent with its provider instance's environment; remove that file or choose another backend" >&2
+    return 1
+  fi
+  if [ -n "$5" ]; then
+    echo "error: backend=t3code cannot apply the $1 worker account pin because T3's provider instance owns the account; select that instance in config/t3code-instances instead" >&2
+    return 1
+  fi
+}
+
 # There is no pane: bin/fm-spawn.sh's launch-time typing helpers land here.
 fm_backend_t3code_send_literal() {
   echo "error: backend=t3code has no pane to type into" >&2

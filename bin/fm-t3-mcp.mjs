@@ -121,6 +121,8 @@ export const REQUIRED_TOOLS = [
   "t3_thread_wait",
   "t3_thread_interrupt",
   "t3_thread_organize",
+  "t3_thread_configure",
+  "t3_thread_list",
   "t3_project_list",
   "t3_project_create",
 ];
@@ -832,14 +834,23 @@ async function resume(flags) {
   if (t.activeRunId) {
     throw new Refusal("run_active", `thread ${threadId} still has active run ${t.activeRunId}; stop it before resuming`, 4, { activeRunId: t.activeRunId });
   }
-  if (t.archived === true || t.archivedAt) await session.call("t3_thread_organize", { threadId, action: "unarchive" });
-  await session.call("t3_thread_configure", { threadId, modelSelection: selection });
-  t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
-  const problems = [];
-  if (t.archived === true || t.archivedAt) problems.push("still archived");
-  if (t.providerInstanceId !== selection.instanceId) problems.push(`provider ${t.providerInstanceId ?? "none"}`);
-  if (t.model !== selection.model) problems.push(`model ${t.model ?? "none"}`);
-  if (problems.length) throw new Refusal("resume_unproven", `thread ${threadId} did not read back resumed (${problems.join(", ")})`, 3);
+  const unarchived = t.archived === true || Boolean(t.archivedAt);
+  if (unarchived) await session.call("t3_thread_organize", { threadId, action: "unarchive" });
+  try {
+    await session.call("t3_thread_configure", { threadId, modelSelection: selection });
+    t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+    const problems = [];
+    if (t.archived === true || t.archivedAt) problems.push("still archived");
+    if (t.providerInstanceId !== selection.instanceId) problems.push(`provider ${t.providerInstanceId ?? "none"}`);
+    if (t.model !== selection.model) problems.push(`model ${t.model ?? "none"}`);
+    if (problems.length) throw new Refusal("resume_unproven", `thread ${threadId} did not read back resumed (${problems.join(", ")})`, 3);
+  } catch (err) {
+    // A resume that unarchived the thread and then failed archives it again
+    // (best effort), so a failed relaunch never leaves an active thread a
+    // doorbell would wake.
+    if (unarchived) await session.call("t3_thread_organize", { threadId, action: "archive" }).catch(() => {});
+    throw err;
+  }
   return { ok: true, threadId, resumed: true, model: t.model, status: t.status ?? null };
 }
 

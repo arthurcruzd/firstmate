@@ -2975,28 +2975,9 @@ WORKER_ACCOUNT_DECLARED=${WORKER_ACCOUNT%%$'\t'*}
 WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT#*$'\t'}
 WORKER_ACCOUNT_PROVIDER=${WORKER_ACCOUNT_ROOT#*$'\t'}
 WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT_ROOT%%$'\t'*}
-# T3 starts the agent itself, at full access, with its provider instance's own
-# account and environment, so a launch setting only a Firstmate-built command
-# line can apply refuses here instead of being silently widened or dropped.
+# The launch settings T3 can run (fm_backend_t3code_admit owns the rules).
 if [ "$BACKEND" = t3code ]; then
-  # Grok and Muse run T3 ship and scout workers only: a secondmate needs the
-  # supervision path verified for claude and codex threads.
-  if [ "$KIND" = secondmate ] && [ "$HARNESS" != claude ] && [ "$HARNESS" != codex ]; then
-    echo "error: backend=t3code runs a secondmate only on the claude or codex harness, not '$HARNESS'" >&2
-    exit 1
-  fi
-  if [ "$HARNESS" = claude ] && [ "$CLAUDE_PERMISSION_MODE" != bypass ]; then
-    echo "error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=$CLAUDE_PERMISSION_MODE; remove that file or choose another backend" >&2
-    exit 1
-  fi
-  if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
-    echo "error: backend=t3code cannot apply config/launch-env-allowlist because T3 starts the agent with its provider instance's environment; remove that file or choose another backend" >&2
-    exit 1
-  fi
-  if [ -n "$WORKER_ACCOUNT" ]; then
-    echo "error: backend=t3code cannot apply the $HARNESS worker account pin because T3's provider instance owns the account; select that instance in config/t3code-instances instead" >&2
-    exit 1
-  fi
+  fm_backend_t3code_admit "$HARNESS" "$KIND" "$CLAUDE_PERMISSION_MODE" "$LAUNCH_ENV_ENABLED" "$WORKER_ACCOUNT" || exit 1
 fi
 if [ -n "$WORKER_ACCOUNT" ] && [ "$HARNESS" = claude ]; then
   if [ -n "$WORKER_ACCOUNT_ROOT" ]; then
@@ -4265,9 +4246,7 @@ fi
 
 # spawn_t3code_relaunch_prepare: the T3 project and model selection a t3code
 # relaunch resumes or launches with, read from the task's own record and the
-# relaunch profile, and the removal of the previous incarnation's per-directory
-# channel files, which the install below writes afresh (a fresh spawn refuses
-# them as foreign, and only a Firstmate spawn put them there).
+# relaunch profile.
 spawn_t3code_relaunch_prepare() {
   T3CODE_PROJECT_ID=$(fm_meta_get "$RELAUNCH_META" t3_project_id)
   [ -n "$T3CODE_PROJECT_ID" ] || {
@@ -4275,6 +4254,14 @@ spawn_t3code_relaunch_prepare() {
     exit 1
   }
   T3CODE_MODEL_SELECTION=$(fm_backend_t3code_model_selection "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$T3CODE_PROJECT_ID") || exit 1
+}
+
+# spawn_t3code_relaunch_clear_channel: the removal of the previous
+# incarnation's per-directory channel files, which the install below writes
+# afresh (a fresh spawn refuses them as foreign, and only a Firstmate spawn put
+# them there). It runs only once the thread is resumed or replaced, so a
+# relaunch that fails before that leaves the old wiring in place.
+spawn_t3code_relaunch_clear_channel() {
   "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$WT" || {
     echo "error: could not remove the previous Codex environment overlay from $WT before relaunching $ID" >&2
     exit 1
@@ -4333,6 +4320,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
           exit 1
           ;;
       esac
+      spawn_t3code_relaunch_clear_channel
       WT_TARGET=$T
     fi
   elif [ "$BACKEND" = t3code ]; then
@@ -4341,6 +4329,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # rebind the record to it, as herdr re-creates a pane.
     spawn_t3code_relaunch_prepare
     spawn_t3code_relaunch_launch
+    spawn_t3code_relaunch_clear_channel
     WT_TARGET=$T
   else
     # The recorded endpoint is authoritatively gone, so there is nothing to
