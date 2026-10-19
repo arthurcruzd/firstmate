@@ -1143,7 +1143,18 @@ async function main(argv) {
   else process.stdout.write(`${JSON.stringify(out)}\n`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function invokedDirectly() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(entry) === realpathSync(self);
+  } catch {
+    return path.resolve(entry) === self;
+  }
+}
+
+if (invokedDirectly()) {
   main(process.argv.slice(2)).catch((err) => {
     const r = err instanceof Refusal ? err : new Refusal("unexpected", err?.message ?? String(err), 1);
     process.stdout.write(`${JSON.stringify({ ok: false, error: { code: r.code, message: r.message, ...r.extra } })}\n`);

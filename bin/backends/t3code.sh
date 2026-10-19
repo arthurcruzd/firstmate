@@ -362,9 +362,14 @@ fm_backend_t3code_send_key() {  # <thread-id> <key>
 # transcript visible in T3. Idempotent: an archived thread with no active run,
 # or one the verified server no longer has, is already the end state.
 fm_backend_t3code_kill() {  # <thread-id>
-  local thread=$1 out
+  local thread=$1 out exists
   out=$(fm_backend_t3code_thread_state "$thread") || return 1
-  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get exists)" = true ] || return 0
+  exists=$(printf '%s' "$out" | fm_backend_t3code_json_get exists) || return 1
+  case "$exists" in
+    true) ;;
+    false) return 0 ;;
+    *) return 1 ;;
+  esac
   if [ "$(printf '%s' "$out" | fm_backend_t3code_json_get archived)" = true ] \
     && ! printf '%s' "$out" | fm_backend_t3code_json_get activeRunId >/dev/null; then
     return 0

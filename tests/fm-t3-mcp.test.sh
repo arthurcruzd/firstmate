@@ -587,6 +587,15 @@ test_watch_is_event_driven_and_bounded() {
   pass "fm-t3-mcp watch: exact-run waits end on a terminal run, idle threads never wait, and pending requests block once per signature"
 }
 
+test_helper_runs_through_symlinked_path() {
+  ln -sfn "$ROOT/bin" "$TMP_ROOT/bin-link"
+  OUT=$(node "$TMP_ROOT/bin-link/fm-t3-mcp.mjs" status --token-file "$TMP_ROOT/no-such-token" 2>"$TMP_ROOT/stderr")
+  RC=$?
+  expect_code 4 "$RC" "the helper must run its verb when reached through a symlinked path, got '$OUT'"
+  assert_equals no_credential "$(field "$OUT" error.code)" "the verb's own refusal must come back through the symlinked path"
+  pass "fm-t3-mcp: a helper reached through a symlinked path runs its verb instead of exiting silently"
+}
+
 test_watch_reports_failed_waits_not_timeout() {
   fresh_case watch-wait-fails
   t3_fake_set 'w.threads = { "thread-a": { threadId: "thread-a", projectId: "p", status: "running", activeRunId: "run-a", archived: false, worktreePath: null, items: [],
@@ -628,3 +637,4 @@ test_launch_reads_back_full_configuration
 test_requests_and_respond
 test_watch_is_event_driven_and_bounded
 test_watch_reports_failed_waits_not_timeout
+test_helper_runs_through_symlinked_path

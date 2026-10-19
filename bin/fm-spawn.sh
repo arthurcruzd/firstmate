@@ -1670,8 +1670,9 @@ spawn_abort_cleanup() {
   fi
   # Nothing has run in a leased slot until T3 accepts the launch turn, so an
   # abort before that, including one after T3 refused the turn, archives the
-  # thread (it must never act in a returned slot) and hands the lease back only
-  # once that succeeded; once T3 accepted the turn, or its reply was lost, the
+  # thread (it must never act in a returned slot), removes the environment
+  # files the spawn wrote there as teardown does, and hands the lease back only
+  # once both succeeded; once T3 accepted the turn, or its reply was lost, the
   # agent may be working there, so both are left in place.
   if [ "$T3CODE_CREATE_UNCERTAIN" = 1 ]; then
     # t3_thread_launch has no idempotency key, so a launch whose outcome was
@@ -1696,8 +1697,14 @@ spawn_abort_cleanup() {
   fi
   if [ "$T3CODE_LEASED" = 1 ] && [ -n "${WT:-}" ]; then
     T3CODE_LEASED=0
-    (cd "$PROJ_ABS" && treehouse return --force "$WT") >/dev/null 2>&1 \
-      || echo "warning: could not return the leased worktree $WT for $ID; run 'treehouse return --force $WT' from $PROJ_ABS" >&2
+    rm -f "$WT/.claude/settings.local.json" "$WT/CLAUDE.local.md" 2>/dev/null || true
+    if ! "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$WT" \
+      || [ -e "$WT/.claude/settings.local.json" ] || [ -e "$WT/CLAUDE.local.md" ]; then
+      echo "warning: could not remove the T3 environment files this spawn wrote into $WT for $ID, so it stays leased; remove them, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
+    else
+      (cd "$PROJ_ABS" && treehouse return --force "$WT") >/dev/null 2>&1 \
+        || echo "warning: could not return the leased worktree $WT for $ID; run 'treehouse return --force $WT' from $PROJ_ABS" >&2
+    fi
   fi
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
     SPAWN_TASK_LOCK_HELD=0

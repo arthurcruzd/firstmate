@@ -52,6 +52,7 @@ The credential is much narrower than T3's administrative bearer from `t3 auth se
 The credential, the server's origin, its environment id, and its version are written to the local, gitignored `config/t3code-token`, mode 0600.
 A missing, expired, revoked, or over-readable credential refuses with one error that names the sign-in command.
 A secondmate spawned on this backend gets `config/t3code-token` as a symlink to the primary's credential file, so its own daemon and crew use the same credential without a copy of the secret, and a fresh sign-in reaches them.
+Teardown removes that link, with the rest of the T3 environment the spawn wrote into the home, before a pooled home returns to the pool.
 
 ### Expiry and revocation
 
@@ -95,7 +96,7 @@ For `claude` that is an `env` block in the directory's `.claude/settings.local.j
 The Claude `env` block keeps entries Firstmate did not write, such as a secondmate home's own, and lists the keys Firstmate wrote in `FM_T3CODE_ENV_KEYS` so a respawn replaces exactly those; a symlinked `.claude/settings.local.json` is refused.
 The thread's `GIT_CONFIG_*` entries are Firstmate's own `core.hooksPath` hook entry only: inherited `GIT_CONFIG_*` values, or any other inherited environment value, are never written to these files, because they can carry credentials, and the hook entry replaces any `GIT_CONFIG_*` entries in the T3 server's environment.
 A T3 server whose agents need extra Git config, such as a `credential.helper`, supplies it through its own service environment's Git config files, for example the service user's global config or `GIT_CONFIG_GLOBAL`.
-Firstmate-created untracked environment files are git-excluded and removed at teardown.
+Firstmate-created untracked environment files are git-excluded and removed at teardown; in a secondmate home, teardown removes only the keys `FM_T3CODE_ENV_KEYS` lists from the home's own `.claude/settings.local.json`.
 An existing untracked `.codex/config.toml` without Firstmate's marker is preserved and refused.
 A symlinked `.codex` directory, config file, or tracked-overlay journal is refused.
 For a tracked `.codex/config.toml`, Firstmate preserves the project bytes and appends its policy only if the file does not already define `shell_environment_policy`, including through dotted or quoted keys.
@@ -157,6 +158,7 @@ Before the slot returns to the pool, or before a secondmate home is removed, tea
 T3 detaches the provider session as a separate effect after that read-back, so its Claude or Codex process can briefly outlive it: a worker's slot is cleared by teardown's worktree-process reaper, and a secondmate home, pooled or standalone, goes through the same reaper before it is returned or removed, keeping the home and its records when the process scan cannot complete.
 Secondmate retirement requires `lsof` to prove the home is quiet; without it, teardown preserves the home and records for retry.
 If spawn aborts after launching the thread and before T3 accepts its launch brief, including when T3 refuses the brief, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive and `treehouse return --force` steps.
+After a proven close it removes the environment files the spawn wrote into the slot, as teardown does, and keeps the lease when that fails.
 `t3_thread_launch` has no idempotency key, so a lost launch reply or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and never retries.
 A gate failure before `t3_thread_launch` is requested launched nothing, so spawn returns the lease.
 When the thread id is known, the helper attempts to archive it and reports its id, but even an accepted archive request leaves the lease held until the archive is verified.

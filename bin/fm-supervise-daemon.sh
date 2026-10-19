@@ -741,10 +741,18 @@ fm_daemon_primary_harness() {
 
 pane_is_busy() {  # <target> [backend]
   local target=$1 backend=${2:-tmux} native tail40 harness
+  # T3 has no rendered busy fallback, so require positive proof that the
+  # thread is settled and not waiting on a pending request, which the busy
+  # table reads as idle.
+  if [ "$backend" = t3code ]; then
+    fm_backend_source t3code || return 0
+    case "$(fm_backend_t3code_probe "$target")" in
+      idle|ready|interrupted) return 1 ;;
+    esac
+    return 0
+  fi
   harness=$(fm_daemon_primary_harness)
   native=$(fm_backend_busy_state "$backend" "$target" 2>/dev/null)
-  # T3 has no rendered busy fallback, so require positive idle proof.
-  [ "$backend" != t3code ] || { [ "$native" != idle ]; return; }
   case "$native" in
     busy) return 0 ;;
   esac

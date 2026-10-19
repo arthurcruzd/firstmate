@@ -581,6 +581,7 @@ test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim() {
   t3_case daemon-digest-freeze completed
   state="$CASE_DIR/state"
   mkdir -p "$state"
+  fm_touch_epoch "$(( $(date +%s) - 7200 ))" "$CASE_DIR/two-hours-ago"
   t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
   got=$(t3_run '
     . "$0/bin/fm-supervise-daemon.sh"
@@ -589,7 +590,7 @@ test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim() {
     escalate_add "$1" "event-one"
     escalate_add "$1" "event-two"
     escalate_flush "$1"; printf "first=%s\n" "$?"
-    find "$1" -type f -exec touch -d "2 hours ago" {} +
+    find "$1" -type f -exec touch -r "$3" {} +
     escalate_add "$1" "event-three"
     node -e "
 const fs = require(\"fs\"), f = process.argv[1], w = JSON.parse(fs.readFileSync(f, \"utf8\"));
@@ -597,7 +598,7 @@ const t = w.threads[\"thread-live\"]; t.status = \"completed\"; t.activeRunId = 
 fs.writeFileSync(f, JSON.stringify(w));
 " "$2"
     escalate_flush "$1"; printf "second=%s\n" "$?"
-  ' "$state" "$T3_FAKE_WORLD" 2>&1)
+  ' "$state" "$T3_FAKE_WORLD" "$CASE_DIR/two-hours-ago" 2>&1)
   assert_contains "$got" "first=1" "an unconfirmed digest is not reported delivered: $got"
   assert_contains "$got" "second=0" "the frozen digest and the next generation are delivered: $got"
   [ ! -s "$state/.subsuper-escalations" ] || fail "every event was delivered, buffer still holds '$(cat "$state/.subsuper-escalations")'"
@@ -646,6 +647,54 @@ test_frozen_flush_restamps_the_next_generation() {
   [ "$(printf '%s\n' "$got" | sed -n 's/^age=//p')" -lt 60 ] \
     || fail "items left behind a delivered frozen digest must start a fresh undelivered window: $got"
   pass "away daemon on T3: a delivered frozen digest restarts the undelivered clock for the items behind it"
+}
+
+# A supervisor thread waiting on a pending request is not free to take a
+# digest: the message would steer the turn that waits on the human, so the
+# digest stays buffered until the request is answered.
+test_daemon_defers_digest_while_supervisor_waits_on_request() {
+  local state got
+  t3_case daemon-supervisor-blocked completed
+  state="$CASE_DIR/state"
+  mkdir -p "$state"
+  t3_world_set 'w.threads["thread-live"].runtimeRequests = [{ id: "req-1", kind: "user_input", status: "pending", questions: [] }]'
+  got=$(t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=claude
+    afk_enter "$1"
+    inject_msg "worker needs attention" "$1"; rc=$?
+    printf "%s:%s:%s" "$rc" "$INJECT_SUBMIT_ATTEMPTED" "$INJECT_LAST_FAILURE"
+  ' "$state")
+  case "$got" in 1:0:deferred*) ;; *) fail "a supervisor thread waiting on a pending request must defer the digest, got $got" ;; esac
+  [ -z "$(t3_dispatch_types)" ] || fail "no digest may be sent while the supervisor waits on a request, got '$(t3_dispatch_types)'"
+  t3_world_set 'w.threads["thread-live"].runtimeRequests[0].status = "resolved"'
+  got=$(t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=claude
+    inject_msg "worker needs attention" "$1"; printf "%s" "$?"
+  ' "$state")
+  [ "$got" = 0 ] || fail "once the request is answered the digest is delivered, got $got"
+  [ "$(t3_dispatch_types)" = t3_thread_send ] || fail "the answered supervisor receives the digest once, got '$(t3_dispatch_types)'"
+  pass "away daemon on T3: a supervisor thread waiting on a pending request defers digests until it is answered"
+}
+
+# The helper's own entry check resolves symlinks, so a Firstmate root reached
+# through a symlinked path still drives T3; a kill that cannot read the
+# thread's state fails closed instead of reporting it gone.
+test_helper_through_symlinked_root_reaches_t3_and_kill_fails_closed() {
+  local link out
+  t3_case symlinked-root
+  t3_world "$(t3_thread_json thread-live running false)"
+  link="$CASE_DIR/root-link"
+  ln -s "$ROOT" "$link"
+  FM_CONFIG_OVERRIDE="$CONFIG" FM_STATE_OVERRIDE="$CASE_DIR/state" \
+    bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source t3code || exit 1; fm_backend_t3code_kill thread-live' "$link" \
+    || fail "a kill through a symlinked Firstmate root must close the thread"
+  [ "$(t3_dispatch_types)" = "t3_thread_interrupt t3_thread_organize" ] \
+    || fail "a kill through a symlinked root must interrupt, then archive, got '$(t3_dispatch_types)'"
+  out=$(t3_run 'fm_backend_t3code_thread_state() { printf "not json"; }; fm_backend_t3code_kill thread-live && echo closed || echo refused')
+  [ "$out" = refused ] || fail "a kill whose state read is unparseable must fail closed, got '$out'"
+  pass "t3code helper: runs through a symlinked Firstmate root, and a kill that cannot read the thread fails closed"
 }
 
 # A stall reported while T3's verdict was unknown is the same stall once T3
@@ -1361,6 +1410,39 @@ test_untracked_codex_config_is_preserved() {
   pass "untracked Codex config is preserved unless Firstmate's marker owns it"
 }
 
+# Teardown runs cleanup for every T3 task, so without an installed overlay it
+# must neither need Python nor refuse a project's own .codex layout.
+test_codex_cleanup_without_journal_needs_no_python() {
+  local fb py proj out rc
+  t3_case codex-cleanup-no-journal
+  fb="$CASE_DIR/no-tomllib"
+  mkdir -p "$fb"
+  for py in python3 python3.11 python3.12 python3.13 python3.14; do
+    printf '#!/bin/sh\nexit 1\n' > "$fb/$py"
+    chmod +x "$fb/$py"
+  done
+  proj="$CASE_DIR/tracked-config"
+  fm_git_init_commit "$proj"
+  mkdir -p "$proj/.codex"
+  printf 'model = "project-model"\n' > "$proj/.codex/config.toml"
+  git -C "$proj" add .codex/config.toml
+  git -C "$proj" -c user.name=t -c user.email=t@example.invalid commit -qm codex
+  out=$(PATH="$fb:$PATH" "$ROOT/bin/fm-t3code-codex-env.sh" cleanup "$proj" 2>&1); rc=$?
+  expect_code 0 "$rc" "cleanup of a tracked config Firstmate never overlaid must not need Python: $out"
+  [ "$(cat "$proj/.codex/config.toml")" = 'model = "project-model"' ] || fail "cleanup changed the project's tracked config"
+  proj="$CASE_DIR/tracked-codex-link"
+  fm_git_init_commit "$proj"
+  mkdir -p "$proj/codex-real"
+  printf '# Generated by Firstmate T3 Code\n' > "$proj/codex-real/config.toml"
+  ln -s codex-real "$proj/.codex"
+  git -C "$proj" add -A
+  git -C "$proj" -c user.name=t -c user.email=t@example.invalid commit -qm link
+  out=$(PATH="$fb:$PATH" "$ROOT/bin/fm-t3code-codex-env.sh" cleanup "$proj" 2>&1); rc=$?
+  expect_code 0 "$rc" "cleanup must not refuse a project that tracks .codex as a symlink: $out"
+  assert_present "$proj/codex-real/config.toml" "cleanup must never delete through a symlinked .codex"
+  pass "fm-t3code-codex-env.sh cleanup: without an installed overlay it needs no Python and never refuses"
+}
+
 test_spawn_leases_slot_creates_thread_and_starts_launch_turn() {
   local proj wt data state id out fb thread
   id="t3spawnz1"
@@ -1781,19 +1863,26 @@ test_launch_gate_failure_returns_lease() {
 }
 
 test_refused_launch_turn_archives_thread_and_returns_lease() {
-  local id=t3turnz out rc
-  t3_case spawn-launch-turn-refused
-  t3_world_set 'w.failTools = { t3_thread_send: { code: "turn_refused", message: "launch turn refused" } }'
-  t3_worker_setup "$id"
-  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
-  expect_code 1 "$rc" "a refused launch turn must abort spawn"$'\n'"$out"
-  assert_contains "$out" "T3 refused the launch turn" "the refusal is reported"
-  [ "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" -gt "$(t3_log_line_of 'r.tool === "t3_thread_send"')" ] \
-    || fail "the idle thread of a rolled-back dispatch must be archived"$'\n'"$out"
-  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt \
-    "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" ] || fail "the lease must return after the archive"$'\n'"$out"
-  assert_absent "$CASE_DIR/state/$id.meta" "the rolled-back dispatch leaves no record"
-  pass "fm-spawn.sh --backend t3code: a refused launch turn archives the thread, then returns the lease"
+  local harness model id out rc
+  for harness in claude codex; do
+    case "$harness" in claude) model=claude-sonnet-5 ;; codex) model=gpt-5.6-sol ;; esac
+    id="t3turnz$harness"
+    t3_case "spawn-launch-turn-refused-$harness"
+    t3_world_set 'w.failTools = { t3_thread_send: { code: "turn_refused", message: "launch turn refused" } }'
+    t3_worker_setup "$id"
+    out=$(t3_worker_spawn "$id" "$harness" --model "$model"); rc=$?
+    expect_code 1 "$rc" "a refused $harness launch turn must abort spawn"$'\n'"$out"
+    assert_contains "$out" "T3 refused the launch turn" "the refusal is reported"
+    [ "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" -gt "$(t3_log_line_of 'r.tool === "t3_thread_send"')" ] \
+      || fail "the idle thread of a rolled-back $harness dispatch must be archived"$'\n'"$out"
+    [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt \
+      "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" ] || fail "the lease must return after the archive"$'\n'"$out"
+    assert_absent "$CASE_DIR/state/$id.meta" "the rolled-back dispatch leaves no record"
+    assert_absent "$WORKER_WT/.claude/settings.local.json" "a returned $harness slot must not keep the aborted spawn's Claude settings"
+    assert_absent "$WORKER_WT/CLAUDE.local.md" "a returned $harness slot must not keep the aborted spawn's channel statement"
+    assert_absent "$WORKER_WT/.codex/config.toml" "a returned $harness slot must not keep the aborted spawn's Codex environment"
+  done
+  pass "fm-spawn.sh --backend t3code: a refused launch turn archives the thread, removes its environment files, then returns the lease"
 }
 
 test_misbound_thread_launch_returns_lease() {
@@ -2010,7 +2099,7 @@ if (o.clientRequestId !== id || !/^msg:/.test(o.messageId || "") || !o.runId || 
   [ "$(t3_item_count "$thread" "deliver once")" = 2 ] || fail "after a proven delivery the same text later is a new delivery"
   [ "$(find "$sends" -name '*.accepted' | grep -c .)" = 2 ] || fail "each accepted delivery keeps its own outcome"
   [ -z "$(find "$sends" -type f ! -name '*.accepted')" ] || fail "a proven delivery leaves no in-flight record behind"
-  touch -d '2 days ago' "$accepted"
+  fm_touch_epoch "$(( $(date +%s) - 172800 ))" "$accepted"
   t3_run 'fm_backend_t3code_send_text_submit "$1" "another" 3 0.01 0.01' "$thread" >/dev/null 2>&1
   [ ! -e "$accepted" ] || fail "an accepted outcome older than a day is pruned"
 
@@ -2167,12 +2256,22 @@ test_pooled_t3_secondmate_home_returned_only_after_provider_exits() {
     "window=fm-$id" "endpoint_task_id=$id" "worktree=$home" "project=$home" \
     "harness=claude" "kind=secondmate" "mode=secondmate" "yolo=off" \
     "backend=t3code" "t3_thread_id=$thread" "t3_project_id=proj-sm" "home=$home"
+  # What the T3 spawn wrote into the home, beside the home's own settings.
+  mkdir -p "$home/.claude" "$home/.codex"
+  printf '{"permissions":{"allow":["Bash(ls:*)"]},"env":{"CAPTAIN_VAR":"keep","FM_SUPERVISOR_TARGET":"%s","FM_T3CODE_ENV_KEYS":"FM_SUPERVISOR_TARGET"}}\n' \
+    "$thread" > "$home/.claude/settings.local.json"
+  printf '# Generated by Firstmate T3 Code\n[shell_environment_policy]\nset = { FM_HOME = "%s" }\n' "$home" > "$home/.codex/config.toml"
+  ln -s "$CONFIG/t3code-token" "$home/config/t3code-token"
   fb=$(make_treehouse_fakebin "$CASE_DIR")
   (cd "$home/state" && exec sleep 300) &
   provider=$!
   cat > "$fb/treehouse" <<TH
 #!/usr/bin/env bash
 if kill -0 $provider 2>/dev/null; then printf 'provider-alive\n'; else printf 'provider-gone\n'; fi >> '$CASE_DIR/return.log'
+if [ -e '$home/.codex/config.toml' ] || [ -L '$home/config/t3code-token' ] \
+  || grep -q FM_SUPERVISOR_TARGET '$home/.claude/settings.local.json'; then
+  printf 't3-env-present\n' >> '$CASE_DIR/return.log'
+fi
 exit 0
 TH
   chmod +x "$fb/treehouse"
@@ -2184,8 +2283,11 @@ TH
   wait "$provider" 2>/dev/null || true
   expect_code 0 "$rc" "pooled t3code secondmate teardown should succeed"$'\n'"$out"
   [ "$(cat "$CASE_DIR/return.log" 2>/dev/null)" = provider-gone ] \
-    || fail "the slot must be returned exactly once, after the provider process ended, got '$(cat "$CASE_DIR/return.log" 2>/dev/null)'"$'\n'"$out"
-  pass "fm-teardown.sh backend=t3code pooled secondmate: the slot returns only after the home's provider process ended"
+    || fail "the slot must be returned exactly once, after the provider process ended and without the T3 environment, got '$(cat "$CASE_DIR/return.log" 2>/dev/null)'"$'\n'"$out"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'JSON.stringify(d)')" = '{"permissions":{"allow":["Bash(ls:*)"]},"env":{"CAPTAIN_VAR":"keep"}}' ] \
+    || fail "the home's own settings must survive while Firstmate's keys leave, got '$(cat "$home/.claude/settings.local.json")'"
+  [ -e "$CONFIG/t3code-token" ] || fail "removing the home's credential link must leave the primary's credential"
+  pass "fm-teardown.sh backend=t3code pooled secondmate: the slot returns only after the provider ended, without the T3 environment the spawn wrote"
 }
 
 # The Claude PR-tool clause is scoped to servers older than the first build
@@ -2283,6 +2385,8 @@ test_failed_t3_secondmate_is_resumed_in_place
 test_t3_secondmate_missing_thread_reproves_close_before_replacement
 test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim
 test_frozen_flush_restamps_the_next_generation
+test_daemon_defers_digest_while_supervisor_waits_on_request
+test_helper_through_symlinked_root_reaches_t3_and_kill_fails_closed
 test_draining_archived_t3_secondmate_is_not_relaunched
 test_kill_interrupts_then_archives_and_tolerates_gone
 test_dispatcher_routes_and_validates_t3code_meta
@@ -2299,6 +2403,7 @@ test_spawn_codex_refuses_tracked_codex_config
 test_spawn_claude_refuses_tracked_claude_local_md
 test_spawn_claude_refuses_worktree_symlink
 test_untracked_codex_config_is_preserved
+test_codex_cleanup_without_journal_needs_no_python
 test_spawn_codex_scout_writes_toml_env_with_traceparent
 test_spawn_secondmate_runs_thread_in_home_with_env
 test_spawn_codex_secondmate_writes_toml_env
