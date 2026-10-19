@@ -265,8 +265,8 @@ SH
   assert_contains "$sends" '"threadId":"mcp:primary"' "the attended wake goes to the recorded thread"
   assert_contains "$sends" "Firstmate wake from the T3 wake relay:" "the attended wake carries the relay's header"
   assert_contains "$sends" "early.status" "the attended wake carries the watcher's reason line"
-  assert_contains "$sends" "\"clientRequestId\":\"fm-t3-relay-$relay-$(awk '/^arm / {print $2; exit}' "$log")-1\"" \
-    "the delivery request id names the relay and the cycle that closed"
+  printf '%s\n' "$sends" | grep -Eq "\"clientRequestId\":\"fm-t3-relay-[0-9]+-$relay-$(awk '/^arm / {print $2; exit}' "$log")-1\"" \
+    || fail "the delivery request id must name the relay and the cycle that closed: $sends"
   until_true 10 starts_arm_at_least "$log" 2 || fail "the relay did not open a second watcher cycle after delivering"
   printf 'quiet\n%s\n' "$(date +%s)" > "$home/state/.afk"
   until_true 10 grep -q '^arm-term ' "$log" || fail "entering quiet mode did not end the relay's open watcher cycle"
@@ -283,7 +283,8 @@ SH
 # previously rejected", and the relay retried it forever, so nothing behind it
 # was delivered and no watcher cycle started. A rejected id is retried once
 # under a derived id; rejected again, the entry is parked and delivery moves
-# on, while an ordinary failure keeps resending the same id.
+# on, while an ordinary failure keeps resending the same id, without holding
+# up the watcher cycle.
 test_relay_parks_a_rejected_request_instead_of_looping() {
   local home="$TMP_ROOT/rejected" arm log relay outbox sends
   mkdir -p "$home/state" "$home/config"
@@ -314,6 +315,9 @@ SH
   FAKE_PIDS+=("$relay")
   until_true 30 starts_arm_at_least "$log" 1 \
     || fail "a rejected outbox entry kept the relay from starting a watcher cycle: $(cat "$home/relay.out")"
+  # Delivery retries while the watcher cycle runs.
+  until_true 30 grep -q 'delivered fm-t3-relay-1000000002-1-000002 ' "$home/relay.out" \
+    || fail "the entry behind the parked one was not delivered: $(cat "$home/relay.out")"
   assert_contains "$(cat "$home/relay.out")" "retrying once as fm-t3-relay-1000000001-1-000001-retry" \
     "a rejected request id was not retried under its derived id"
   assert_contains "$(cat "$home/relay.out")" "PARKED fm-t3-relay-1000000001-1-000001" "a twice-rejected entry was not parked loudly"
@@ -337,11 +341,62 @@ SH
   relay=$!
   FAKE_PIDS+=("$relay")
   until_true 30 starts_arm_at_least "$log" 1 || fail "the relay did not move on after the derived id delivered: $(cat "$home/relay2.out")"
+  until_true 30 grep -q 'delivered fm-t3-relay-1000000003-1-000003-retry ' "$home/relay2.out" \
+    || fail "the derived id did not deliver the message: $(cat "$home/relay2.out")"
   assert_contains "$(cat "$home/relay2.out")" "delivered fm-t3-relay-1000000003-1-000003-retry " "the derived id did not deliver the message"
   assert_not_contains "$(cat "$home/relay2.out")" "PARKED" "a message the derived id delivered was parked"
   kill -TERM "$relay"
   wait "$relay" 2>/dev/null
   pass "fm-t3-host.sh relay: a request id T3 rejects is retried once under a derived id, then parked, and delivery and the watcher move on"
+}
+
+# Review finding B2/F05: a delivery T3 can never accept (here the credential
+# is missing; an expired credential or a deleted thread is the same) used to
+# be retried forever before the watcher started or away mode was served. The
+# entry now stays queued with its error visible in status while supervision
+# goes on.
+test_relay_undeliverable_outbox_does_not_block_supervision() {
+  local home="$TMP_ROOT/undeliverable" arm entry log relay outbox out
+  mkdir -p "$home/state" "$home/config"
+  : > "$home/config/supervision-host-off"
+  log="$home/events.log"
+  arm="$TMP_ROOT/fake-arm-undeliverable.sh"
+  cat > "$arm" <<'SH'
+#!/usr/bin/env bash
+printf 'arm %s\n' "$$" >> "$FAKE_LOG"
+trap 'exit 0' TERM
+while :; do sleep 0.1; done
+SH
+  entry="$TMP_ROOT/fake-daemon-undeliverable.sh"
+  cat > "$entry" <<'SH'
+#!/usr/bin/env bash
+printf 'start %s\n' "$$" >> "$FAKE_LOG"
+trap 'exit 0' TERM
+while :; do sleep 0.1; done
+SH
+  chmod +x "$arm" "$entry"
+  printf 'thread=mcp:primary\n' > "$home/state/.t3-host"
+  printf 'window=fm-w\nbackend=t3code\n' > "$home/state/w.meta"
+  outbox="$home/state/.t3-relay-outbox"
+  mkdir -p "$outbox"
+  printf 'signal: %s/state/stuck.status\n' "$home" > "$outbox/1000000001-1-000001.close"
+  FM_HOME="$home" FAKE_LOG="$log" FM_T3_RELAY_ARM_ENTRY="$arm" FM_T3_RELAY_DAEMON_ENTRY="$entry" FM_T3_RELAY_SEND_DELAY=1 \
+    FM_T3_RELAY_IDLE_POLL=1 FM_T3_RELAY_MODE_POLL=1 "$ROOT/bin/fm-t3-host.sh" relay > "$home/relay.out" 2>&1 &
+  relay=$!
+  FAKE_PIDS+=("$relay")
+  until_true 15 starts_arm_at_least "$log" 1 \
+    || fail "an undeliverable outbox entry kept the relay from starting a watcher cycle: $(cat "$home/relay.out")"
+  assert_contains "$(cat "$home/relay.out")" "delivery of fm-t3-relay-1000000001-1-000001 failed" "the failed delivery must be logged"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" status 2>/dev/null)
+  assert_contains "$out" "undelivered=1" "status must count the undelivered entry"
+  assert_contains "$out" "last-delivery-error=" "status must show the last delivery error"
+  printf 'away\n%s\n' "$(date +%s)" > "$home/state/.afk"
+  until_true 15 starts_at_least "$log" 1 \
+    || fail "an undeliverable outbox entry kept the relay from running the away daemon: $(cat "$home/relay.out")"
+  [ -f "$outbox/1000000001-1-000001.close" ] || fail "the undelivered entry must stay queued"
+  kill -TERM "$relay"
+  wait "$relay" 2>/dev/null
+  pass "fm-t3-host.sh relay: an undeliverable outbox entry stays queued with its error in status while watcher cycles and away mode go on"
 }
 
 test_relay_ownership_predicate
@@ -350,3 +405,4 @@ test_launch_and_adopt
 test_relay_hosts_away_daemon
 test_relay_hands_open_watcher_cycle_to_daemon
 test_relay_parks_a_rejected_request_instead_of_looping
+test_relay_undeliverable_outbox_does_not_block_supervision

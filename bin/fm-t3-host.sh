@@ -51,9 +51,13 @@
 #     reason lines and any supervision-host: lines, and a captain outcome the
 #     host recorded carries each outcome's summary from the outcome store.
 #     A session T3 reopened without its SessionStart hooks, found by a dead
-#     session-lock holder, is told to run session start first. It retries
-#     until T3 accepts each message; the durable wake queue, the outcome
-#     store, and the outbox hold the event in the meantime. A request id T3
+#     session-lock holder, is told to run session start first. The relay's
+#     own closes go through the outbox too, and delivery never blocks
+#     supervision: an entry T3 does not accept stays at the head of the
+#     outbox and is retried after a backoff (FM_T3_RELAY_SEND_DELAY) while
+#     watcher cycles and mode changes go on, the durable wake queue and the
+#     outcome store still hold the event, and the last delivery error stays
+#     in state/.t3-relay-error until a send succeeds. A request id T3
 #     answers "was previously rejected" never succeeds again, so it retries
 #     that message once under a derived id and, rejected again, parks it in
 #     state/.t3-relay-parked with a PARKED log line and moves on; the event
@@ -71,8 +75,9 @@
 #   fm-t3-host.sh uninstall [--name <unit>]
 #     Stops and removes that service; an absent service is already the end state.
 #   fm-t3-host.sh status
-#     The recorded thread and its T3 state, and whether a live relay owns the
-#     home. Changes nothing.
+#     The recorded thread and its T3 state, whether a live relay owns the
+#     home, how many closes wait undelivered in the outbox, and the last
+#     delivery error while one stands. Changes nothing.
 #
 # Environment: FM_HOME (default: this checkout), FM_T3_RELAY_IDLE_POLL (seconds
 # between need checks while the home needs no watcher, and the pause before a
@@ -222,42 +227,72 @@ cmd_adopt() {
   printf 'adopted primary thread=%s home=%s\n' "$thread" "$FM_HOME"
 }
 
-# Deliver one wake to the primary thread. The request id is derived from the
-# closed arm, so a retried delivery is the same T3 message. Returns 0 once T3
-# accepted it, 1 when this relay was replaced, and 2 when it was parked
-# (header): T3 keeps a rejected request id rejected, so resending that id can
-# only loop.
+# Try once to deliver one wake to the primary thread. The request id is
+# derived from the closed arm, so a retried delivery is the same T3 message.
+# Returns 0 once T3 accepted it, 1 when this relay was replaced, 2 when it was
+# parked (header): T3 keeps a rejected request id rejected, so resending that
+# id can only loop. Returns 3 while it stays undelivered: the caller keeps it
+# and retries after the backoff, so an unreachable T3, an expired credential,
+# or a deleted thread never stops supervision.
+RELAY_REJECTED_ID=
 deliver() {  # <request-id> <file>
-  local rid=$1 file=$2 send_id=$1 thread delay=$SEND_DELAY out
+  local rid=$1 file=$2 send_id=$1 thread out
+  fm_t3_relay_mine || return 1
+  thread=$(record_get "$HOST_RECORD" thread)
+  if [ -z "$thread" ]; then
+    printf 'fm-t3-host relay: no primary thread recorded in %s; holding %s\n' "$HOST_RECORD" "$rid" >&2
+    relay_send_failed "no primary thread recorded in $HOST_RECORD"
+    return 3
+  fi
   # Recorded before the send: T3 may submit it, and the mirror hook read it,
   # before the send returns.
   fm_t3_relay_sent_record "$STATE" "$rid" "$file" \
     || printf 'fm-t3-host relay: could not record %s as sent; the dialog mirror may take it for the captain'"'"'s words\n' "$rid" >&2
+  [ "$RELAY_REJECTED_ID" != "$rid" ] || send_id="$rid-retry"
   while :; do
-    thread=$(record_get "$HOST_RECORD" thread)
-    if [ -n "$thread" ]; then
-      if out=$(mcp send --thread "$thread" --message-file "$file" --client-request-id "$send_id" 2>&1); then
-        printf 'fm-t3-host relay: delivered %s to %s (%s)\n' "$send_id" "$thread" "$(printf '%s' "$out" | json_get delivery 2>/dev/null)"
-        return 0
-      fi
-      case "$out" in
-        *'was previously rejected'*)
-          if [ "$send_id" != "$rid" ]; then
-            relay_park "$rid" "$file" "$(printf '%s' "$out" | tail -1)"
-            return 2
-          fi
-          send_id="$rid-retry"
-          printf 'fm-t3-host relay: T3 rejected request id %s for good; retrying once as %s in %ss\n' "$rid" "$send_id" "$delay" >&2
-          ;;
-        *) printf 'fm-t3-host relay: delivery of %s failed, retrying in %ss: %s\n' "$send_id" "$delay" "$(printf '%s' "$out" | tail -1)" >&2 ;;
-      esac
-    else
-      printf 'fm-t3-host relay: no primary thread recorded in %s; holding %s\n' "$HOST_RECORD" "$rid" >&2
+    if out=$(mcp send --thread "$thread" --message-file "$file" --client-request-id "$send_id" 2>&1); then
+      printf 'fm-t3-host relay: delivered %s to %s (%s)\n' "$send_id" "$thread" "$(printf '%s' "$out" | json_get delivery 2>/dev/null)"
+      RELAY_REJECTED_ID=
+      relay_send_ok
+      return 0
     fi
-    fm_t3_relay_mine || return 1
-    sleep "$delay"
-    [ "$delay" -ge 60 ] || delay=$((delay * 2))
+    case "$out" in
+      *'was previously rejected'*)
+        if [ "$send_id" != "$rid" ]; then
+          RELAY_REJECTED_ID=
+          relay_park "$rid" "$file" "$(printf '%s' "$out" | tail -1)"
+          relay_send_ok
+          return 2
+        fi
+        send_id="$rid-retry"
+        RELAY_REJECTED_ID=$rid
+        printf 'fm-t3-host relay: T3 rejected request id %s for good; retrying once as %s\n' "$rid" "$send_id" >&2
+        ;;
+      *)
+        printf 'fm-t3-host relay: delivery of %s failed, retrying in %ss: %s\n' "$send_id" "$RELAY_DELAY" "$(printf '%s' "$out" | tail -1)" >&2
+        relay_send_failed "$(printf '%s' "$out" | tail -1)"
+        return 3
+        ;;
+    esac
   done
+}
+
+# The delivery backoff: after a failed attempt nothing is resent before
+# RELAY_NEXT_SEND, and the delay doubles up to 60 seconds. The last error is
+# kept in state/.t3-relay-error for status until a delivery succeeds.
+RELAY_DELAY=$SEND_DELAY
+RELAY_NEXT_SEND=0
+RELAY_ERROR_RECORD="$STATE/.t3-relay-error"
+relay_send_failed() {  # <error>
+  RELAY_NEXT_SEND=$(($(date +%s) + RELAY_DELAY))
+  RELAY_DELAY=$((RELAY_DELAY * 2))
+  [ "$RELAY_DELAY" -le 60 ] || RELAY_DELAY=60
+  printf '%s %s\n' "$(date +%s)" "$1" > "$RELAY_ERROR_RECORD" 2>/dev/null || true
+}
+relay_send_ok() {
+  RELAY_DELAY=$SEND_DELAY
+  RELAY_NEXT_SEND=0
+  rm -f "$RELAY_ERROR_RECORD"
 }
 
 fm_t3_relay_mine() {
@@ -305,17 +340,33 @@ relay_compose() {  # <close-file> <message-file>
 }
 
 # Send every entry in the relay outbox, oldest first, removing each once T3
-# accepted it; fails when this relay was replaced mid-delivery.
+# accepted or parked it; fails when this relay was replaced mid-delivery. An
+# entry that stays undelivered keeps its place, and the rest wait behind it
+# until the backoff allows the next attempt.
 relay_flush_outbox() {  # <message-file>
-  local f
+  local f rc
+  [ "$(date +%s)" -ge "$RELAY_NEXT_SEND" ] || return 0
   for f in "$STATE/$FM_T3_RELAY_OUTBOX_DIRNAME"/*.close; do
     [ -f "$f" ] || continue
     if relay_compose "$f" "$1"; then
       deliver "fm-t3-relay-$(basename "$f" .close)" "$1"
-      [ "$?" -ne 1 ] || return 1
+      rc=$?
+      [ "$rc" -ne 1 ] || return 1
+      [ "$rc" -ne 3 ] || return 0
     fi
     rm -f "$f"
   done
+}
+
+# Queue a close this relay's own watcher cycle exited with in the outbox, so
+# it is delivered, and retried, like a host's close while the next cycle runs.
+relay_queue_close() {  # <close-file> <cycle-id>
+  local dir="$STATE/$FM_T3_RELAY_OUTBOX_DIRNAME" tmp
+  mkdir -p "$dir" 2>/dev/null && tmp=$(mktemp "$dir/.put.XXXXXX" 2>/dev/null) \
+    && cp "$1" "$tmp" 2>/dev/null && mv -f "$tmp" "$dir/$(date +%s)-$2.close" 2>/dev/null && return 0
+  [ -z "${tmp:-}" ] || rm -f "$tmp"
+  printf 'fm-t3-host relay: could not queue the close of cycle %s in %s; the wake stays in the durable queue for main\n' "$2" "$dir" >&2
+  return 1
 }
 
 # True when this home's watcher cycle is the supervision host's
@@ -432,7 +483,7 @@ cmd_relay() {
         kill -TERM "$arm_pid" 2>/dev/null
         break
       fi
-      if [ "$host" -eq 1 ] && ! relay_flush_outbox "$msg"; then
+      if ! relay_flush_outbox "$msg"; then
         kill -TERM "$arm_pid" 2>/dev/null
         break
       fi
@@ -448,15 +499,15 @@ cmd_relay() {
       continue
     fi
     # What the host put in the outbox before it exited goes first.
-    [ "$host" -eq 0 ] || relay_flush_outbox "$msg" || break
+    relay_flush_outbox "$msg" || break
     if [ "$host" -eq 1 ] && grep -q '^supervision-host stood down:' "$out"; then
       printf 'fm-t3-host relay: %s\n' "$(grep -m 1 '^supervision-host stood down:' "$out")" >&2
       pred=''
       sleep "$IDLE_POLL"
     elif relay_compose "$out" "$msg"; then
       n=$((n + 1))
-      deliver "fm-t3-relay-$$-$pred-$n" "$msg"
-      [ "$?" -ne 1 ] || break
+      relay_queue_close "$out" "$$-$pred-$n"
+      relay_flush_outbox "$msg" || break
     elif [ "$host" -eq 1 ] && { [ "$rc" -gt 128 ] || [ ! -s "$out" ]; }; then
       # The host died without a close; the next one stops what it left.
       printf 'fm-t3-host relay: the supervision host exited without a close (rc=%s); starting another\n' "$rc" >&2
@@ -582,7 +633,7 @@ cmd_uninstall() {
 }
 
 cmd_status() {
-  local thread
+  local thread f n=0
   thread=$(record_get "$HOST_RECORD" thread)
   printf 'home=%s\n' "$FM_HOME"
   printf 'checkout=%s\n' "$FM_ROOT"
@@ -593,6 +644,9 @@ cmd_status() {
   else
     printf 'relay=none\n'
   fi
+  for f in "$STATE/$FM_T3_RELAY_OUTBOX_DIRNAME"/*.close; do [ -f "$f" ] && n=$((n + 1)); done
+  printf 'undelivered=%s\n' "$n"
+  [ ! -s "$RELAY_ERROR_RECORD" ] || printf 'last-delivery-error=%s\n' "$(head -n 1 "$RELAY_ERROR_RECORD")"
 }
 
 case "${1:-}" in
