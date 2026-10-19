@@ -3243,23 +3243,28 @@ test_discover_supervisor_t3code_after_env_tmux_and_herdr() {
 }
 
 test_pane_is_busy_t3code_trusts_native_verdict_without_capture() {
-  local dir
+  local dir row
   dir=$(make_supercase primary-t3code-busy)
   (
-    fm_backend_capture() { fail "capture must never be consulted for a t3code supervisor"; }
-    fm_backend_busy_state() {
-      [ "$1" = t3code ] && [ "$2" = thread-captain ] || fail "unexpected busy_state args: $1 $2"
-      printf '%s' "${FM_FAKE_T3_NATIVE:?}"
+    fm_backend_source t3code || fail "could not source the t3code adapter"
+    fm_backend_capture() { : > "$dir/capture-called"; }
+    fm_backend_t3code_probe() {
+      [ "$1" = thread-captain ] || : > "$dir/unexpected-probe"
+      printf '%s' "${FM_FAKE_T3_ROW:?}"
     }
-    FM_FAKE_T3_NATIVE=busy FM_STATE_OVERRIDE="$dir/state" FM_DAEMON_PRIMARY_HARNESS=claude pane_is_busy thread-captain t3code \
-      || fail "a running T3 session must read busy"
-    if FM_FAKE_T3_NATIVE=idle FM_STATE_OVERRIDE="$dir/state" FM_DAEMON_PRIMARY_HARNESS=claude pane_is_busy thread-captain t3code; then
-      fail "a ready T3 session must read idle without a rendered-tail fallback"
-    fi
-    FM_FAKE_T3_NATIVE=unknown FM_STATE_OVERRIDE="$dir/state" FM_DAEMON_PRIMARY_HARNESS=claude pane_is_busy thread-captain t3code \
-      || fail "T3 native uncertainty must defer injection"
+    for row in running starting blocked error http-failure http-404 archived closing; do
+      FM_FAKE_T3_ROW=$row FM_STATE_OVERRIDE="$dir/state" FM_DAEMON_PRIMARY_HARNESS=claude pane_is_busy thread-captain t3code \
+        || fail "a T3 supervisor thread reading $row must defer injection"
+    done
+    for row in idle ready interrupted; do
+      if FM_FAKE_T3_ROW=$row FM_STATE_OVERRIDE="$dir/state" FM_DAEMON_PRIMARY_HARNESS=claude pane_is_busy thread-captain t3code; then
+        fail "a settled T3 supervisor thread reading $row must accept injection without a rendered-tail fallback"
+      fi
+    done
   ) || fail "t3code pane_is_busy subshell failed"
-  pass "pane_is_busy: t3code trusts the native verdict for busy and idle and never reads a rendered tail"
+  [ ! -e "$dir/capture-called" ] || fail "capture must never be consulted for a t3code supervisor"
+  [ ! -e "$dir/unexpected-probe" ] || fail "pane_is_busy must probe the supervisor thread it was given"
+  pass "pane_is_busy: t3code accepts only a settled thread with no pending request and never reads a rendered tail"
 }
 
 test_pane_is_busy_herdr_native_busy_state() {

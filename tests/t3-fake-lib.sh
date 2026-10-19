@@ -49,14 +49,17 @@ t3_fake_case() {
   printf '%s' "$1" > "$T3_FAKE_CASE_FILE"
 }
 
-# t3_fake_set <js>: run <js> against the current world as `w` and save it.
+# t3_fake_set <js>: run <js> against the current world as `w` and save it
+# atomically.
 t3_fake_set() {
   node -e '
 const fs = require("fs");
 const file = process.argv[1];
 let w = JSON.parse(fs.readFileSync(file, "utf8"));
 eval(process.argv[2]);
-fs.writeFileSync(file, JSON.stringify(w));
+const tmp = file + "." + process.pid + ".tmp";
+fs.writeFileSync(tmp, JSON.stringify(w));
+fs.renameSync(tmp, file);
 ' "$T3_FAKE_WORLD" "$1"
 }
 

@@ -4792,8 +4792,11 @@ EOF
     ;;
   t3code)
     # Validate the project policy before the first T3 or Treehouse mutation;
-    # installation rechecks the actual leased worktree's configuration.
-    if [ "$HARNESS" = codex ]; then
+    # installation rechecks the actual leased worktree's configuration. A
+    # worker's leased worktree shares only tracked files with this checkout, so
+    # an untracked config here is checked only for a secondmate, whose launch
+    # directory this checkout is.
+    if [ "$HARNESS" = codex ] && { [ "$KIND" = secondmate ] || [ -n "$(git -C "$PROJ_ABS" ls-files -- .codex)" ]; }; then
       "$SCRIPT_DIR/fm-t3code-codex-env.sh" check "$PROJ_ABS" || exit 1
     fi
     if [ "$HARNESS" = claude ] && [ "$KIND" != secondmate ] && git -C "$PROJ_ABS" ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1; then

@@ -72,6 +72,15 @@ test_login_origin_defaults() {
   OUT=$(HOME="$home" FM_T3CODE_ORIGIN='' node "$HELPER" login --access full-access --t3 "$cli" --token-file "$CRED" 2>"$TMP_ROOT/stderr"); RC=$?
   expect_code 0 "$RC" "login should take the origin from T3's runtime file: $(cat "$TMP_ROOT/stderr")"
   assert_equals "$T3_FAKE_URL" "$(field "$OUT" origin)" "the runtime file's origin is normalized"
+  printf '{"origin":"http://127.0.0.1:9/"}\n' > "$home/.t3/userdata/server-runtime.json"
+  rm -f "$CRED"
+  OUT=$(HOME="$home" FM_T3CODE_ORIGIN="$T3_FAKE_URL/" node "$HELPER" login --access full-access --t3 "$cli" --token-file "$CRED" 2>"$TMP_ROOT/stderr"); RC=$?
+  expect_code 0 "$RC" "FM_T3CODE_ORIGIN must win over T3's runtime file: $(cat "$TMP_ROOT/stderr")"
+  assert_equals "$T3_FAKE_URL" "$(field "$OUT" origin)" "FM_T3CODE_ORIGIN, normalized, is the sign-in origin"
+  rm -f "$CRED"
+  OUT=$(HOME="$home" FM_T3CODE_ORIGIN=http://127.0.0.1:9 node "$HELPER" login --url "$T3_FAKE_URL" --access full-access --t3 "$cli" --token-file "$CRED" 2>"$TMP_ROOT/stderr"); RC=$?
+  expect_code 0 "$RC" "--url must win over FM_T3CODE_ORIGIN: $(cat "$TMP_ROOT/stderr")"
+  assert_equals "$T3_FAKE_URL" "$(field "$OUT" origin)" "--url is the sign-in origin"
   rm -f "$CRED"
   OUT=$(HOME="$TMP_ROOT/nowhere" FM_T3CODE_ORIGIN='' node "$HELPER" login --access full-access --t3 "$cli" --token-file "$CRED" 2>"$TMP_ROOT/stderr"); RC=$?
   expect_code 2 "$RC" "login without any origin is invalid use"
@@ -317,6 +326,14 @@ test_send_state_capture_interrupt_archive() {
   assert_equals true "$(field "$OUT" archived)" "archive reads back archived"
   mcp archive --thread "$thread"
   expect_code 0 "$RC" "archiving an archived thread is the same end state"
+  t3_fake_set 'w.failTools = { t3_thread_organize: { code: "invalid_request", message: "Thread is already archived" } }'
+  mcp archive --thread "$thread"
+  expect_code 0 "$RC" "T3 refusing to re-archive an archived thread is the same end state: $ERR"
+  assert_equals true "$(field "$OUT" closed)" "the read-back still proves the close"
+  t3_fake_set 'w.failTools = { t3_thread_organize: { code: "boom", message: "organize failed" } }'
+  mcp archive --thread "$thread"
+  expect_code 3 "$RC" "any other organize failure is not an archive"
+  t3_fake_set 'w.failTools = {}'
   mcp state --thread "$thread"
   assert_equals true "$(field "$OUT" archived)" "state reports archived"
   mcp send --thread "$thread" --message-file "$msg" --client-request-id req-4
@@ -355,9 +372,10 @@ test_thread_for_root() {
   expect_code 6 "$RC" "two running root threads are ambiguous"
   assert_contains "$ERR" "FM_SUPERVISOR_TARGET" "the ambiguity names the pin"
   assert_contains "$(field "$OUT" error.threadIds)" "$captain" "the ambiguity lists the ids"
-  mcp archive --thread "$other"
+  FM_T3_ID="$other" t3_fake_set 'w.threads[process.env.FM_T3_ID].archived = true'
   mcp thread-for-root --root "$TMP_ROOT/proj"
-  expect_code 0 "$RC" "an archived root thread no longer counts"
+  expect_code 0 "$RC" "an archived root thread whose run is still ending no longer counts: $ERR"
+  assert_equals "$captain" "$(field "$OUT" threadId)" "the unarchived running root thread is the supervisor"
   pass "fm-t3-mcp thread-for-root: only an unarchived, running, worktree-less thread on the root resolves"
 }
 
