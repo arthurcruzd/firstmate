@@ -1611,10 +1611,17 @@ spawn_abort_cleanup() {
       fi
     fi
   fi
-  # Nothing has run in a leased slot before the launch turn, so an abort
-  # archives the thread (it must never act in a returned slot) and hands the
-  # lease back only once that succeeded; after publication the record's own
-  # teardown owns both.
+  # An abort archives the thread (it must never act in a returned slot) and
+  # hands the lease back only once that succeeded; once the record is
+  # committed its own teardown owns both. A published fresh record is rolled
+  # back first, so one that cannot be removed keeps owning them.
+  if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ] &&
+    { [ "$T3CODE_ABORT_CLEANUP" = 1 ] || [ "$T3CODE_LEASED" = 1 ]; } &&
+    ! spawn_fresh_commit_rollback; then
+    status=1
+    T3CODE_ABORT_CLEANUP=0
+    T3CODE_LEASED=0
+  fi
   if [ "$T3CODE_CREATE_UNCERTAIN" = 1 ]; then
     # t3_thread_launch has no idempotency key, so a launch whose outcome was
     # lost may have left a thread whose id never came back.
@@ -6299,7 +6306,10 @@ if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
 fi
 "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 [ "$BACKEND" = orca ] && ORCA_ABORT_CLEANUP=0
-if [ "$BACKEND" = t3code ]; then
+# A fresh record an abort still rolls back (SPAWN_FRESH_COMMIT_PENDING, until
+# the backlog commit below) owns neither its thread nor its lease yet, so the
+# abort keeps both; a relaunch's republished record owns them now.
+if [ "$BACKEND" = t3code ] && [ "$SPAWN_FRESH_COMMIT_PENDING" != 1 ]; then
   T3CODE_ABORT_CLEANUP=0
   T3CODE_LEASED=0
 fi
@@ -6918,11 +6928,16 @@ else
     SPAWN_FRESH_COMMIT_PENDING=0
   fi
 fi
+# The committed record now owns its thread and lease.
+[ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ] || { T3CODE_ABORT_CLEANUP=0; T3CODE_LEASED=0; }
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
     if spawn_fresh_commit_rollback; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
+      # The record that remains owns its thread and lease.
+      T3CODE_ABORT_CLEANUP=0
+      T3CODE_LEASED=0
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
     fi
   else

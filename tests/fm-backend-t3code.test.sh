@@ -2051,6 +2051,27 @@ test_uncertain_launch_message_keeps_git_hooks() {
   pass "fm-spawn.sh --backend t3code: a launch message whose response is lost keeps its Git hook directory"
 }
 
+# Review finding 3 (C1): a launch that fails after its record is published
+# but before the backlog commit rolls the record back, so the spawn itself
+# must still archive the thread and return the leased slot; nothing else can
+# find them once the record is gone.
+test_refused_launch_message_archives_thread_and_returns_lease() {
+  local id=t3refusedturn out rc archive_line return_line
+  t3_case spawn-refused-turn
+  t3_world_set 'w.failTools = { t3_thread_send: { code: "invalid_request", message: "thread refused the message" } }'
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "a refused launch message must abort spawn"$'\n'"$out"
+  assert_absent "$CASE_DIR/state/$id.meta" "an aborted launch must roll back its metadata"
+  archive_line=$(t3_log_line_of 'r.tool === "t3_thread_organize"')
+  [ "$archive_line" -gt 0 ] || fail "an aborted launch must archive the thread it created, got '$(t3_dispatch_types)'"$'\n'"$out"
+  return_line=$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')
+  [ "$return_line" -gt 0 ] || fail "an aborted launch must return the slot it leased"$'\n'"$out"
+  [ "$archive_line" -lt "$return_line" ] || fail "the thread must be archived before the slot is returned (archive line $archive_line, return line $return_line)"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-spawn.sh --backend t3code: a launch message refused after the record is published archives the thread and returns the slot"
+}
+
 test_scout_teardown_stops_and_archives_before_slot_return() {
   local proj wt data state id out rc neutral fb thread=mcp:2c8f0d4e-7b1a-4f3c-9e2d-abcdef012345
   id="t3teardownz1"
@@ -2236,3 +2257,4 @@ test_spawn_abort_returns_lease_only_after_archive fail
 test_uncertain_thread_launch_keeps_lease
 test_misbound_thread_launch_returns_lease
 test_uncertain_launch_message_keeps_git_hooks
+test_refused_launch_message_archives_thread_and_returns_lease
