@@ -1,0 +1,72 @@
+### [01] test_untracked_codex_config_is_preserved
+ok - untracked Codex config is preserved unless Firstmate's marker owns it
+rc=0
+### [02] test_codex_cleanup_without_journal_needs_no_python
+ok - fm-t3code-codex-env.sh cleanup: without an installed overlay it needs no Python and never refuses
+rc=0
+### [03] test_codex_worker_ignores_untracked_config_in_main_checkout
+ok - fm-spawn.sh --backend t3code codex: an untracked Codex config in the main checkout does not refuse a worker
+rc=0
+### [04] test_spawn_codex_scout_writes_toml_env_with_traceparent
+ok - fm-spawn.sh --backend t3code codex: writes .codex/config.toml with GOTMPDIR, FM_TASK_ID, and TRACEPARENT
+rc=0
+### [05] test_spawn_secondmate_runs_thread_in_home_with_env
+ok - fm-spawn.sh --backend t3code --secondmate: project on the home, root-strategy thread, charter message, launch prefix as settings env
+rc=0
+### [06] test_spawn_codex_secondmate_writes_toml_env
+ok - fm-spawn.sh --backend t3code --secondmate codex: launch prefix as .codex/config.toml shell_environment_policy
+rc=0
+### [07] test_spawn_refuses_t3code_when_token_rejected
+ok - fm-spawn.sh --backend t3code: refuses before mutation when the credential is rejected
+rc=0
+### [08] test_scout_teardown_stops_and_archives_before_slot_return
+ok - fm-teardown.sh backend=t3code: interrupts and archives the thread with a proven close, then returns the slot
+rc=0
+### [09] test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete
+ok - fm-teardown.sh backend=t3code secondmate: interrupts and archives, then ends the home's lingering provider process before the home is removed; an unprovable scan keeps the home
+rc=0
+### [10] test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete codex
+ok - fm-teardown.sh backend=t3code secondmate: interrupts and archives, then ends the home's lingering provider process before the home is removed; an unprovable scan keeps the home
+rc=0
+### [11] test_pooled_t3_secondmate_home_returned_only_after_provider_exits
+ok - fm-teardown.sh backend=t3code pooled secondmate: the slot returns only after the provider ended, without the T3 environment the spawn wrote
+rc=0
+### [12] test_teardown_refuses_when_t3_is_unreachable
+ok - fm-teardown.sh backend=t3code: an unreachable or gate-refused server keeps the slot a live thread still points at
+rc=0
+### [13] test_spawn_refuses_launch_settings_t3_cannot_honor claude-permission-mode auto "config/claude-permission-mode=auto"
+ok - fm-spawn.sh --backend t3code: refuses config/claude-permission-mode it cannot honor before any mutation
+rc=0
+### [14] test_spawn_refuses_launch_settings_t3_cannot_honor launch-env-allowlist HOME "config/launch-env-allowlist"
+ok - fm-spawn.sh --backend t3code: refuses config/launch-env-allowlist it cannot honor before any mutation
+rc=0
+### [15] test_spawn_refuses_raw_launch_command
+ok - fm-spawn.sh --backend t3code: refuses a raw launch command before any mutation
+rc=0
+### [16] test_spawn_abort_returns_lease_only_after_archive ok
+ok - fm-spawn.sh --backend t3code: an abort archives the thread, then returns the lease
+rc=0
+### [17] test_spawn_abort_returns_lease_only_after_archive fail
+ok - fm-spawn.sh --backend t3code: an abort that cannot archive the thread keeps the lease
+rc=0
+### [18] test_uncertain_thread_launch_keeps_lease
+ok - fm-spawn.sh --backend t3code: a launch whose response was lost keeps the lease
+rc=0
+### [19] test_spawn_never_writes_inherited_git_config
+ok - fm-spawn.sh --backend t3code: inherited Git config values never reach the env file, which carries only Firstmate's hook entry
+rc=0
+### [20] test_spawn_secondmate_refuses_symlinked_claude_settings
+ok - fm-spawn.sh --backend t3code --secondmate: a symlinked .claude/settings.local.json is refused, never written through
+rc=0
+### [21] test_launch_gate_failure_returns_lease
+ok - fm-spawn.sh --backend t3code: a gate failure before the launch request returns the lease
+rc=0
+### [22] test_refused_launch_turn_archives_thread_and_returns_lease
+ok - fm-spawn.sh --backend t3code: a refused launch turn archives the thread, removes its environment files, then returns the lease
+rc=0
+### [23] test_misbound_thread_launch_returns_lease
+ok - fm-spawn.sh --backend t3code: a thread T3 bound elsewhere is archived and the lease returned
+rc=0
+### [24] test_uncertain_launch_message_keeps_task_record
+ok - fm-spawn.sh --backend t3code: a launch brief whose reply is lost is reported unconfirmed and keeps its task record
+rc=0

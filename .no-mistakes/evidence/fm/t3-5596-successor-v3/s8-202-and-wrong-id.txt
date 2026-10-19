@@ -1,0 +1,25 @@
+### F. HTTP 202 empty reply to t3_thread_send
+pre-fix helper:
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","clientRequestId":"fm-gate-202-1792380318-old","delivery":null,"status":null,"runId":null,"messageId":null}
+exit=0
+this change:
+{"ok":false,"error":{"code":"delivery_unconfirmed","message":"the reply to t3_thread_send on thread mcp:d77b56a6-9b09-4731-b80e-4efe01623da8 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-gate-202-1792380318","threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","clientRequestId":"fm-gate-202-1792380318"}}
+fm-t3-mcp: the reply to t3_thread_send on thread mcp:d77b56a6-9b09-4731-b80e-4efe01623da8 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-gate-202-1792380318
+exit=7
+
+### G. Reply to t3_thread_read carrying a different JSON-RPC id (state verb)
+pre-fix helper:
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","exists":true,"archived":false,"status":null,"activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":null}
+exit=0
+this change:
+{"ok":false,"error":{"code":"transport","message":"T3 /mcp returned no reply to tools/call"}}
+fm-t3-mcp: T3 /mcp returned no reply to tools/call
+exit=1
+through the adapter (fm_backend_agent_state t3code), this change:
+aliveexit=0
+
+NOTE: the "through the adapter" line in section G is NOT proxy evidence: the adapter reads <config>/t3code-token and ignores FM_T3CODE_TOKEN_FILE, so that read went to the real server (alive is the correct live answer). The adapter-level lost-reply path is shown in s9 instead, through FM_CONFIG_OVERRIDE=<proxy config>.
+
+### Fault-injecting proxy log
+2026-10-19T03:25:18.534Z DROPPED reply to t3_thread_send id=4 clientRequestId=fm-gate-202-1792380318 upstreamStatus=200 upstreamBytes=683 mode=202
+2026-10-19T03:25:18.758Z DROPPED reply to t3_thread_read id=4 clientRequestId=undefined upstreamStatus=200 upstreamBytes=25819 mode=wrong-id

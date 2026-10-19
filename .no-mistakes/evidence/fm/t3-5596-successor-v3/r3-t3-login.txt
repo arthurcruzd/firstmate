@@ -1,0 +1,5 @@
+== T3 server
+t3 v0.1.0
+$ bin/fm-t3-mcp.mjs login --access full-access --url http://127.0.0.1:<port> --t3 <npx t3@0.1.0> --base-dir <lab>/t3
+{"ok":true,"tokenFile":"/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.04X420/home/config/t3code-token","origin":"http://127.0.0.1:49994","access":"full-access","scope":"orchestration:read orchestration:operate settings:write source-control:write","expiresAt":"2026-11-18T04:11:40.463Z","environmentId":"5e34bf31-7684-4109-aae5-8a437497b098","serverVersion":"0.1.0"}
+exit=0

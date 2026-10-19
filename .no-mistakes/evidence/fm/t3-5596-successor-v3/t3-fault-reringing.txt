@@ -1,0 +1,15 @@
+## watcher-style re-ring of the swallowed doorbell for 002.msg (fm_task_inbox_ring t3code <thread> <rec>, the call fm-watch.sh's re-ring ladder makes)
+ring rc=0
+## status after re-ring: done [at=1792382111]: README first word is 'hello'; report written; captain-hold complete --none still needs the origin id from firstmate
+done [at=1792382146]: steer A acknowledged; STEER-A-OK
+done [at=1792382300]: steer B acknowledged; STEER-B-OK
+handled
+
+/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/state/t3scout2.inbox/handled:
+001.msg
+002.msg
+fm-1792381896-29615-29907.accepted
+fm-1792381952-73095-21641.accepted
+fm-1792382101-89845-25537.accepted
+fm-1792382141-24705-27967.accepted
+fm-1792382292-33831-29836.accepted

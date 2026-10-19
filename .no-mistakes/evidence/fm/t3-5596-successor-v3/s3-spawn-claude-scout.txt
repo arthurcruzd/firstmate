@@ -1,0 +1,58 @@
+$ bin/fm-spawn.sh lab1 <lab-home>/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low   (config/backend=t3code)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-0dd723/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-0dd723/1/labproj' to release it.
+spawned lab1 harness=claude kind=scout window=fm-lab1 worktree=<lab>/pool/.treehouse/labproj-0dd723/1/labproj
+exit=0 elapsed=4s
+== state/lab1.meta
+window=fm-lab1
+endpoint_task_id=lab1
+worktree=<lab>/pool/.treehouse/labproj-0dd723/1/labproj
+project=<lab>/home/projects/labproj
+harness=claude
+kind=scout
+tasktmp=/tmp/fm-lab1
+model=claude-haiku-5-5
+effort=low
+busy_gen=g1792380040.55292.4609
+spawn_gen=s1792380040.52950.14230
+backend=t3code
+t3_thread_id=mcp:d77b56a6-9b09-4731-b80e-4efe01623da8
+t3_project_id=mcp:821fb802-dd0b-4f7d-870b-b00782bb46cb
+decisions_reviewed=1
+decision_keys=
+== state/lab1.status
+done [at=1792380077]: README title line is '# labproj'; read README.md in worktree; report at data/lab1/report.md
+== data/lab1/report.md
+# lab1 scout report
+
+Line 1: `# labproj`
+Line 2: Read `README.md` in the worktree (`<lab>/pool/.treehouse/labproj-0dd723/1/labproj/README.md`).
+
+## What I did
+- Ran `head -n 5 README.md` in the worktree. Output:
+  ```
+  # labproj
+
+  A scratch project for the T3 lab.
+  ```
+- Checked the inbox (`lab1.inbox/*.msg`): empty.
+- No project files edited; no pushes, PRs, or worktree operations.
+
+## Findings
+- The worktree is readable: the title line is `# labproj`.
+- README.md line 3 reads "A scratch project for the T3 lab."
+
+## Completion gate
+- `bin/fm-captain-hold.sh complete lab1 --none` (from the no-mistakes worktree, `FM_HOME` = lab home) returned `complete: lab1 captain-call inventory reviewed`. No captain-held calls were discovered.
+
+## Recommendation
+- Nothing further. The lab scout can read its worktree.
+== thread state (fm-t3-mcp state)
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-0dd723/1/labproj","turnAt":"2026-10-19T03:21:20.826Z"}
+== worktree env files written by spawn
+-rw-r--r--@ 1 disco  staff  2039 Oct 19 00:20 <lab>/pool/.treehouse/labproj-0dd723/1/labproj/.claude/settings.local.json
+-rw-------@ 1 disco  staff   601 Oct 19 00:20 <lab>/pool/.treehouse/labproj-0dd723/1/labproj/CLAUDE.local.md
+env keys: COMPACT_ADVISER_DISABLE,FM_T3CODE_ENV_KEYS,FM_TASK_ID,FM_TASK_INBOX,GIT_CONFIG_COUNT,GIT_CONFIG_KEY_0,GIT_CONFIG_VALUE_0,GOTMPDIR
+!! .claude/
+!! CLAUDE.local.md

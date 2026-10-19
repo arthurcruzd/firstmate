@@ -1,0 +1,12 @@
+== before interrupt
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Ad77b56a6-9b09-4731-b80e-4efe01623da8:ordinal:3","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-0dd723/1/labproj","turnAt":"2026-10-19T03:23:09.028Z"}
+70924 /bin/zsh -c source /Users/disco/.claude/shell-snapshots/snapshot-zsh-1792380049844-ytpj3c.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'python3 -c '"'"'import time; time.sleep(240)'"'"'; echo "exit=$?"' < /dev/null && pwd -P >| /tmp/claude-8d12-cwd
+70928 /opt/homebrew/Cellar/python@3.15/3.15.0/Frameworks/Python.framework/Versions/3.15/Resources/Python.app/Contents/MacOS/Python -c import time; time.sleep(240)
+$ bin/fm-control.sh lab1 interrupt
+interrupt-delivered lab1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+exit=0 elapsed=2s
+== 2.5s after interrupt: python child still running?
+== thread state after
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-0dd723/1/labproj","turnAt":"2026-10-19T03:23:21.815Z"}
+== recheck via ps (no process carries 'import time; time.sleep(240)'):
+matching Python processes: 0

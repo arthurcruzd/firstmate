@@ -1,0 +1,48 @@
+$ FM_HOME=$LAB bin/fm-teardown.sh t3scout1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+fm-captain-hold: origin t3scout1 has no completed captain-call inventory
+REFUSED: scout task t3scout1 has not passed the captain-call completion gate.
+Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown.
+exit=1 (1s)
+## T3 thread after teardown
+{"ok":true,"threadId":"mcp:cb880457-6d49-4c8d-affc-8f5dd34cad69","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo","turnAt":"2026-10-19T03:52:41.842Z"}
+
+## env files left in worktree
+-rw-r--r--@ 1 disco  staff  2093 Oct 19 00:51 /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo/.claude/settings.local.json
+-rw-------@ 1 disco  staff   601 Oct 19 00:51 /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo/CLAUDE.local.md
+## treehouse pool status
+base  main  (repository default)
+1     leased       /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo  (detached)  (held by t3scout1)
+                   2.1.303 (34275), paper (34428)
+## state files for task
+t3scout1.busy-gen
+t3scout1.busy-state
+t3scout1.git-hooks
+t3scout1.inbox
+t3scout1.meta
+t3scout1.status
+t3scout1.turn-ended
+
+$ FM_HOME=$LAB bin/fm-captain-hold.sh complete t3scout1 --none
+complete: t3scout1 captain-call inventory reviewed
+exit=0
+$ FM_HOME=$LAB bin/fm-teardown.sh t3scout1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for t3scout1: 34275 34428
+🌳 Worktree returned to pool.
+teardown t3scout1 complete (window mcp:cb880457-6d49-4c8d-affc-8f5dd34cad69, worktree /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo)
+Backlog: t3scout1 just finished (this home keeps no markdown backlog at /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/data/backlog.md). Update /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/data/backlog.md - move t3scout1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0 (7s)
+## T3 thread after teardown
+{"ok":true,"threadId":"mcp:cb880457-6d49-4c8d-affc-8f5dd34cad69","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo","turnAt":"2026-10-19T03:52:41.842Z"}
+
+## env files left in worktree
+ls: /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo/.claude/settings.local.json: No such file or directory
+ls: /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo/CLAUDE.local.md: No such file or directory
+## treehouse pool status
+base  main  (repository default)
+1     available    /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo  (detached)
+## state files for task
+(none)

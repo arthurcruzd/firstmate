@@ -1,0 +1,7 @@
+$ FM_HOME=$LAB bin/fm-spawn.sh t3scout1 $LAB/projects/demo --scout --harness claude --model claude-haiku-5-5 --backend t3code
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home
+🌳 Setting up worktree...
+🌳 Leased worktree at /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo. Run 'treehouse return /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo' to release it.
+spawned t3scout1 harness=claude kind=scout window=fm-t3scout1 worktree=/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo
+env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_CONFIG_OVERRIDE -u  -u  2.50s user 1.55s system 91% cpu 4.419 total
+exit=0

@@ -1,0 +1,24 @@
+## commit under test: ac5a98ca (T3 server: t3 v0.1.0, isolated --base-dir; lab home config/backend=t3code)
+## before: the free pool slot holds an operator's git-excluded regular CLAUDE.local.md
+-rw-r--r--@ 1 disco  staff  59 Oct 19 01:13 <lab>/pool/.treehouse/demo-301db6/1/demo/CLAUDE.local.md
+Operator-local Claude instructions for this slot. Keep me.
+8a97225d1594d4eab6ee2561d1687788bddc2819  -
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh r3keep1 <lab>/home/projects/demo --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/demo-301db6/1/demo. Run 'treehouse return <lab>/pool/.treehouse/demo-301db6/1/demo' to release it.
+error: <lab>/pool/.treehouse/demo-301db6/1/demo/CLAUDE.local.md already exists or is tracked; refusing to overwrite project instructions
+error: could not write the Claude task-worker channel statement for r3keep1 into <lab>/pool/.treehouse/demo-301db6/1/demo
+warning: leaving task r3keep1's slot claim on <lab>/pool/.treehouse/demo-301db6/1/demo in place; the Treehouse project lock is no longer held, so the next spawn's claim replaces it
+exit=1
+## after the refused spawn: the operator file is still in the slot, unchanged
+-rw-r--r--@ 1 disco  staff  59 Oct 19 01:13 <lab>/pool/.treehouse/demo-301db6/1/demo/CLAUDE.local.md
+Operator-local Claude instructions for this slot. Keep me.
+8a97225d1594d4eab6ee2561d1687788bddc2819  -
+## the spawn's own Claude settings file was removed
+ls: <lab>/pool/.treehouse/demo-301db6/1/demo/.claude/settings.local.json: No such file or directory
+## pool slot (lease returned)
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/demo-301db6/1/demo  (detached)
+## task record
+r3keep1.inbox

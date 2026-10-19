@@ -1,0 +1,30 @@
+### A. Pre-fix helper (0f306f44, parent of the fix) through a proxy that lets T3 commit t3_thread_send and then returns an empty 200 SSE body
+$ node <0f306f44>/fm-t3-mcp.mjs send --thread mcp:d77b56a6-9b09-4731-b80e-4efe01623da8 --message-file heron --client-request-id fm-gate-prefix-1792380276 --token-file <proxy-origin credential>
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","clientRequestId":"fm-gate-prefix-1792380276","delivery":null,"status":null,"runId":null,"messageId":null}
+exit=0
+
+### B. This change's helper (75739f79), same lost reply
+$ node bin/fm-t3-mcp.mjs send --thread mcp:d77b56a6-9b09-4731-b80e-4efe01623da8 --message-file pelican --client-request-id fm-gate-empty-1792380276 --token-file <proxy-origin credential>
+{"ok":false,"error":{"code":"delivery_unconfirmed","message":"the reply to t3_thread_send on thread mcp:d77b56a6-9b09-4731-b80e-4efe01623da8 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-gate-empty-1792380276","threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","clientRequestId":"fm-gate-empty-1792380276"}}
+fm-t3-mcp: the reply to t3_thread_send on thread mcp:d77b56a6-9b09-4731-b80e-4efe01623da8 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-gate-empty-1792380276
+exit=7
+### C. Against the real lab server directly: did T3 commit the message whose reply was dropped?
+user_message items containing PELICAN: 1
+user_message items containing HERON: 1
+
+### D. Retry with the SAME client request id directly against the real server (the safe retry exit 7 asks for)
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","clientRequestId":"fm-gate-empty-1792380276","delivery":"queued","status":"completed","runId":"run:thread:mcp%3Ad77b56a6-9b09-4731-b80e-4efe01623da8:ordinal:5","messageId":"message:mcp:client%3A022f7ca7-c68f-44da-b860-d0e4ef6a76b6:thread-send:fm-gate-empty-1792380276"}
+exit=0
+user_message items containing PELICAN after the retry: 1   (1 = the retry reached the committed message, no duplicate)
+
+### E. Activity tail
+[assistant_message/completed] HERON
+[checkpoint/completed] []
+[user_message/completed] Firstmate check: reply with the single word PELICAN and do nothing else.
+[assistant_message/completed] PELICAN
+[checkpoint/completed] []
+t3code: status=completed run=none
+
+### Fault-injecting proxy log (lab proxy in front of the real T3 0.1.0 server; it forwarded each t3_thread_send, waited for T3's full reply, then handed the client an empty 200 text/event-stream body)
+2026-10-19T03:24:36.979Z DROPPED reply to t3_thread_send id=4 clientRequestId=fm-gate-prefix-1792380276 upstreamStatus=200 upstreamBytes=691 mode=empty-sse
+2026-10-19T03:24:37.112Z DROPPED reply to t3_thread_send id=4 clientRequestId=fm-gate-empty-1792380276 upstreamStatus=200 upstreamBytes=683 mode=empty-sse

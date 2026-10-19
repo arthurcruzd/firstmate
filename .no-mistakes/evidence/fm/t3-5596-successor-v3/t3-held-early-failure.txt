@@ -1,0 +1,12 @@
+## A: held id (FM_T3CODE_CLIENT_REQUEST_ID set, as the away daemon's frozen-digest retry) + unwritable TMPDIR so mktemp fails before the request
+mktemp: mkstemp failed on /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/ro-tmp/fm-t3code-msg.QYOPFN: Permission denied
+send_text_submit verdict=unconfirmed
+## B: held id + state dir that cannot be created (mkdir -p fails)
+mkdir: /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/not-a-dir: Not a directory
+send_text_submit verdict=unconfirmed
+## C: control, no held id + unwritable TMPDIR (nothing can be in flight)
+mktemp: mkstemp failed on /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/ro-tmp/fm-t3code-msg.MAUFDl: Permission denied
+send_text_submit verdict=send-failed
+## t3code-sends entries before=5 after=5 (C's fresh record removed)
+## T3 thread unchanged (no new run from any probe)
+{"ok":true,"threadId":"mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo","turnAt":"2026-10-19T03:58:22.122Z"}

@@ -1,0 +1,7 @@
+$ node bin/fm-t3-mcp.mjs status
+{"ok":true,"origin":"http://127.0.0.1:62404","access":"full-access","expiresAt":"2026-11-18T03:50:31.658Z","daysLeft":30,"environmentId":"8e3842c6-b008-4fd0-9fd3-9f9f4be6972e","serverVersion":"0.1.0","recordedServerVersion":"0.1.0","telemetry":"off"}
+exit=0
+
+$ FM_T3CODE_LIVE_E2E=1 bash tests/fm-backend-t3code-live-e2e.test.sh
+ok - t3code live transport: T3 0.1.0 environment 8e3842c6-b008-4fd0-9fd3-9f9f4be6972e passes the gate (telemetry=off)
+exit=0

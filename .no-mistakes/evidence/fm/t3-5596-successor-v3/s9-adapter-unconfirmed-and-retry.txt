@@ -1,0 +1,12 @@
+### H1. fm_backend_t3code_send_text_submit through the empty-SSE proxy (FM_CONFIG_OVERRIDE=<proxy config>)
+verdict: fm-t3-mcp: the reply to t3_thread_send on thread mcp:d77b56a6-9b09-4731-b80e-4efe01623da8 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-1792380388-99411-2228
+unconfirmed
+send records kept (id reserved for a safe retry):
+  59fbafde1391a4e55d9ae69e0327b1adad0134d18eaa8af4fee390cacf016be1
+  59fbafde1391a4e55d9ae69e0327b1adad0134d18eaa8af4fee390cacf016be1 = fm-1792380388-99411-2228
+
+### H2. Same text again, now straight to the real lab server (FM_CONFIG_OVERRIDE=<lab home config>)
+verdict: empty
+send records after:
+  fm-1792380388-99411-2228.accepted = {"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","clientRequestId":"fm-1792380388-99411-2228","delivery":"started","status":"running","runId":"run:thread:mcp%3Ad77b56a6-9b09-4731-b80e-4efe01623da8:ordinal:7","messageId":"message:mcp:client%3A022f7ca7-c68f-44da-b860-d0e4ef6a76b6:thread-send:fm-1792380388-99411-2228"}
+user_message items containing KITE on the real server: 1 of 15 items read   (1 = the unconfirmed delivery and its retry are one message)

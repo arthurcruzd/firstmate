@@ -1,0 +1,69 @@
+$ FM_SECONDMATE_CHARTER=... bin/fm-brief.sh labsm --secondmate --no-projects
+scaffolded: <lab>/home/data/labsm/brief.md (secondmate charter)
+exit=0
+$ bin/fm-home-seed.sh labsm <lab>/smhome --no-projects
+home=<lab>/smhome
+exit=0
+-rw-r--r--@   1 disco  staff      6 Oct 19 00:36 .fm-secondmate-home
+-rw-r--r--@   1 disco  staff    131 Oct 19 00:36 .fm-secondmate-parent
+drwxr-xr-x@   2 disco  staff     64 Oct 19 00:36 config
+drwxr-xr-x@   4 disco  staff    128 Oct 19 00:36 data
+drwxr-xr-x@   2 disco  staff     64 Oct 19 00:36 state
+- labsm - Lab secondmate for the T3 gate check: on startup, read AGENTS.md and your config, append one idle status line, then wait for instructions. Do not spawn crew, start watchers, or edit files. (home: <lab>/smhome; scope: lab-only T3 gate check; projects: ; added 2026-10-19)
+== home-owned settings before spawn: {"env":{"LAB_HOME_OWN":"keep-me"}}
+$ bin/fm-spawn.sh labsm <lab>/smhome claude --model claude-haiku-5-5 --effort low --secondmate   (config/backend=t3code)
+warning: secondmate labsm sync skipped before launch: primary default-branch commit cannot be resolved
+spawned labsm harness=claude kind=secondmate mode=secondmate yolo=off window=fm-labsm worktree=<lab>/smhome
+exit=0 elapsed=12s
+== state/labsm.meta
+window=fm-labsm
+endpoint_task_id=labsm
+worktree=<lab>/smhome
+project=<lab>/smhome
+harness=claude
+kind=secondmate
+mode=secondmate
+yolo=off
+tasktmp=/tmp/fm-labsm
+model=claude-haiku-5-5
+effort=low
+busy_gen=g1792381012.60275.6643
+spawn_gen=s1792381013.53680.21968
+backend=t3code
+t3_thread_id=mcp:b3de1f86-3815-433c-9b6c-2b831a7b45da
+t3_project_id=mcp:5276c67c-bbb5-4f2e-b034-69ad122ec237
+home=<lab>/smhome
+projects=
+== secondmate credential
+lrwxr-xr-x@ 1 disco  staff  95 Oct 19 00:36 <lab>/smhome/config/t3code-token -> <lab>/home/config/t3code-token
+== secondmate .claude/settings.local.json env keys
+COMPACT_ADVISER_DISABLE,FM_CONFIG_OVERRIDE,FM_DATA_OVERRIDE,FM_HOME,FM_PROJECTS_OVERRIDE,FM_PUBLIC_FOLLOWUP_PRIMARY_HOME,FM_ROOT_OVERRIDE,FM_STATE_OVERRIDE,FM_SUPERVISION_MODEL,FM_SUPERVISOR_BACKEND,FM_SUPERVISOR_TARGET,FM_T3CODE_ENV_KEYS,FM_TASK_INBOX,FM_TRACE_CONTEXT,GIT_CONFIG_COUNT,GIT_CONFIG_KEY_0,GIT_CONFIG_VALUE_0,GOTMPDIR,LAB_HOME_OWN
+LAB_HOME_OWN= keep-me  FM_SUPERVISOR_BACKEND= t3code  FM_SUPERVISOR_TARGET= mcp:b3de1f86-3815-433c-9b6c-2b831a7b45da
+FM_T3CODE_ENV_KEYS= GOTMPDIR,COMPACT_ADVISER_DISABLE,FM_TASK_INBOX,GIT_CONFIG_COUNT,GIT_CONFIG_KEY_0,GIT_CONFIG_VALUE_0,FM_ROOT_OVERRIDE,FM_STATE_OVERRIDE,FM_DATA_OVERRIDE,FM_PROJECTS_OVERRIDE,FM_CONFIG_OVERRIDE,FM_PUBLIC_FOLLOWUP_PRIMARY_HOME,FM_HOME,FM_TRACE_CONTEXT,FM_SUPERVISION_MODEL,FM_SUPERVISOR_BACKEND,FM_SUPERVISOR_TARGET
+== secondmate thread after charter turn
+{"ok":true,"threadId":"mcp:b3de1f86-3815-433c-9b6c-2b831a7b45da","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":"2026-10-19T03:37:39.199Z"}
+== activity tail
+[user_message/completed] ⁣FIRSTMATE_OP: v1 launch-brief: You are a persistent second mate managed by the main firstmate. Work on your own; do not wait for a human. # Charter Lab secondmate for the T3 gate check: on startup, read AGENTS.md and your config, append one idle status line, then wait for instructions. Do not spawn crew, start watchers, or edit files. # Routing scope lab-only T3 gate chec
+[reasoning/completed] The charter is clear: on startup I just read AGENTS.md and config, append one idle status line, then wait—no spawning crew, watchers, or file edits. Since the session start digest already ran via the hook, I need to locate the status file path to append that single idle line. I'm weighing which status word fits—working, needs-decision, blocked, paused, done, failed—since none
+[command_execution/completed] $ ts=$(date +%s); echo "done [at=${ts}]: lab secondmate startup complete, no in-flight work, idle and waiting for routed work" >> '<lab>/home/state/labsm.status' && { [ ! -e '<lab>/home/config/fleet-ledger' ] || '/Users/disco/.no-mistakes/w
+[assistant_message/completed] Captain, startup is done. I appended one idle status line to `labsm.status`, and the parent channel shows it: `done [at=1792381056]: lab secondmate startup complete, no in-flight work, idle and waiting for routed work` I did not spawn crew, start watchers, or edit files. I'm waiting for work routed from the main firstmate.
+[checkpoint/completed] []
+t3code: status=completed run=none
+== provider processes rooted in the home
+2.1.303 64783
+paper 68328
+$ bin/fm-teardown.sh labsm
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown labsm complete (window mcp:b3de1f86-3815-433c-9b6c-2b831a7b45da, worktree <lab>/smhome)
+exit=0 elapsed=6s
+== thread
+{"ok":true,"threadId":"mcp:b3de1f86-3815-433c-9b6c-2b831a7b45da","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":"2026-10-19T03:37:39.199Z"}
+== home
+ls: <lab>/smhome: No such file or directory
+== records
+(no state/labsm.* files)
+== registry
+== processes that were rooted in the home
+== primary credential after secondmate retirement (symlink target must survive)
+-rw-------@ 1 disco  staff  892 Oct 19 00:19 <lab>/home/config/t3code-token
+{"ok":true,"origin":"http://127.0.0.1:38773","access":"full-access","expiresAt":"2026-11-18T03:19:04.161Z","daysLeft":30,"environmentId":"c7c6384d-6ab8-4ebb-8d70-3e8b07912328","serverVersion":"0.1.0","recordedServerVersion":"0.1.0","telemetry":"off"}

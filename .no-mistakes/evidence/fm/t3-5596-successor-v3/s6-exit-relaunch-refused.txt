@@ -1,0 +1,8 @@
+$ bin/fm-control.sh lab1 exit
+error: task lab1 runs on the t3code backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread
+exit=1
+$ bin/fm-control.sh lab1 relaunch
+error: task lab1 runs on the t3code backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch
+exit=1
+== thread still alive and unarchived after both refusals:
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-0dd723/1/labproj","turnAt":"2026-10-19T03:23:21.815Z"}

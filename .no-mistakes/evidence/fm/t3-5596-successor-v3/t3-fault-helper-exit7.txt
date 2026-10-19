@@ -1,0 +1,21 @@
+## proxy mode empty-sse: node bin/fm-t3-mcp.mjs send --thread <tid> --message-file <f> --client-request-id fm-1792382141-24705-27967 (via fault proxy)
+{"ok":false,"error":{"code":"delivery_unconfirmed","message":"the reply to t3_thread_send on thread mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-1792382141-24705-27967","threadId":"mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55","clientRequestId":"fm-1792382141-24705-27967"}}
+fm-t3-mcp: the reply to t3_thread_send on thread mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-1792382141-24705-27967
+exit=7
+## proxy mode 202: node bin/fm-t3-mcp.mjs send --thread <tid> --message-file <f> --client-request-id fm-1792382141-24705-27967 (via fault proxy)
+{"ok":false,"error":{"code":"delivery_unconfirmed","message":"the reply to t3_thread_send on thread mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-1792382141-24705-27967","threadId":"mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55","clientRequestId":"fm-1792382141-24705-27967"}}
+fm-t3-mcp: the reply to t3_thread_send on thread mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-1792382141-24705-27967
+exit=7
+## proxy mode wrong-id: node bin/fm-t3-mcp.mjs send --thread <tid> --message-file <f> --client-request-id fm-1792382141-24705-27967 (via fault proxy)
+{"ok":false,"error":{"code":"delivery_unconfirmed","message":"the reply to t3_thread_send on thread mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-1792382141-24705-27967","threadId":"mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55","clientRequestId":"fm-1792382141-24705-27967"}}
+fm-t3-mcp: the reply to t3_thread_send on thread mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55 was lost (T3 /mcp returned no reply to tools/call); T3 may have committed it, so retry only with client request id fm-1792382141-24705-27967
+exit=7
+## no fault: same send straight to the real T3 v0.1.0 server (safe retry of the held id)
+{"ok":true,"threadId":"mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55","clientRequestId":"fm-1792382141-24705-27967","delivery":"started","status":"completed","runId":"run:thread:mcp%3Abc52cd20-5c31-4ba9-be18-741f0cbb0a55:ordinal:2","messageId":"message:mcp:client%3A0cb63ea9-f8a2-4299-a5b6-176441519ff3:thread-send:fm-1792382141-24705-27967"}
+exit=0
+## proxy log
+2026-10-19T03:54:33.004Z listening 64125 -> http://127.0.0.1:62404
+2026-10-19T03:55:41.300Z FAULT empty-sse on t3_thread_send id=4 clientRequestId=fm-1792382141-24705-27967 upstream=200 upstreamBytes=691
+2026-10-19T03:55:57.218Z FAULT empty-sse on t3_thread_send id=4 clientRequestId=fm-1792382141-24705-27967 upstream=200 upstreamBytes=693
+2026-10-19T03:55:57.336Z FAULT 202 on t3_thread_send id=4 clientRequestId=fm-1792382141-24705-27967 upstream=200 upstreamBytes=693
+2026-10-19T03:55:57.460Z FAULT wrong-id on t3_thread_send id=4 clientRequestId=fm-1792382141-24705-27967 upstream=200 upstreamBytes=693

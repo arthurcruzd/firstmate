@@ -1,0 +1,21 @@
+$ bin/fm-teardown.sh lab1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for lab1: 27173 27359
+🌳 Worktree returned to pool.
+teardown lab1 complete (window mcp:d77b56a6-9b09-4731-b80e-4efe01623da8, worktree <lab>/pool/.treehouse/labproj-0dd723/1/labproj)
+Backlog: lab1 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move lab1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0 elapsed=5s
+== thread after teardown
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-0dd723/1/labproj","turnAt":"2026-10-19T03:26:30.216Z"}
+== task record
+(no state/lab1.* files)
+== slot
+base  main  (repository default)
+🌳 No worktrees in pool.
+== env files left in slot
+ls: <lab>/pool/.treehouse/labproj-0dd723/1/labproj/.claude/settings.local.json: No such file or directory
+ls: <lab>/pool/.treehouse/labproj-0dd723/1/labproj/CLAUDE.local.md: No such file or directory
+== provider processes still rooted in slot
+== slot (treehouse status with the lab pool root)
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/labproj-0dd723/1/labproj  (detached)

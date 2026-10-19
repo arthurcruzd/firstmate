@@ -1,0 +1,15 @@
+## before: pool slot holds an excluded CLAUDE.local.md symlink to operator instructions
+lrwxr-xr-x@ 1 disco  staff  97 Oct 19 01:01 /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo/CLAUDE.local.md -> /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/operator-instructions.md
+$ FM_HOME=$LAB bin/fm-spawn.sh t3scout3 $LAB/projects/demo --scout --harness claude --model claude-haiku-5-5 --backend t3code
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home
+🌳 Setting up worktree...
+🌳 Leased worktree at /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo. Run 'treehouse return /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo' to release it.
+error: /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo/CLAUDE.local.md already exists or is tracked; refusing to overwrite project instructions
+error: could not write the Claude task-worker channel statement for t3scout3 into /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo
+warning: leaving task t3scout3's slot claim on /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo in place; the Treehouse project lock is no longer held, so the next spawn's claim replaces it
+exit=1
+## after the refused spawn
+ls: /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo/CLAUDE.local.md: No such file or directory
+operator file still: operator instructions - keep
+base  main  (repository default)
+1     available    /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo  (detached)

@@ -1,0 +1,15 @@
+## default-path home: config/t3code-token present and its T3 v0.1.0 server reachable, but NO config/backend, no FM_BACKEND, no --backend
+t3code-token
+config/backend: (absent)
+FM_BACKEND=(unset)
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh r3dflt <lab>/home/projects/demo --scout --harness claude
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M58MSX4QJVGF4SFBKVYJ7A49/bin/backends/tmux.sh: line 76: tmux: command not found
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M58MSX4QJVGF4SFBKVYJ7A49/bin/backends/tmux.sh: line 98: tmux: command not found
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M58MSX4QJVGF4SFBKVYJ7A49/bin/backends/tmux.sh: line 102: tmux: command not found
+exit=1
+## routed to the default tmux backend (tmux is not on this host PATH, so it stops there), not to T3
+no r3dflt.meta written (no t3code metadata recorded)
+## T3 thread bound to the slot after: {"ok":false,"error":{"code":"no_thread","message":"T3 has no project rooted at <lab>/pool/.treehouse/demo-301db6/1/demo"}}
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/demo-301db6/1/demo  (detached)

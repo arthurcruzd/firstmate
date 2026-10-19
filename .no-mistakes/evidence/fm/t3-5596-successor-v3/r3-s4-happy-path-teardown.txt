@@ -1,0 +1,36 @@
+## scout status and report (worker ran in the T3 v0.1.0 thread)
+done [at=1792383283]: README.md first line is '# demo'; report written to data/r3happy/report.md
+# r3happy report: first line of README.md
+
+## Task
+Read `README.md` in the demo project and report its first line. Nothing else.
+
+## What I did
+- Read `README.md` from the worktree at `<lab>/pool/.treehouse/demo-301db6/1/demo/README.md`.
+- Checked the firstmate instruction inbox (`home/state/r3happy.inbox`) for `*.msg` files: none present.
+## T3 thread before teardown
+{"ok":true,"threadId":"mcp:c8f9b78b-43f0-4ef6-b6b0-7e55de14a813","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-301db6/1/demo","turnAt":"2026-10-19T04:14:55.157Z"}
+$ FM_HOME=<lab>/home bin/fm-captain-hold.sh complete r3happy --none
+complete: r3happy captain-call inventory reviewed
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-teardown.sh r3happy
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for r3happy: 92229 92577
+🌳 Worktree returned to pool.
+teardown r3happy complete (window mcp:c8f9b78b-43f0-4ef6-b6b0-7e55de14a813, worktree <lab>/pool/.treehouse/demo-301db6/1/demo)
+Backlog: r3happy just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move r3happy to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+## T3 thread after teardown (archived)
+{"ok":true,"threadId":"mcp:c8f9b78b-43f0-4ef6-b6b0-7e55de14a813","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-301db6/1/demo","turnAt":"2026-10-19T04:14:55.157Z"}
+## the env files this spawn wrote are gone from the returned slot
+ls: <lab>/pool/.treehouse/demo-301db6/1/demo/.claude/settings.local.json: No such file or directory
+ls: <lab>/pool/.treehouse/demo-301db6/1/demo/CLAUDE.local.md: No such file or directory
+## pool
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/demo-301db6/1/demo  (detached)

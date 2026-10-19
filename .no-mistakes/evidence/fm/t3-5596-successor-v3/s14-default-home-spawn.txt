@@ -1,0 +1,19 @@
+### Default-path home: no config/backend, but config/t3code-token is present and its T3 server is reachable
+t3code-token
+config/backend: (absent)
+$ bin/fm-spawn.sh lab4 <home2>/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low   (typed in the lab tmux primary pane)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned lab4 harness=claude kind=scout window=primary:fm-lab4 worktree=<lab>/pool2/.treehouse/labproj-46a728/1/labproj
+exit=0
+== state/lab4.meta
+window=primary:fm-lab4
+endpoint_task_id=lab4
+worktree=<lab>/pool2/.treehouse/labproj-46a728/1/labproj
+project=<lab>/home2/projects/labproj
+harness=claude
+kind=scout
+tasktmp=/tmp/fm-lab4
+model=claude-haiku-5-5
+effort=low
+busy_gen=g1792380739.54323.13018
+spawn_gen=s1792380739.50303.31186

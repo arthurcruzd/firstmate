@@ -1,0 +1,1 @@
+{"ok":true,"tokenFile":"/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/config/t3code-token","origin":"http://127.0.0.1:62404","access":"full-access","scope":"orchestration:read orchestration:operate settings:write source-control:write","expiresAt":"2026-11-18T03:50:31.658Z","environmentId":"8e3842c6-b008-4fd0-9fd3-9f9f4be6972e","serverVersion":"0.1.0"}

@@ -1,0 +1,10 @@
+### I. A request id already in flight (FM_T3CODE_CLIENT_REQUEST_ID, as the away daemon's frozen-digest retry sets it) and a LOCAL failure before the request goes out
+held id; mktemp fails (TMPDIR does not exist)        old (0f306f44) -> mktemp: mkstemp failed on <lab>/no-such-dir/fm-t3code-msg.toxUCw: No such file or directory turn_start rc=1; mktemp: mkstemp failed on <lab>/no-such-dir/fm-t3code-msg.C7ILdl: No such file or directory submit verdict=send-failed
+held id; mktemp fails (TMPDIR does not exist)        new (75739f79) -> mktemp: mkstemp failed on <lab>/no-such-dir/fm-t3code-msg.svOZvq: No such file or directory turn_start rc=7; mktemp: mkstemp failed on <lab>/no-such-dir/fm-t3code-msg.u9SISW: No such file or directory submit verdict=unconfirmed
+held id; send-record dir cannot be created           old (0f306f44) -> turn_start rc=1; submit verdict=send-failed
+held id; send-record dir cannot be created           new (75739f79) -> turn_start rc=7; submit verdict=unconfirmed
+
+### I-control. No id in flight (fresh send) and the same mktemp failure: nothing could have gone out, so proven non-delivery stays rc 1 / send-failed
+fresh send; mktemp fails                             new (75739f79) -> mktemp: mkstemp failed on <lab>/no-such-dir/fm-t3code-msg.niCcPt: No such file or directory turn_start rc=1; id records left=0
+
+messages containing "must never be sent" on the real server: 0

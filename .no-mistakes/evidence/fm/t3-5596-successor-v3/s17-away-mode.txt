@@ -1,0 +1,50 @@
+== captain project at the lab home root
+{"ok":true,"projectId":"mcp:f8e300ad-6cd7-4757-bf24-94914de961d3","created":true}
+{"ok":true,"driverKind":"claudeAgent","selection":{"instanceId":"claudeAgent","model":"claude-haiku-5-5","options":[{"id":"effort","value":"low"}]}}
+== idle captain thread (root strategy, no message)
+{"ok":true,"threadId":"mcp:4881c7ef-b4c9-400c-82a9-6382f94190fe","projectId":"mcp:f8e300ad-6cd7-4757-bf24-94914de961d3","instanceId":"claudeAgent","model":"claude-haiku-5-5","runId":null,"status":"idle","environmentId":"c7c6384d-6ab8-4ebb-8d70-3e8b07912328","origin":"http://127.0.0.1:38773","serverVersion":"0.1.0"}
+== daemon log at spawn time
+[2026-10-19T00:40:07-0300] daemon starting (pid 22595); target=mcp:4881c7ef-b4c9-400c-82a9-6382f94190fe; target_source=T3_THREAD; backend=t3code; backend_source=T3_THREAD; afk=on; inject_skip='heartbeat'; stale_escalate=240s; batch=90s
+$ bin/fm-spawn.sh lab5 <lab-home>/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low   (while away)
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-0dd723/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-0dd723/1/labproj' to release it.
+spawned lab5 harness=claude kind=scout window=fm-lab5 worktree=<lab>/pool/.treehouse/labproj-0dd723/1/labproj
+== away daemon log (resolved by T3 thread discovery)
+[2026-10-19T00:40:07-0300] daemon starting (pid 22595); target=mcp:4881c7ef-b4c9-400c-82a9-6382f94190fe; target_source=T3_THREAD; backend=t3code; backend_source=T3_THREAD; afk=on; inject_skip='heartbeat'; stale_escalate=240s; batch=90s
+[2026-10-19T00:41:47-0300] wake: signal: <lab>/home/state/lab5.status <lab>/home/state/lab5.turn-ended
+[2026-10-19T00:41:48-0300] escalate: signal: <lab>/home/state/lab5.status <lab>/home/state/lab5.turn-ended -> lab5.status: done [at=1792381270]: README.md title line is '# labproj'; report at home/data/lab5/report.md; no captain calls
+[2026-10-19T00:41:48-0300] self-handle: signal: <lab>/home/state/lab5.status <lab>/home/state/lab5.turn-ended -> signal already escalated (catch-all scan): lab5.status: done [at=1792381270]: README.md title line is '# labproj'; report at home/data/lab5/report.md; no captain calls
+[2026-10-19T00:42:23-0300] wake: stale: mcp:2b17e4fc-59b5-4fef-b620-723e4971ce75
+[2026-10-19T00:42:25-0300] self-handle: stale: mcp:2b17e4fc-59b5-4fef-b620-723e4971ce75 -> stale + terminal (already escalated by signal): done [at=1792381270]: README.md title line is '# labproj'; report at home/data/lab5/report.md; no captain calls
+== operational-inbox digest the daemon delivered
+(eval):1: no matches found: <lab>/home/state/operational-inbox/*/*.msg
+== operational-inbox digest the daemon delivered
+-- state/operational-inbox/1792381407-07d448cc83a330a9.msg
+⁣FIRSTMATE_OP: v1 away-supervisor: Supervisor escalate (1 event(s)): lab5.status: done [at=1792381270]: README.md title line is '# labproj'; report at home/data/lab5/report.md; no captain calls (pre-read; re-arm not needed — watcher daemon-managed)
+== accepted T3 send records for the captain thread
+-- fm-digest-1792381407-22595-1688825071.accepted
+{"ok":true,"threadId":"mcp:4881c7ef-b4c9-400c-82a9-6382f94190fe","clientRequestId":"fm-digest-1792381407-22595-1688825071","delivery":"started","status":"starting","runId":"run:thread:mcp%3A4881c7ef-b4c9-400c-82a9-6382f94190fe:ordinal:2","messageId":"message:mcp:client%3A022f7ca7-c68f-44da-b860-d0e4ef6a76b6:thread-send:fm-digest-1792381407-22595-1688825071"}
+== captain thread capture
+[user_message/completed] : Firstmate operational input waiting: read '<lab>/home/state/operational-inbox/1792381407-07d448cc83a330a9.msg' and handle its contents as Firstmate operational input.
+[dynamic_tool/completed] { "toolName": "Read", "input": { "file_path": "<lab>/home/state/operational-inbox/1792381407-07d448cc83a330a9.msg" }, "output": { "type": "text", "file": { "filePath": "<lab>/home/state/operational-inbox/1792381407-07d448cc83a330a9.msg", "content": "⁣FIRSTMATE_OP: v1 away-supervisor: Supervisor escalate (1 event(s)): lab5.status: done [at=1792
+[reasoning/completed] This is an away-supervisor digest, so per my instructions I should just reply with a single acknowledging line and nothing more.
+[assistant_message/completed] Firstmate operational input acknowledged: lab5 is done. Its README title line is `# labproj`, the report is at `home/data/lab5/report.md`, and no captain calls are needed. The watcher is daemon-managed, so no re-arm.
+[checkpoint/completed] []
+t3code: status=completed run=none
+$ bin/fm-afk-launch.sh stop
+fm-afk-launch: away-posture record archived at <lab>/home/state/afk-contracts/1792381201.afk-contract
+fm-afk-launch: away mode stopped; no daemon terminal was running, .afk cleared, and the posture record archived
+exit=0
+daemon still running: yes
+(no .afk record left)
+== after stop: the native daemon exits on its own once .afk is cleared
+[2026-10-19T00:44:01-0300] daemon shutting down
+pid 22595 alive: no
+$ bin/fm-teardown.sh lab5
+teardown: reaping leaked worktree process(es) for lab5: 49483 50399
+🌳 Worktree returned to pool.
+teardown lab5 complete (window mcp:2b17e4fc-59b5-4fef-b620-723e4971ce75, worktree <lab>/pool/.treehouse/labproj-0dd723/1/labproj)
+Backlog: lab5 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move lab5 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=
+$ fm-t3-mcp.mjs archive --thread <captain>
+{"ok":true,"threadId":"mcp:4881c7ef-b4c9-400c-82a9-6382f94190fe","closed":true,"archived":true,"activeRunId":null,"status":"completed"}

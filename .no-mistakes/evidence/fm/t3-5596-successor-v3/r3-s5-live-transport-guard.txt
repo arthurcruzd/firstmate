@@ -1,0 +1,6 @@
+$ node bin/fm-t3-mcp.mjs status   (lab home credential)
+{"ok":true,"origin":"http://127.0.0.1:49994","access":"full-access","expiresAt":"2026-11-18T04:11:40.463Z","daysLeft":30,"environmentId":"5e34bf31-7684-4109-aae5-8a437497b098","serverVersion":"0.1.0","recordedServerVersion":"0.1.0","telemetry":"off"}
+exit=0
+$ FM_T3CODE_LIVE_E2E=1 FM_T3CODE_LIVE_TOKEN_FILE=<lab>/home/config/t3code-token bash tests/fm-backend-t3code-live-e2e.test.sh
+ok - t3code live transport: T3 0.1.0 environment 5e34bf31-7684-4109-aae5-8a437497b098 passes the gate (telemetry=off)
+exit=0

@@ -1,0 +1,22 @@
+== before: the free slot holds an operator's untracked, git-excluded CLAUDE.local.md
+-rw-r--r--@ 1 disco  staff  59 Oct 19 00:28 <lab>/pool/.treehouse/labproj-0dd723/1/labproj/CLAUDE.local.md
+Operator-local Claude instructions for this slot. Keep me.
+$ bin/fm-spawn.sh lab2 <lab-home>/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low   (config/backend=t3code)
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-0dd723/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-0dd723/1/labproj' to release it.
+error: <lab>/pool/.treehouse/labproj-0dd723/1/labproj/CLAUDE.local.md already exists or is tracked; refusing to overwrite project instructions
+error: could not write the Claude task-worker channel statement for lab2 into <lab>/pool/.treehouse/labproj-0dd723/1/labproj
+warning: leaving task lab2's slot claim on <lab>/pool/.treehouse/labproj-0dd723/1/labproj in place; the Treehouse project lock is no longer held, so the next spawn's claim replaces it
+exit=1
+== after the refused spawn
+ls: <lab>/pool/.treehouse/labproj-0dd723/1/labproj/CLAUDE.local.md: No such file or directory
+cat: <lab>/pool/.treehouse/labproj-0dd723/1/labproj/CLAUDE.local.md: No such file or directory
+== task record
+lab2.inbox
+== slot
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/labproj-0dd723/1/labproj  (detached)
+{"_tag":"OrchestratorMcpFailure","code":"target_required","message":"Pass projectId: this MCP client is not running inside a T3 thread."} 
+schema: {"type":"object","properties":{"projectId":{"anyOf":[{"type":"string"},{"type":"null"}]},"statuses":{"anyOf":[{"type":"array","items":{"type":"string","enum":["idle","preparing","queued","starting","running","waiting","completed","interrupted","failed","cancelled","rolled_back"]},"maxItems":10},{"type":"null"}]},"titleContains":{"anyOf":[{"type":"string"},{"type":"null"}]},"settled":{"anyOf":[{"type":"boolean"},{"type":"null"}]},"snoozed":{"anyOf":[{"type":"boolean"},{"type":"null"}]},"includeSubagents":{"anyOf":[{"type":"boolean"},{"type":"null"}]},"cursor":{"anyOf":[{"type":"integer","minimu
+== all threads in the lab project (t3_thread_list includeArchived)
+{"projectId":"<lab project>","threads":[],"total":0}   <- t3_thread_list lists only unarchived threads: after the refused lab2 spawn no live thread remains in the project (the abort archive ran), and the slot reads available; only the operator file was lost.

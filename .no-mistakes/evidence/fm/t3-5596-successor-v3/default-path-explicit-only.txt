@@ -1,0 +1,11 @@
+## home has config/t3code-token (signed in to the lab T3 v0.1.0 server) but NO config/backend, no FM_BACKEND, no --backend
+t3code-token
+$ FM_HOME=$LAB bin/fm-spawn.sh t3scout4 $LAB/projects/demo --scout --harness claude
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M58MSX4QJVGF4SFBKVYJ7A49/bin/backends/tmux.sh: line 76: tmux: command not found
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M58MSX4QJVGF4SFBKVYJ7A49/bin/backends/tmux.sh: line 98: tmux: command not found
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M58MSX4QJVGF4SFBKVYJ7A49/bin/backends/tmux.sh: line 102: tmux: command not found
+exit=1
+## no t3code metadata recorded, no T3 send made
+cat: /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/state/t3scout4.meta: No such file or directory
+t3code-sends entries before=5 after=5

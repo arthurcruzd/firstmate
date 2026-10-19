@@ -1,0 +1,60 @@
+## t3scout1 status line
+done [at=1792381927]: README.md has 1 line (wc -l); report at home/data/t3scout1/report.md
+
+## state/t3scout1.meta
+window=fm-t3scout1
+endpoint_task_id=t3scout1
+worktree=/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo
+project=/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/projects/demo
+harness=claude
+kind=scout
+tasktmp=/tmp/fm-t3scout1
+model=claude-haiku-5-5
+effort=default
+busy_gen=g1792381894.32241.24853
+spawn_gen=s1792381894.29615.121
+backend=t3code
+t3_thread_id=mcp:cb880457-6d49-4c8d-affc-8f5dd34cad69
+t3_project_id=mcp:aaaa2410-12b2-4b57-be22-c50db72ee978
+
+## worktree .claude/settings.local.json env block keys
+[
+  "COMPACT_ADVISER_DISABLE",
+  "FM_T3CODE_ENV_KEYS",
+  "FM_TASK_ID",
+  "FM_TASK_INBOX",
+  "GIT_CONFIG_COUNT",
+  "GIT_CONFIG_KEY_0",
+  "GIT_CONFIG_VALUE_0",
+  "GOTMPDIR"
+]
+## CLAUDE.local.md present:
+-rw-------@ 1 disco  staff  601 Oct 19 00:51 /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo/CLAUDE.local.md
+## git status in worktree (env files excluded)
+## T3 thread state
+{"ok":true,"threadId":"mcp:cb880457-6d49-4c8d-affc-8f5dd34cad69","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo","turnAt":"2026-10-19T03:52:09.376Z"}
+
+## report.md
+# Scout report: README.md line count
+
+**Result:** `README.md` in the demo project has **1 line**.
+
+## What I did
+1. Ran `wc -l README.md` in the worktree (`/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo`).
+2. Read `README.md` to confirm its contents.
+3. Checked the file's raw bytes with `od -c` and `wc -c`.
+4. No project files were edited.
+
+## Evidence
+- `wc -l README.md` → `1 README.md`
+- `wc -c README.md` → `10 README.md`
+- `od -c README.md` → `h e l l o   l a b \n` (one newline byte, 10 bytes total)
+- `README.md:1` → `hello lab`
+
+The Read tool displayed a second, empty line 2. That is a display artifact of the trailing newline. `wc -l` counts newline characters, so the file has one line.
+
+## Captain-hold inventory
+No captain-owned questions came out of this scout, so the inventory is empty and the hold/complete step would be `complete <origin-id> --none`. I did not run `complete` because the brief does not name an origin id, and the command must run in the originating FM_HOME. Firstmate should run it with the correct origin id if its gate requires that call.
+
+## Recommendation
+None. The line count is the only deliverable. Nothing here should ship.

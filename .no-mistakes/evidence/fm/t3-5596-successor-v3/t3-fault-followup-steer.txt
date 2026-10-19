@@ -1,0 +1,26 @@
+## status before: done [at=1792382111]: README first word is 'hello'; report written; captain-hold complete --none still needs the origin id from firstmate
+done [at=1792382146]: steer A acknowledged; STEER-A-OK
+## real token restored; fm-send Steer B through the normal path
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+exit=0
+## t3code-sends after
+total 32
+drwxr-xr-x@  6 disco  staff  192 Oct 19 00:56 .
+drwxr-xr-x@ 14 disco  staff  448 Oct 19 00:56 ..
+-rw-r--r--@  1 disco  staff  337 Oct 19 00:51 fm-1792381896-29615-29907.accepted
+-rw-r--r--@  1 disco  staff  337 Oct 19 00:52 fm-1792381952-73095-21641.accepted
+-rw-r--r--@  1 disco  staff  337 Oct 19 00:55 fm-1792382101-89845-25537.accepted
+-rw-r--r--@  1 disco  staff  338 Oct 19 00:56 fm-1792382141-24705-27967.accepted
+accepted fm-1792381896-29615-29907.accepted: {"ok":true,"threadId":"mcp:cb880457-6d49-4c8d-affc-8f5dd34cad69","clientRequestId":"fm-1792381896-29615-29907","delivery":"started","status":"starting","runId":"run:thread:mcp%3Acb880457-6d49-4c8d-affc-8f5dd34cad69:ordinal:1","messageId":"message:mcp:client%3A0cb63ea9-f8a2-4299-a5b6-176441519ff3:thread-send:fm-1792381896-29615-29907"}
+accepted fm-1792381952-73095-21641.accepted: {"ok":true,"threadId":"mcp:cb880457-6d49-4c8d-affc-8f5dd34cad69","clientRequestId":"fm-1792381952-73095-21641","delivery":"started","status":"starting","runId":"run:thread:mcp%3Acb880457-6d49-4c8d-affc-8f5dd34cad69:ordinal:2","messageId":"message:mcp:client%3A0cb63ea9-f8a2-4299-a5b6-176441519ff3:thread-send:fm-1792381952-73095-21641"}
+accepted fm-1792382101-89845-25537.accepted: {"ok":true,"threadId":"mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55","clientRequestId":"fm-1792382101-89845-25537","delivery":"started","status":"starting","runId":"run:thread:mcp%3Abc52cd20-5c31-4ba9-be18-741f0cbb0a55:ordinal:1","messageId":"message:mcp:client%3A0cb63ea9-f8a2-4299-a5b6-176441519ff3:thread-send:fm-1792382101-89845-25537"}
+accepted fm-1792382141-24705-27967.accepted: {"ok":true,"threadId":"mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55","clientRequestId":"fm-1792382141-24705-27967","delivery":"started","status":"completed","runId":"run:thread:mcp%3Abc52cd20-5c31-4ba9-be18-741f0cbb0a55:ordinal:2","messageId":"message:mcp:client%3A0cb63ea9-f8a2-4299-a5b6-176441519ff3:thread-send:fm-1792382141-24705-27967"}
+## status after: done [at=1792382111]: README first word is 'hello'; report written; captain-hold complete --none still needs the origin id from firstmate
+done [at=1792382146]: steer A acknowledged; STEER-A-OK
+002.msg
+handled
+
+/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/state/t3scout2.inbox/handled:
+001.msg
+{"ok":true,"threadId":"mcp:bc52cd20-5c31-4ba9-be18-741f0cbb0a55","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo","turnAt":"2026-10-19T03:55:48.479Z"}

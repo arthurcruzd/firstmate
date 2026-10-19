@@ -1,0 +1,13 @@
+### Credential whose recorded environment id is not the server's (same address, 'different server')
+$ bin/fm-t3-mcp.mjs status
+{"ok":false,"error":{"code":"environment_mismatch","message":"T3 at http://127.0.0.1:38773 is environment c7c6384d-6ab8-4ebb-8d70-3e8b07912328, not the 00000000-1111-2222-3333-444444444444 this credential was issued by; refusing to drive a different server","environmentId":"c7c6384d-6ab8-4ebb-8d70-3e8b07912328","expected":"00000000-1111-2222-3333-444444444444"}}
+fm-t3-mcp: T3 at http://127.0.0.1:38773 is environment c7c6384d-6ab8-4ebb-8d70-3e8b07912328, not the 00000000-1111-2222-3333-444444444444 this credential was issued by; refusing to drive a different server
+exit=4
+$ bin/fm-spawn.sh lab3 <lab-home>/projects/labproj --scout --harness claude --model claude-haiku-5-5   (config/backend=t3code)
+fm-t3-mcp: T3 at http://127.0.0.1:38773 is environment c7c6384d-6ab8-4ebb-8d70-3e8b07912328, not the 00000000-1111-2222-3333-444444444444 this credential was issued by; refusing to drive a different server
+exit=1
+== no mutation: task record / slot / project threads
+(no state/lab3.meta)
+slot before: 1     available    <lab>/pool/.treehouse/labproj-0dd723/1/labproj  (detached)
+slot after:  1     available    <lab>/pool/.treehouse/labproj-0dd723/1/labproj  (detached)
+threads in project after: {"projectId":"mcp:821fb802-dd0b-4f7d-870b-b00782bb46cb","currentThreadId":null,"threads":[],"nextCursor":null,"total":0}

@@ -1,0 +1,64 @@
+$ bin/fm-send.sh lab4 "<steer>"   (tmux pane)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+== inbox
+handled
+
+<lab>/home2/state/lab4.inbox/handled:
+001.msg
+== report tail
+Steer received: ALBATROSS
+== status
+done [at=1792380761]: README title read; report written to <lab>/home2/data/lab4/report.md (captain-hold gate not run: complete --none only printed help)
+done [at=1792380787]: steer 001 applied; report.md final line appended (Steer received: ALBATROSS)
+== python3 sleep child before interrupt: 1
+$ bin/fm-control.sh lab4 interrupt   (tmux pane)
+interrupt-delivered lab4 harness=claude backend=tmux verified=agent-alive cancel=unconfirmed
+exit=0
+== python3 sleep child 3s after interrupt: 0
+$ bin/fm-teardown.sh lab4   (tmux pane)
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+fm-captain-hold: origin lab4 has no completed captain-call inventory
+REFUSED: scout task lab4 has not passed the captain-call completion gate.
+Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown.
+exit=1
+== windows after
+0: bash* (1 panes) [220x50] [layout ad1d,220x50,0,0,0] @0 (active)
+1: fm-lab4 (1 panes) [220x50] [layout ad1e,220x50,0,0,1] @1
+== records
+lab4.busy-gen
+lab4.busy-state
+lab4.git-hooks
+lab4.inbox
+lab4.meta
+lab4.status
+lab4.turn-ended
+== slot
+                   zsh (51848), 2.1.302 (55785), paper (56798), caffeinate (56828)
+== T3 lab server untouched by the default-path home: projects whose root is under home2/pool2
+$ bin/fm-captain-hold.sh complete lab4 --none
+complete: lab4 captain-call inventory reviewed
+exit=0
+$ bin/fm-teardown.sh lab4   (tmux pane, retry)
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for lab4: 51848 55785 56798
+teardown: force-killing leaked worktree process(es) for lab4: 51848
+🌳 Worktree returned to pool.
+teardown lab4 complete (window primary:fm-lab4, worktree <lab>/pool2/.treehouse/labproj-46a728/1/labproj)
+Backlog: lab4 just finished (this home keeps no markdown backlog at <lab>/home2/data/backlog.md). Update <lab>/home2/data/backlog.md - move lab4 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+== windows after
+0: bash* (1 panes) [220x50] [layout ad1d,220x50,0,0,0] @0 (active)
+== records
+(no state/lab4.* files)
+== slot
+1     available    <lab>/pool2/.treehouse/labproj-46a728/1/labproj  (detached)
+== every project on the lab T3 server after the default-path home's full spawn/steer/interrupt/teardown
+{"title":"fm-labproj","workspaceRoot":"<lab>/home/projects/labproj"}

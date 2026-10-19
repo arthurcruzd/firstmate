@@ -1,0 +1,31 @@
+$ bin/fm-send.sh lab1 "<steer>"
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+exit=0 elapsed=1s
+== waited 0s for handled/ ack
+<lab>/home/state/lab1.inbox:
+handled
+
+<lab>/home/state/lab1.inbox/handled:
+001.msg
+== handled/001.msg
+schema=fm-task-inbox.v1
+at=2026-10-19T03:22:46Z
+--
+Firstmate steer: append one final line to data/lab1/report.md that reads exactly 'Steer received: ALBATROSS', then append a new done status line.== report tail
+- Nothing further. The lab scout can read its worktree.
+Steer received: ALBATROSS
+== status
+done [at=1792380077]: README title line is '# labproj'; read README.md in worktree; report at data/lab1/report.md
+done [at=1792380175]: steer 001 applied; report final line 'Steer received: ALBATROSS' appended
+== accepted send records
+fm-1792380042-52950-17718.accepted
+fm-1792380167-46072-26778.accepted
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","clientRequestId":"fm-1792380042-52950-17718","delivery":"started","status":"starting","runId":"run:thread:mcp%3Ad77b56a6-9b09-4731-b80e-4efe01623da8:ordinal:1","messageId":"message:mcp:client%3A022f7ca7-c68f-44da-b860-d0e4ef6a76b6:thread-send:fm-1792380042-52950-17718"}
+{"ok":true,"threadId":"mcp:d77b56a6-9b09-4731-b80e-4efe01623da8","clientRequestId":"fm-1792380167-46072-26778","delivery":"started","status":"starting","runId":"run:thread:mcp%3Ad77b56a6-9b09-4731-b80e-4efe01623da8:ordinal:2","messageId":"message:mcp:client%3A022f7ca7-c68f-44da-b860-d0e4ef6a76b6:thread-send:fm-1792380167-46072-26778"}
+
+== peek tail
+[command_execution/completed] $ H='<lab>/home'; echo 'Steer received: ALBATROSS' >> "$H/data/lab1/report.md" && tail -n 2 "$H/data/lab1/report.md"; T=$(date +%s); echo "done [at=$T]: steer 001 applied; report final line 'Steer received: ALBATROSS' appended" >> "$H/state/lab1.status" && { [ ! -e "$H/config/fleet-ledger" ] || '/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M58MSX4QJVGF4SFBKVYJ7A49/bin/fm-fleet-ledger.sh' appended "$H/config" "$H/state/lab1.status" >/dev/null 2>&1 || true; }; mv "$H/state/lab1.inbox/001.msg" "$H
+[assistant_message/completed] I handled the one waiting steer message (001), which asked for a final line in the report. - Appended `Steer received: ALBATROSS` as the last line of `data/lab1/report.md`. - Appended a new `done` line to `lab1.status`. - Moved `001.msg` into `lab1.inbox/handled/`. No other messages were waiting.
+[checkpoint/completed] []
+t3code: status=completed run=none

@@ -1,0 +1,23 @@
+$ FM_HOME=$LAB bin/fm-send.sh t3scout1 "Lab steer: append the word STEERED-OK to your status line via a new status update, then stop."
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+001.msg
+handled
+
+/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/state/t3scout1.inbox/handled:
+fm-1792381896-29615-29907.accepted
+fm-1792381952-73095-21641.accepted
+after 11s status: done [at=1792381927]: README.md has 1 line (wc -l); report at home/data/t3scout1/report.md
+done [at=1792381960]: steer acknowledged, README.md still 1 line; report unchanged STEERED-OK
+handled
+
+/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/home/state/t3scout1.inbox/handled:
+001.msg
+{"ok":true,"threadId":"mcp:cb880457-6d49-4c8d-affc-8f5dd34cad69","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Acb880457-6d49-4c8d-affc-8f5dd34cad69:ordinal:2","pendingRequestCount":0,"worktreePath":"/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000gn/T/fm-t3lab.1mtE4Z/pool/.treehouse/demo-daa74b/1/demo","turnAt":"2026-10-19T03:52:32.304Z"}
