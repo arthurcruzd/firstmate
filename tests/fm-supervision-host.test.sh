@@ -160,8 +160,8 @@ unset FM_SUPERVISION_ACTOR FM_BRANCH_REPORT_TURN FM_LEASE_HOLDER_PID PI_CODING_A
 # Homes are registered in a file: make_home runs in a command substitution,
 # whose variables never reach this shell.
 HOMES_FILE="$TMP_ROOT/homes"
-# Stop whatever a case left running, by the exact pids its home recorded.
-stop_home_processes() {  # <home>
+# Stop the host, its arms, and the watcher a home's records name.
+stop_home_host() {  # <home>
   local home=$1 pid arms='' i=0
   if [ -f "$home/state/.supervision-host" ]; then
     arms=$(awk -F '\t' '$1 == "arm" { print $2 }' "$home/state/.supervision-host")
@@ -177,9 +177,34 @@ stop_home_processes() {  # <home>
   done
   pid=$(cat "$home/state/.watch.lock/pid" 2>/dev/null || true)
   [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
+}
+
+# A session told to stop leaves its loop once its Stop hook returns. Its hook
+# would start another host when the host dies, and that host keeps the
+# downtime resurface the stop causes off main when nothing queued is main's
+# (bin/fm-branch-dispatch.mjs offer) and parks, so the hook never returns by
+# itself. As Claude does when a session ends, the hook is
+# stopped first, then the host and watcher it left; a session still alive at
+# the bound is stopped itself.
+stop_session() {  # <home> <session-pid>
+  local home=$1 pid=$2 i=0
+  pkill -TERM -P "$pid" 2>/dev/null || true
+  stop_home_host "$home"
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+# Stop whatever a case left running, by the exact pids its home recorded.
+stop_home_processes() {  # <home>
+  local home=$1 pid
+  stop_home_host "$home"
   while IFS= read -r pid; do
     if [ -e "$home/session.stop" ]; then
-      wait "$pid" 2>/dev/null || true
+      stop_session "$home" "$pid"
     else
       kill -TERM "$pid" 2>/dev/null || true
     fi
