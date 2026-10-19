@@ -379,6 +379,40 @@ test_a_drain_in_another_timezone_does_not_replay_presented_notes() {
   pass "a drain in another timezone keeps the presented-status position"
 }
 
+# Review finding 11 (D1): an identity an actor without a TZ override recorded
+# before the zone rule (the machine's own zone) still matches after it, so an
+# upgrade on a non-UTC Linux or WSL home does not replay presented notes. On
+# macOS the birth time is an epoch and the case holds trivially.
+test_an_identity_recorded_before_the_zone_rule_still_matches() {
+  local dir state out status reader
+  dir=$(make_case pre-zone-identity)
+  state="$dir/state"
+  out="$dir/drain.out"
+  status="$state/zone.status"
+  reader="$dir/legacy-identity.sh"
+  cat > "$reader" <<'SH'
+#!/usr/bin/env bash
+unset TZ
+if [ "$(uname -s)" = Darwin ]; then
+  printf 'strong:%s:%s' "$(LC_ALL=C /usr/bin/stat -f '%d:%i' "$1")" "$(LC_ALL=C /usr/bin/stat -f '%FB' "$1")"
+else
+  printf 'strong:%s:%s' "$(LC_ALL=C stat -c '%d:%i' "$1")" "$(LC_ALL=C stat -c '%w' "$1")"
+fi
+SH
+  chmod +x "$reader"
+  printf 'note: presented before the upgrade\n' > "$status"
+  FM_STATUS_IDENTITY_READER="$reader" FM_STATE_OVERRIDE="$state" "$DRAIN" >/dev/null 2>/dev/null \
+    || fail "the drain under the legacy identity failed"
+  printf 'note: appended after the upgrade\n' >> "$status"
+  TZ=BRT3 FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "the drain after the upgrade failed"
+  grep -F 'zone note: appended after the upgrade' "$out" >/dev/null \
+    || fail "the drain after the upgrade lost the new note: $(cat "$out")"
+  if grep -F 'presented before the upgrade' "$out" >/dev/null; then
+    fail "an upgrade replayed an already-presented note: $(cat "$out")"
+  fi
+  pass "an identity recorded before the zone rule keeps the presented-status position"
+}
+
 test_snapshot_failure_is_visible() {
   local dir state out reader
   dir=$(make_case snapshot-failure); state="$dir/state"; out="$dir/drain.out"; reader="$dir/identity-reader"
@@ -482,6 +516,7 @@ test_snapshot_does_not_ack_a_later_append
 test_retired_task_id_starts_new_status_unread
 test_weak_identity_still_presents_and_advances
 test_a_drain_in_another_timezone_does_not_replay_presented_notes
+test_an_identity_recorded_before_the_zone_rule_still_matches
 test_snapshot_failure_is_visible
 test_open_decisions_fold_is_unchanged
 test_empty_queue_does_not_swallow_later_signal_annotation
