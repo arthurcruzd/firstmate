@@ -399,6 +399,34 @@ SH
   pass "fm-t3-host.sh relay: an undeliverable outbox entry stays queued with its error in status while watcher cycles and away mode go on"
 }
 
+# Review finding 9 (B4/F11): the generated systemd unit quotes and escapes
+# each value, so a space in the code root, the home, or PATH (WSL's default
+# PATH has /mnt/c/Program Files) and a literal % survive, and a line break is
+# refused.
+test_install_quotes_systemd_unit() {
+  local base="$TMP_ROOT/unit" fb root home unit out
+  fb="$base/fakebin"
+  root="$base/code root"
+  home="$base/home with %h spaces"
+  mkdir -p "$fb" "$root/bin" "$home/state" "$base/xdg"
+  printf '#!/usr/bin/env bash\necho Linux\n' > "$fb/uname"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fb/systemctl"
+  chmod +x "$fb/uname" "$fb/systemctl"
+  out=$(PATH="$fb:/mnt/c/Program Files/x:$PATH" XDG_CONFIG_HOME="$base/xdg" XDG_RUNTIME_DIR="$base" \
+    FM_ROOT_OVERRIDE="$root" FM_HOME="$home" "$ROOT/bin/fm-t3-host.sh" install --name fm-t3-relay-test.service 2>&1) \
+    || fail "the systemd install should succeed: $out"
+  unit="$base/xdg/systemd/user/fm-t3-relay-test.service"
+  assert_grep "Environment=\"FM_HOME=$base/home with %%h spaces\"" "$unit" "FM_HOME must be one quoted assignment with % escaped"
+  assert_grep "Environment=\"PATH=$fb:/mnt/c/Program Files/x:" "$unit" "PATH must be one quoted assignment"
+  assert_grep "ExecStart=\"$root/bin/fm-t3-host.sh\" relay" "$unit" "ExecStart's executable must be quoted"
+  assert_grep "WorkingDirectory=$root" "$unit" "the working directory is the code root"
+  out=$(PATH="$fb:$PATH" XDG_CONFIG_HOME="$base/xdg" XDG_RUNTIME_DIR="$base" \
+    FM_ROOT_OVERRIDE="$root" FM_HOME="$base/bad"$'\n'"home" "$ROOT/bin/fm-t3-host.sh" install --name fm-t3-relay-bad.service 2>&1) \
+    && fail "a home with a line break must be refused"
+  assert_contains "$out" "cannot embed a line break" "the refusal must name the line break"
+  pass "fm-t3-host.sh install: the systemd unit quotes and escapes its paths and refuses a line break"
+}
+
 test_relay_ownership_predicate
 test_protocol_renders_relay_mode
 test_launch_and_adopt
@@ -406,3 +434,4 @@ test_relay_hosts_away_daemon
 test_relay_hands_open_watcher_cycle_to_daemon
 test_relay_parks_a_rejected_request_instead_of_looping
 test_relay_undeliverable_outbox_does_not_block_supervision
+test_install_quotes_systemd_unit

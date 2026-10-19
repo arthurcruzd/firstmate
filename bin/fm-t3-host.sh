@@ -580,8 +580,20 @@ install_launchd() {  # <label>
   printf 'installed %s\n' "$plist"
 }
 
+# One systemd unit value inside double quotes: backslash and double quote are
+# escaped, and % becomes %% so no specifier expands; ExecStart also needs $$.
+# A line break cannot be represented, so the installer refuses it.
+systemd_quote() {  # <value> [exec]
+  local v=$1
+  v=${v//\\/\\\\}
+  v=${v//\"/\\\"}
+  v=${v//%/%%}
+  [ "${2:-}" != exec ] || v=${v//\$/\$\$}
+  printf '"%s"' "$v"
+}
+
 cmd_install() {
-  local name unit dir
+  local name unit dir value
   name=$(service_name "$@") || exit 1
   if [ "$(uname -s)" = Darwin ]; then
     install_launchd "$name"
@@ -593,17 +605,20 @@ cmd_install() {
   export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
   dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
   unit="$dir/$name"
+  for value in "$FM_ROOT" "$FM_HOME" "$PATH"; do
+    case "$value" in *$'\n'*|*$'\r'*) die "cannot embed a line break in a systemd unit: $value" ;; esac
+  done
   mkdir -p "$dir"
   cat > "$unit" <<EOF
 [Unit]
-Description=Firstmate T3 wake relay for $FM_HOME
+Description=Firstmate T3 wake relay for ${FM_HOME//%/%%}
 
 [Service]
 Type=simple
-WorkingDirectory=$FM_ROOT
-Environment=FM_HOME=$FM_HOME
-Environment=PATH=$PATH
-ExecStart=$FM_ROOT/bin/fm-t3-host.sh relay
+WorkingDirectory=${FM_ROOT//%/%%}
+Environment=$(systemd_quote "FM_HOME=$FM_HOME")
+Environment=$(systemd_quote "PATH=$PATH")
+ExecStart=$(systemd_quote "$FM_ROOT/bin/fm-t3-host.sh" exec) relay
 Restart=always
 RestartSec=10
 
