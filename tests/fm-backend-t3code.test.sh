@@ -98,7 +98,15 @@ make_treehouse_fakebin() {  # <dir> -> echoes fakebin dir
 set -u
 printf '{"tool":"treehouse","args":"%s","cwd":"%s"}\n' "$*" "$PWD" >> "${FM_T3_TREEHOUSE_LOG:?}"
 case "${1:-}" in
-  get) printf '%s\n' "${FM_T3_TREEHOUSE_WT:?}" ;;
+  get)
+    # FM_T3_TREEHOUSE_GET_WORLD changes the fake T3 world while the slot is
+    # leased, the moment a real T3 could restart.
+    if [ -n "${FM_T3_TREEHOUSE_GET_WORLD:-}" ]; then
+      node -e 'const fs = require("fs"); let w = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); eval(process.argv[2]); fs.writeFileSync(process.argv[1], JSON.stringify(w))' \
+        "${T3_FAKE_WORLD:?}" "$FM_T3_TREEHOUSE_GET_WORLD"
+    fi
+    printf '%s\n' "${FM_T3_TREEHOUSE_WT:?}"
+    ;;
 esac
 exit 0
 SH
@@ -1631,6 +1639,37 @@ test_uncertain_thread_launch_keeps_lease() {
   pass "fm-spawn.sh --backend t3code: a launch whose response was lost keeps the lease"
 }
 
+test_launch_gate_failure_returns_lease() {
+  local id=t3gatez out rc
+  t3_case spawn-launch-gate-down
+  t3_worker_setup "$id"
+  out=$(T3_FAKE_WORLD="$T3_FAKE_WORLD" FM_T3_TREEHOUSE_GET_WORLD='w.dropTools = { t3_environment_read: 1 }' \
+    t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "a launch whose gate failed must abort spawn"$'\n'"$out"
+  [ -z "$(t3_dispatch_types)" ] || fail "no launch may be requested after the gate failed, got '$(t3_dispatch_types)'"
+  assert_not_contains "$out" "did not report an outcome" "a launch that was never requested is not an uncertain launch"
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt 0 ] \
+    || fail "a launch that was never requested must return the lease"$'\n'"$out"
+  assert_absent "$CASE_DIR/state/$id.meta" "a refused spawn records nothing"
+  pass "fm-spawn.sh --backend t3code: a gate failure before the launch request returns the lease"
+}
+
+test_refused_launch_turn_archives_thread_and_returns_lease() {
+  local id=t3turnz out rc
+  t3_case spawn-launch-turn-refused
+  t3_world_set 'w.failTools = { t3_thread_send: { code: "turn_refused", message: "launch turn refused" } }'
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "a refused launch turn must abort spawn"$'\n'"$out"
+  assert_contains "$out" "T3 refused the launch turn" "the refusal is reported"
+  [ "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" -gt "$(t3_log_line_of 'r.tool === "t3_thread_send"')" ] \
+    || fail "the idle thread of a rolled-back dispatch must be archived"$'\n'"$out"
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt \
+    "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" ] || fail "the lease must return after the archive"$'\n'"$out"
+  assert_absent "$CASE_DIR/state/$id.meta" "the rolled-back dispatch leaves no record"
+  pass "fm-spawn.sh --backend t3code: a refused launch turn archives the thread, then returns the lease"
+}
+
 test_misbound_thread_launch_returns_lease() {
   local id=t3misbound out rc
   t3_case spawn-misbound
@@ -1956,6 +1995,8 @@ fm_secondmate_liveness_relaunch "$1" smfail && echo relaunched=yes || echo relau
   assert_contains "$out" "relaunched=yes" "the resume succeeds: $out"
   [ "$(t3_dispatch_types)" = t3_thread_send ] || fail "recovery must only send a resume turn to the existing thread (no archive, no launch), got '$(t3_dispatch_types)'"
   [ "$(t3_request "$(t3_log_line_of 'r.tool === "t3_thread_send"')" 'r.arguments.threadId')" = "$thread" ] || fail "the resume turn goes to the recorded thread"
+  assert_contains "$(t3_request "$(t3_log_line_of 'r.tool === "t3_thread_send"')" 'r.arguments.message')" \
+    "Re-read your AGENTS.md and your home's config first" "the resumed conversation is told to re-read, as a fresh launch would"
   assert_grep "t3_thread_id=$thread" "$state/smfail.meta" "the endpoint record is unchanged"
   assert_grep relaunched "$state/.secondmate-relaunch-smfail" "the resume is recorded in the relaunch ledger"
   pass "secondmate liveness backend=t3code: a failed run is resumed on its own thread, never archived and replaced"
@@ -2145,5 +2186,7 @@ test_spawn_refuses_raw_launch_command
 test_spawn_abort_returns_lease_only_after_archive ok
 test_spawn_abort_returns_lease_only_after_archive fail
 test_uncertain_thread_launch_keeps_lease
+test_launch_gate_failure_returns_lease
+test_refused_launch_turn_archives_thread_and_returns_lease
 test_misbound_thread_launch_returns_lease
 test_uncertain_launch_message_keeps_task_record

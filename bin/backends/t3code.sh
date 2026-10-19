@@ -512,9 +512,10 @@ fm_backend_t3code_claude_pr_tools_verified() {
 
 # fm_backend_t3code_resume_failed: continue a secondmate whose last run
 # failed in its own readable thread, rather than replacing the thread and
-# losing its conversation. A new turn runs on the same driver and transcript.
+# losing its conversation. A new turn runs on the same driver and transcript,
+# so it carries the re-read a fresh launch would have done.
 fm_backend_t3code_resume_failed() {  # <thread-id>
-  fm_backend_t3code_turn_start "$1" "Firstmate recovery: your previous T3 run ended failed. Reconcile the work already recorded in your home, report anything your parent needs through your parent channel, then idle as your charter says."
+  fm_backend_t3code_turn_start "$1" "Firstmate recovery: your previous T3 run ended failed. Re-read your AGENTS.md and your home's config first, since either may have changed while the run was down. Then reconcile the work already recorded in your home, report anything your parent needs through your parent channel, then idle as your charter says."
 }
 
 fm_backend_t3code_validate_harness() {  # <harness>

@@ -1670,8 +1670,8 @@ spawn_abort_cleanup() {
   fi
   # Nothing has run in a leased slot before the launch turn, so an abort
   # archives the thread (it must never act in a returned slot) and hands the
-  # lease back only once that succeeded; after publication the record's own
-  # teardown owns both.
+  # lease back only once that succeeded; once the launch turn was sent the
+  # agent may be working there, so both are left in place.
   if [ "$T3CODE_CREATE_UNCERTAIN" = 1 ]; then
     # t3_thread_launch has no idempotency key, so a launch whose outcome was
     # lost may have left a thread whose id never came back.
@@ -6629,10 +6629,6 @@ if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
 fi
 "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 [ "$BACKEND" = orca ] && ORCA_ABORT_CLEANUP=0
-if [ "$BACKEND" = t3code ]; then
-  T3CODE_ABORT_CLEANUP=0
-  T3CODE_LEASED=0
-fi
 
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")
@@ -7053,6 +7049,8 @@ if [ "$BACKEND" = t3code ]; then
     fi
     T3CODE_LAUNCH_UNCONFIRMED=1
   }
+  T3CODE_ABORT_CLEANUP=0
+  T3CODE_LEASED=0
 else
   if ! (umask 077 && mkdir "$LAUNCH_DIR") 2>/dev/null; then
     if [ -L "$LAUNCH_DIR" ] || [ ! -d "$LAUNCH_DIR" ] || [ ! -O "$LAUNCH_DIR" ] ||

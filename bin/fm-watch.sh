@@ -3143,7 +3143,7 @@ event_wait_or_sleep() {
       t3_windows+=("$w")
       continue
     fi
-    session=$(fm_backend_event_session "$b" "$w")
+    session=${w%%:*}
     if [ -z "$first_backend" ]; then first_backend=$b; first_session=$session; fi
     # One socket connection covers one backend+session; a home normally has a
     # single herdr or rex session. A window in a different backend/session stays on the

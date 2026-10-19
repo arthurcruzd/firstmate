@@ -683,12 +683,22 @@ fm_backend_rex_id_atom_valid() {  # <kind> <id>
 }
 
 fm_backend_meta_for_window() {  # <target> <state-dir>
-  local target=$1 state=$2 meta window terminal
+  local target=$1 state=$2 meta line window terminal thread
   for meta in "$state"/*.meta; do
     [ -e "$meta" ] || continue
-    window=$(fm_meta_get "$meta" window)
-    terminal=$(fm_meta_get "$meta" terminal)
-    [ -n "$terminal" ] || terminal=$(fm_meta_get "$meta" t3_thread_id)
+    window=''
+    terminal=''
+    thread=''
+    if [ -f "$meta" ]; then
+      while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+          window=*) window=${line#*=} ;;
+          terminal=*) terminal=${line#*=} ;;
+          t3_thread_id=*) thread=${line#*=} ;;
+        esac
+      done < "$meta" 2>/dev/null || true
+    fi
+    [ -n "$terminal" ] || terminal=$thread
     { [ -n "$window" ] && [ "$window" = "$target" ]; } || { [ -n "$terminal" ] && [ "$terminal" = "$target" ]; } || continue
     printf '%s' "$meta"
     return 0

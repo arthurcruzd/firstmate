@@ -48,8 +48,9 @@
 //     access, instance, model, and every requested option value; a refused
 //     thread whose archive fails exits 1, because it may still be live. A
 //     read-back that fails also archives and exits 1, since the thread exists
-//     but its binding is unproven. Without --message-file the thread is
-//     created idle.
+//     but its binding is unproven. A transport or unexpected failure of the
+//     gate, before t3_thread_launch is requested, exits 8: no thread was
+//     launched. Without --message-file the thread is created idle.
 //   fm-t3-mcp.mjs send --thread <id> --message-file <file> --client-request-id <id>
 //     t3_thread_send mode auto: start an idle thread's next turn or steer the
 //     running one. T3 derives the message and command ids from the client
@@ -96,7 +97,8 @@
 //     cleared. Otherwise it waits on the exact active run of every thread at
 //     once and reports event:run-ended for the first that turns terminal,
 //     event:timeout when none does, or event:none when no thread has an
-//     active run (the caller sleeps instead of re-arming).
+//     active run (the caller sleeps instead of re-arming). When every wait
+//     failed rather than returned, the first failure is the verb's error.
 //   fm-t3-mcp.mjs archive --thread <id> [--timeout-ms <n>]
 //     t3_thread_organize archive, then read back until the thread reports
 //     archived:true and activeRunId:null (closed=true). A thread the verified
@@ -123,8 +125,8 @@
 // it has one); 4 a local refusal (no credential, expired credential, revoked
 // credential, environment mismatch, capability gate, or a launch binding
 // mismatch whose thread was archived); 5 and 6 as thread-for-root says; 7 a
-// mutation whose request went out but whose reply was lost (send). A
-// failure prints {"ok":false,"error":{...}} on stdout and one line on stderr.
+// mutation whose request went out but whose reply was lost (send); 8 a launch
+// that failed before t3_thread_launch was requested (launch). A failure prints {"ok":false,"error":{...}} on stdout and one line on stderr.
 // A credential within EXPIRY_WARN_DAYS of expiry adds a stderr warning on
 // every verb and a `credentialWarning` field on status.
 
@@ -771,7 +773,14 @@ async function launch(flags) {
   if (worktree !== undefined && !path.isAbsolute(worktree)) usage("--worktree must be an absolute path");
   const selection = modelSelection(flags);
   const message = flags["message-file"] ? readMessage(flags) : null;
-  const { session, gate: g } = await verifiedSession(flags);
+  let session;
+  let g;
+  try {
+    ({ session, gate: g } = await verifiedSession(flags));
+  } catch (err) {
+    if (err instanceof Refusal && err.exit !== 1) throw err;
+    throw new Refusal(err instanceof Refusal ? err.code : "unexpected", `${err?.message ?? String(err)}; no thread was launched`, 8, err instanceof Refusal ? err.extra : {});
+  }
   const workspaceStrategy = worktree
     ? { type: "existing_worktree", worktreePath: worktree, ...(flags.branch ? { branch: flags.branch } : {}) }
     : { type: "root", ...(flags.branch ? { branch: flags.branch } : {}) };
@@ -1017,14 +1026,18 @@ async function watch(flags) {
   }
   if (!runs.length) return { ok: true, event: "none", cleared };
   const abort = new AbortController();
+  const notEnded = new Error("not ended");
   try {
     const ended = await Promise.any(
       runs.map(async ({ threadId, runId }) => {
         const waited = await waitRun(session, threadId, runId, timeoutMs, abort.signal);
         if (waited?.runId === runId && waited?.timedOut !== true && TERMINAL_RUN.has(waited?.status)) return { threadId, runId, status: waited.status };
-        throw new Error("not ended");
+        throw notEnded;
       }),
-    ).catch(() => null);
+    ).catch((err) => {
+      if (err.errors.every((e) => e !== notEnded)) throw err.errors[0];
+      return null;
+    });
     return ended ? { ok: true, event: "run-ended", ...ended, cleared } : { ok: true, event: "timeout", cleared };
   } finally {
     abort.abort();

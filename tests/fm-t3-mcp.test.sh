@@ -244,7 +244,13 @@ test_launch_refusals() {
   t3_fake_set 'w.failTools = {}; w.dropTools = { t3_thread_launch: 1 }'
   mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
   expect_code 1 "$RC" "a launch whose reply was lost is an uncertain transport failure"
-  pass "fm-t3-mcp launch: refuses a binding T3 did not honor, and reports a lost, unproven, or unarchivable launch as uncertain"
+  t3_fake_set 'w.dropTools = { t3_environment_read: 1 }'
+  : > "$T3_FAKE_LOG"
+  mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
+  expect_code 8 "$RC" "a gate transport failure before the launch request launched nothing"
+  assert_contains "$ERR" "no thread was launched" "the failure says no thread exists"
+  [ -z "$(t3_fake_calls t3_thread_launch)" ] || fail "no launch may be requested after the gate failed"
+  pass "fm-t3-mcp launch: refuses a binding T3 did not honor, reports a lost, unproven, or unarchivable launch as uncertain, and a gate failure as no launch"
 }
 
 new_thread() {  # -> thread id
@@ -571,6 +577,22 @@ test_watch_is_event_driven_and_bounded() {
   pass "fm-t3-mcp watch: exact-run waits end on a terminal run, idle threads never wait, and pending requests block once per signature"
 }
 
+test_watch_reports_failed_waits_not_timeout() {
+  fresh_case watch-wait-fails
+  t3_fake_set 'w.threads = { "thread-a": { threadId: "thread-a", projectId: "p", status: "running", activeRunId: "run-a", archived: false, worktreePath: null, items: [],
+    runs: [{ runId: "run-a", ordinal: 1, status: "running" }] }, "thread-b": { threadId: "thread-b", projectId: "p", status: "running", activeRunId: "run-b", archived: false, worktreePath: null, items: [],
+    runs: [{ runId: "run-b", ordinal: 1, status: "running" }] } }; w.failTools = { t3_thread_wait: { code: "invalid_request", message: "timeoutMs rejected" } }'
+  mcp watch --thread thread-a --thread thread-b --timeout-ms 200
+  [ "$RC" -ne 0 ] || fail "every wait failing must fail the watch, got '$OUT'"
+  [ "$(field "$OUT" event)" != timeout ] || fail "failed waits must not read as a full-budget timeout"
+  assert_contains "$ERR" "timeoutMs rejected" "the watch reports the wait's own failure"
+  t3_fake_set 'w.failTools = {}'
+  mcp watch --thread thread-a --thread thread-b --timeout-ms 200
+  expect_code 0 "$RC" "a wait that ran its budget is an ordinary timeout: $ERR"
+  assert_equals timeout "$(field "$OUT" event)" "waits that ran their budget report a timeout"
+  pass "fm-t3-mcp watch: waits that all fail are an error, not a timeout"
+}
+
 t3_fake_start "$TMP_ROOT/server"
 test_login_writes_private_credential_and_never_prints_token
 test_login_origin_defaults
@@ -595,3 +617,4 @@ test_resolve_selection_uses_t3_catalog
 test_launch_reads_back_full_configuration
 test_requests_and_respond
 test_watch_is_event_driven_and_bounded
+test_watch_reports_failed_waits_not_timeout

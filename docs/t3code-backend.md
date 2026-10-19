@@ -8,7 +8,7 @@ Firstmate drives the server only through its Orchestrator V2 `/mcp` endpoint, si
 ## Setup
 
 Pick T3 Code when you already run the T3 Code app and want each task to be a visible T3 thread working in a Treehouse worktree, and each secondmate a visible T3 thread working in its own home.
-T3 Code runs only the `claude` and `codex` harnesses; every other harness is refused at spawn.
+T3 Code runs only the `claude` and `codex` harnesses; every other harness, and a raw launch command, is refused at spawn.
 
 Prerequisites:
 
@@ -153,8 +153,9 @@ Cleanup keeps all shared Firstmate safety checks.
 Before the slot returns to the pool, or before a secondmate home is removed, teardown interrupts any active run, archives the thread with `t3_thread_organize`, and requires T3 to read back `archived:true` with no active run, so no live thread can act in a slot another task may lease.
 T3 detaches the provider session as a separate effect after that read-back, so its Claude or Codex process can briefly outlive it: a worker's slot is cleared by teardown's worktree-process reaper, and a secondmate home, pooled or standalone, goes through the same reaper before it is returned or removed, keeping the home and its records when the process scan cannot complete.
 Secondmate retirement requires `lsof` to prove the home is quiet; without it, teardown preserves the home and records for retry.
-If spawn aborts after launching the thread, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive and `treehouse return --force` steps.
+If spawn aborts after launching the thread and before sending its launch brief, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive and `treehouse return --force` steps.
 `t3_thread_launch` has no idempotency key, so a lost launch reply or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and never retries.
+A gate failure before `t3_thread_launch` is requested launched nothing, so spawn returns the lease.
 When the thread id is known, the helper attempts to archive it and reports its id, but even an accepted archive request leaves the lease held until the archive is verified.
 A lost reply to the launch brief means the brief may already be running, so spawn keeps the task record, lease, and thread, never resends the brief itself, and exits nonzero with the thread to inspect.
 An identical brief resend follows the [ordinary-send retention window above](#current-lifecycle-and-safety); verify delivery in T3 Code before resending after that window.
@@ -182,6 +183,7 @@ Thread persistence alone does not prove a live agent.
 Inspect a failed worker's thread error before sending a new turn through its normal steer path.
 A new turn continues the same driver and transcript; `fm-control.sh relaunch` remains refused.
 Automatic secondmate recovery treats a failed run the same way: the thread is still readable, so recovery resumes it in place with one recovery turn instead of archiving it and launching a second thread, and the relaunch ledger bounds repeats.
+That turn tells the secondmate to re-read its `AGENTS.md` and config first, and startup still delivers its queued config re-read retries, because a resumed conversation does not re-read on its own the way a fresh launch does.
 A secondmate thread that reads missing is closed again through the idempotent archive before a replacement thread is launched, and when that close cannot be proven the thread and its record stay as recorded and nothing is spawned; other backends keep their existing best-effort close ([`bin/fm-secondmate-liveness-lib.sh`](../bin/fm-secondmate-liveness-lib.sh)).
 Teardown still requires a proven archive before returning the worktree.
 
@@ -244,7 +246,7 @@ If a task's thread no longer reads back, release the task by hand:
 ## Active limits
 
 - T3 Code remains experimental and runs only `claude` and `codex`.
-- T3 starts the agent at `full-access` with its provider instance's account and environment, so a spawn refuses `config/claude-permission-mode=auto` for `claude`, `config/launch-env-allowlist`, and a worker account pin; select the account through `config/t3code-instances` instead.
+- T3 starts the agent at `full-access` with its provider instance's account and environment, so a spawn refuses `config/claude-permission-mode=auto` for `claude`, `config/launch-env-allowlist`, a worker account pin, and a raw launch command; select the account through `config/t3code-instances` instead.
 - T3 owns the Claude provider command, so Firstmate cannot add its command-line prompt-suggestion, feedback-draft, or attribution controls; configure equivalent provider-instance settings in T3 when those policies are required.
   Unless `config/keep-ai-trailers` is present, the per-worktree environment selects Firstmate's Git commit hook to strip known AI trailers, including on T3 workers.
 - T3 also owns the Codex provider command, so Firstmate cannot apply the pane-backed worker's hook-disable or turn-end notify options.
