@@ -224,6 +224,9 @@ cmd_launch() {
     current=$(fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null || printf 'unreadable\n')
     case "$current" in
       alive)
+        # A retry after a failed attach finds the endpoint alive; it converges
+        # the home's relay binding before claiming the route.
+        [ "$REMOTE_ENDPOINT_BACKEND" != t3code ] || t3_host_attach "$id"
         print_route "$id"
         return 0
         ;;
@@ -278,13 +281,22 @@ t3_host() { # <verb> [args...]
 # reopens an unloaded mate with each wake. A failure here leaves the endpoint
 # launched but unsupervised across an idle unload, so it fails the launch for
 # the parent to report rather than claiming a whole route.
+#
+# It converges: an already-recorded thread is not adopted again, and a relay
+# that already owns the home keeps running and reads the new record at its
+# next delivery, so a launch retry or a relaunch that kept or replaced the
+# thread ends with the relay aimed at the endpoint the route reports.
 t3_host_attach() { # <id>
   local id=$1
   remote_endpoint_require "$id"
-  t3_host adopt --thread "$REMOTE_ENDPOINT_TARGET" >/dev/null \
-    || die "remote secondmate $id launched as T3 thread $REMOTE_ENDPOINT_TARGET, but the home could not record it as its T3 host thread"
-  t3_host install >/dev/null \
-    || die "remote secondmate $id launched as T3 thread $REMOTE_ENDPOINT_TARGET, but its wake relay service could not be installed"
+  if [ "$(sed -n 's/^thread=//p' "$TARGET_HOME/state/.t3-host" 2>/dev/null | head -1)" != "$REMOTE_ENDPOINT_TARGET" ]; then
+    t3_host adopt --thread "$REMOTE_ENDPOINT_TARGET" >/dev/null \
+      || die "remote secondmate $id launched as T3 thread $REMOTE_ENDPOINT_TARGET, but the home could not record it as its T3 host thread"
+  fi
+  if ! fm_t3_relay_owns_home "$TARGET_HOME/state"; then
+    t3_host install >/dev/null \
+      || die "remote secondmate $id launched as T3 thread $REMOTE_ENDPOINT_TARGET, but its wake relay service could not be installed"
+  fi
 }
 
 # A T3 launch writes the mate's environment into the home itself (the env block
@@ -352,11 +364,16 @@ cmd_relaunch() {
   # the dedicated fm-remote session, and the parent already owns both convergence
   # legs, so the host-local spawn must not re-sync or re-inherit against this
   # host's own Firstmate copy.
+  # A T3-hosted mate's workers stay on this T3 server across a relaunch too
+  # (cmd_launch), and a relaunch that replaced the thread must move the home's
+  # relay to it.
   HERDR_SESSION="$REMOTE_HERDR_SESSION" FM_HOME="$FM_ROOT" FM_ROOT_OVERRIDE="$FM_ROOT" \
     FM_STATE_OVERRIDE="$CONTROL_STATE" FM_DATA_OVERRIDE="$CONTROL_DATA" \
     FM_CONFIG_OVERRIDE="$TARGET_HOME/config" FM_SKIP_SECONDMATE_INHERIT=1 \
     FM_SKIP_SECONDMATE_SYNC=1 \
-    "$SCRIPT_DIR/fm-control.sh" "${control_args[@]}"
+    FM_SPAWN_SECONDMATE_CREW_BACKEND="$([ "$REMOTE_ENDPOINT_BACKEND" != t3code ] || printf t3code)" \
+    "$SCRIPT_DIR/fm-control.sh" "${control_args[@]}" || return $?
+  [ "$REMOTE_ENDPOINT_BACKEND" != t3code ] || t3_host_attach "$id"
   # A parent tracking this route needs the identity the relaunch actually
   # produced, not the one it asked for, so it can republish its own record the
   # same way cmd_launch's caller already does. Reading it back from the

@@ -1800,6 +1800,58 @@ test_remote_host_release_removes_t3_env() {
   pass "fm-remote-secondmate-control.sh release: archives the T3 mate, removes its relay, and strips its launch environment from the home"
 }
 
+# Review findings 4 and 5 (F02, F08): a host-local T3 mate relaunch must keep
+# its workers on this T3 server (FM_BACKEND=t3code in the mate's environment)
+# and leave the home's relay aimed at the endpoint the route reports, and an
+# initial-launch retry that finds the endpoint alive must converge the relay
+# binding a failed attach left out.
+test_remote_host_relaunch_keeps_crew_backend_and_relay_target() {
+  local id=t3smz5 home out meta thread hostlog
+  t3_case remote-relaunch
+  home="$CASE_DIR/sm-home-relaunch"
+  make_t3_secondmate_home "$home" "$id"
+  mkdir -p "$home/config" "$home/state/parent-route" "$home/data/.parent-route"
+  cp "$CONFIG/t3code-token" "$home/config/t3code-token"
+  chmod 600 "$home/config/t3code-token"
+  printf 'herdr\n' > "$home/config/backend"
+  hostlog="$CASE_DIR/t3-host.log"
+  # The home's own relay entry point, stubbed: it records the binding calls.
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n[ "$1" != adopt ] || { mkdir -p "$FM_HOME/state"; printf "thread=%%s\\n" "$3" > "$FM_HOME/state/.t3-host"; }\n' "$hostlog" > "$home/bin/fm-t3-host.sh"
+  chmod +x "$home/bin/fm-t3-host.sh"
+  touch "$CASE_DIR/home/state/.last-watcher-beat" 2>/dev/null || true
+  out=$(HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$ROOT" FM_STATE_OVERRIDE="$home/state/parent-route" FM_DATA_OVERRIDE="$home/data/.parent-route" \
+    FM_CONFIG_OVERRIDE="$home/config" FM_SKIP_SECONDMATE_INHERIT=1 FM_SKIP_SECONDMATE_SYNC=1 FM_SPAWN_NO_GUARD=1 \
+    "$ROOT/bin/fm-spawn.sh" "$id" "$home" claude --model claude-sonnet-5 --backend t3code --secondmate 2>&1)
+  expect_code 0 $? "a host-local T3 mate launch should succeed"$'\n'"$out"
+  meta="$home/state/parent-route/$id.meta"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$meta")
+  FM_T3_ID="$thread" t3_fake_set 'w.threads[process.env.FM_T3_ID].status = "idle"; w.threads[process.env.FM_T3_ID].activeRunId = null;'
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env.FM_BACKEND')" = t3code ] || fail "the launch must give the mate's workers the t3code backend"
+
+  # The launch's attach failed before it recorded the thread: a retry that
+  # finds the endpoint alive converges the binding.
+  out=$(HOME="$SPAWN_HOME" FM_HOME="$home" "$ROOT/bin/fm-remote-secondmate-control.sh" launch "$id" claude claude-sonnet-5 - t3code 2>&1)
+  expect_code 0 $? "a launch retry on an alive endpoint should succeed"$'\n'"$out"
+  assert_grep "adopt --thread $thread" "$hostlog" "a launch retry must record the alive thread as the home's T3 host thread"
+  assert_grep "install" "$hostlog" "a launch retry must install the relay a failed attach left out"
+
+  # The relay still names an older thread; a relaunch moves it and keeps the
+  # crew backend.
+  printf 'thread=mcp:old\n' > "$home/state/.t3-host"
+  : > "$hostlog"
+  out=$(HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' FM_SPAWN_NO_GUARD=1 FM_HOME="$home" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" relaunch "$id" claude claude-sonnet-5 - 2>&1)
+  expect_code 0 $? "a host-local T3 mate relaunch should succeed"$'\n'"$out"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$meta")
+  assert_contains "$out" "target=$thread" "the relaunch must report the endpoint it produced"
+  [ "$(sed -n 's/^thread=//p' "$home/state/.t3-host")" = "$thread" ] || fail "the relaunch must aim the home's relay at $thread, got '$(cat "$home/state/.t3-host")'"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env.FM_BACKEND')" = t3code ] \
+    || fail "a relaunch must keep the mate's workers on the t3code backend, got env '$(t3_json_field "$home/.claude/settings.local.json" 'JSON.stringify(d.env)')'"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-remote-secondmate-control.sh: a T3 mate's relaunch keeps its crew backend and relay target, and a launch retry converges the relay binding"
+}
+
 test_spawn_codex_secondmate_writes_toml_env() {
   local id home out thread toml
   t3_require_tomllib test_spawn_codex_secondmate_writes_toml_env || return 0
@@ -2243,6 +2295,7 @@ test_spawn_codex_scout_writes_toml_env_with_traceparent
 test_spawn_secondmate_runs_thread_in_home_with_env
 test_spawn_remote_host_secondmate_keeps_home_credential
 test_remote_host_release_removes_t3_env
+test_remote_host_relaunch_keeps_crew_backend_and_relay_target
 test_spawn_codex_secondmate_writes_toml_env
 test_spawn_refuses_t3code_when_token_rejected
 test_spawn_refuses_slot_of_another_clone
