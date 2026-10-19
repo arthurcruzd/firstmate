@@ -930,7 +930,7 @@ escalate_flush_frozen() {  # <state> <buf>
       || log "unknown-wake acknowledgement write failed; a delivered unknown wake may escalate again"
     tail -n +"$((n + 1))" "$buf" > "$items" && mv -f "$items" "$buf"
     rm -f "$items" "$buf.frozen" "$buf.frozen-msg" "$state/.subsuper-inject-wedged"
-    [ -s "$buf" ] || rm -f "$buf.since"
+    if [ -s "$buf" ]; then _now > "$buf.since"; else rm -f "$buf.since"; fi
     ESCALATE_KEPT_FULL=
     return 0
   fi
@@ -1399,6 +1399,10 @@ housekeeping() {  # <state>
            _now > "$state/.subsuper-reported-stale-$key"
          fi ;;
       *)
+        if [ -e "$state/.subsuper-reported-stale-$key" ]; then
+          stale_marker_remove "$win" "$state"
+          continue
+        fi
         dialog_name=$(cat "$state/.subsuper-dialog-$key" 2>/dev/null || true)
         if [ -n "$dialog_name" ]; then
           persisted="stale persisted ${age}s (possible wedge, blocked-on-prompt: $dialog_name): $win"

@@ -617,6 +617,75 @@ if (count("event-one") !== 1 || count("event-two") !== 1 || count("event-three")
   pass "away daemon on T3: an unconfirmed digest is frozen and retried verbatim; a later event goes in the next digest, each event once"
 }
 
+# Delivering a frozen digest after a long outage proves the supervisor is
+# reachable again, so items still buffered behind it start a fresh undelivered
+# window instead of inheriting the outage's age and raising a wedge at once.
+test_frozen_flush_restamps_the_next_generation() {
+  local state got
+  t3_case daemon-digest-restamp completed
+  state="$CASE_DIR/state"
+  mkdir -p "$state"
+  t3_world_set 'w.dropTools = { t3_thread_send: 1 }'
+  got=$(t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=codex
+    afk_enter "$1"
+    escalate_add "$1" "event-one"
+    escalate_flush "$1"; printf "first=%s\n" "$?"
+    old=$(( $(_now) - 7200 ))
+    printf "%s\n" "$old" > "$1/.subsuper-escalations.since"
+    { printf "since=%s\n" "$old"; tail -n +2 "$1/.subsuper-escalations.frozen"; } > "$1/frozen.tmp"
+    mv "$1/frozen.tmp" "$1/.subsuper-escalations.frozen"
+    escalate_add "$1" "event-two"
+    escalate_flush "$1"; printf "second=%s\n" "$?"
+    printf "age=%s\n" "$(_oldest_line_age "$1/.subsuper-escalations")"
+  ' "$state" 2>&1)
+  assert_contains "$got" "first=1" "the lost digest is frozen, not delivered: $got"
+  assert_contains "$got" "second=1" "the next generation defers on the supervisor turn the frozen digest started: $got"
+  [ "$(cat "$state/.subsuper-escalations")" = event-two ] || fail "only the next generation stays buffered, got '$(cat "$state/.subsuper-escalations")'"
+  [ "$(printf '%s\n' "$got" | sed -n 's/^age=//p')" -lt 60 ] \
+    || fail "items left behind a delivered frozen digest must start a fresh undelivered window: $got"
+  pass "away daemon on T3: a delivered frozen digest restarts the undelivered clock for the items behind it"
+}
+
+# A stall reported while T3's verdict was unknown is the same stall once T3
+# reads idle, so it is settled without a second possible-wedge report.
+test_reported_unknown_stall_is_not_escalated_again_when_idle() {
+  local state marker
+  t3_case housekeeping-unknown-then-idle completed
+  t3_unknown completed
+  state="$CASE_DIR/state"; mkdir -p "$state"
+  marker="$state/.subsuper-stale-worker"
+  fm_write_meta "$state/worker.meta" "window=fm-worker" "backend=t3code" \
+    "t3_thread_id=thread-live" "harness=claude"
+  printf 'working: waiting for results\n' > "$state/worker.status"
+  t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    _now() { printf 1000; }
+    LOG="$1/daemon.log"
+    FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+    afk_enter "$1"
+    handle_wake "stale: thread-live" "$1"
+    printf 1 > "$1/.subsuper-stale-worker"
+    housekeeping "$1"
+  ' "$state" || fail "unknown housekeeping failed"
+  assert_contains "$(cat "$state/.subsuper-escalations")" 'stale persisted 999s (possible wedge): thread-live' \
+    "the stall is reported once while T3's verdict is unknown"
+  : > "$state/.subsuper-escalations"
+  t3_world_set 'w.failTools = {}'
+  t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    _now() { printf 1000; }
+    LOG="$1/daemon.log"
+    FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+    housekeeping "$1"
+  ' "$state" || fail "idle housekeeping failed"
+  [ ! -s "$state/.subsuper-escalations" ] \
+    || fail "a stall already reported while unknown must not be reported again once T3 reads idle, got '$(cat "$state/.subsuper-escalations")'"
+  assert_absent "$marker" "the idle read settles the already-reported stall"
+  pass "away daemon on T3: a stall reported while unknown is not reported again once T3 reads idle"
+}
+
 test_kill_interrupts_then_archives_and_tolerates_gone() {
   local archive down
   t3_case kill
@@ -1347,7 +1416,7 @@ test_spawn_leases_slot_creates_thread_and_starts_launch_turn() {
   [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_COUNT')" = 1 ] || fail "T3 workers must select one Git config override"
   [ "$(t3_json_field "$settings" 'd.env.TRACEPARENT')" = undefined ] || fail "TRACEPARENT must be absent when trace context is off"
   [ "$(t3_json_field "$settings" 'd.env.COMPACT_ADVISER_DISABLE')" = 1 ] || fail "settings env must carry the compact-adviser kill switch every launch carries"
-  [ "$(t3_json_field "$settings" 'Object.keys(d.env).sort().join(" ")')" = "COMPACT_ADVISER_DISABLE FM_TASK_ID FM_TASK_INBOX GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GOTMPDIR" ] || fail "a worker env block carries the task inbox and Git hook with the launch environment"
+  [ "$(t3_json_field "$settings" 'Object.keys(d.env).sort().join(" ")')" = "COMPACT_ADVISER_DISABLE FM_T3CODE_ENV_KEYS FM_TASK_ID FM_TASK_INBOX GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GOTMPDIR" ] || fail "a worker env block carries the task inbox and Git hook with the launch environment"
   t3_excluded "$wt" .claude/settings.local.json || fail "the settings file must be git-excluded"
   assert_present "$wt/CLAUDE.local.md" "a claude worker gets the task-worker channel statement as CLAUDE.local.md"
   assert_grep "task worker launched by Firstmate" "$wt/CLAUDE.local.md" "CLAUDE.local.md must carry the channel statement"
@@ -1461,6 +1530,10 @@ test_spawn_secondmate_runs_thread_in_home_with_env() {
   t3_case spawn-secondmate
   home="$CASE_DIR/sm-home"
   make_t3_secondmate_home "$home" "$id"
+  # The home's own settings, plus a key an earlier spawn wrote that this one does not.
+  mkdir -p "$home/.claude"
+  printf '{"permissions":{"allow":["Bash(ls:*)"]},"env":{"CAPTAIN_VAR":"keep","LAVISH_AXI_HOST":"stale","FM_T3CODE_ENV_KEYS":"LAVISH_AXI_HOST"}}\n' \
+    > "$home/.claude/settings.local.json"
   out=$(spawn_t3_secondmate "$id" "$home" claude claude-sonnet-5)
   expect_code 0 $? "fm-spawn.sh --backend t3code --secondmate should succeed against the fake T3 server"$'\n'"$out"
   [ "$(t3_dispatch_types)" = "t3_project_create t3_thread_launch t3_thread_send" ] \
@@ -1488,7 +1561,11 @@ test_spawn_secondmate_runs_thread_in_home_with_env() {
   settings="$home/.claude/settings.local.json"
   assert_present "$settings" "a claude secondmate home gets .claude/settings.local.json"
   [ "$(t3_json_field "$settings" 'd.hooks')" = undefined ] || fail "a secondmate home carries no busy hooks"
-  [ "$(t3_json_field "$settings" 'Object.keys(d.env).length')" = 17 ] || fail "the env block should carry GOTMPDIR plus the secondmate environment, got $(t3_json_field "$settings" 'Object.keys(d.env)')"
+  [ "$(t3_json_field "$settings" 'd.env.FM_T3CODE_ENV_KEYS.split(",").length')" = 17 ] || fail "the env block should carry GOTMPDIR plus the secondmate environment, got $(t3_json_field "$settings" 'Object.keys(d.env)')"
+  [ "$(t3_json_field "$settings" 'd.env.CAPTAIN_VAR')" = keep ] || fail "the home's own env entries must survive the T3 environment install"
+  [ "$(t3_json_field "$settings" 'd.permissions.allow[0]')" = 'Bash(ls:*)' ] || fail "the home's own settings must survive the T3 environment install"
+  [ "$(t3_json_field "$settings" 'd.env.LAVISH_AXI_HOST')" = undefined ] || fail "a key an earlier spawn wrote and this one does not must not linger"
+  [ "$(t3_json_field "$settings" 'Object.keys(d.env).length')" = 19 ] || fail "the env block should hold the home's entry, the 17 Firstmate keys, and their list, got $(t3_json_field "$settings" 'Object.keys(d.env)')"
   [ "$(t3_json_field "$settings" 'd.env.GOTMPDIR')" = "/tmp/fm-$id/gotmp" ] || fail "settings env must carry GOTMPDIR"
   read_settings() { t3_json_field "$settings" "d.env[\"$1\"]"; }
   assert_t3_secondmate_env read_settings "claude secondmate settings env" "$home" "$thread" autoarm "$id"
@@ -1637,6 +1714,42 @@ test_uncertain_thread_launch_keeps_lease() {
   [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -eq 0 ] || fail "an uncertain launch returned the lease"
   assert_absent "$CASE_DIR/state/$id.meta" "an uncertain launch must not publish metadata"
   pass "fm-spawn.sh --backend t3code: a launch whose response was lost keeps the lease"
+}
+
+test_spawn_appends_git_hook_after_inherited_git_config() {
+  local id=t3gitcfgz out rc settings pair
+  local -a git_env=()
+  t3_case spawn-git-config
+  t3_worker_setup "$id"
+  out=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=fm-test-helper \
+    t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 0 "$rc" "a spawn with inherited Git config entries should succeed"$'\n'"$out"
+  settings="$WORKER_WT/.claude/settings.local.json"
+  while IFS= read -r -d '' pair; do git_env+=("$pair"); done < <(node -e '
+const env = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).env;
+for (const [k, v] of Object.entries(env)) if (k.startsWith("GIT_CONFIG_")) process.stdout.write(`${k}=${v}\0`);
+' "$settings")
+  [ "$(env "${git_env[@]}" git -C "$WORKER_WT" config --get credential.helper)" = fm-test-helper ] \
+    || fail "the inherited credential.helper must survive the T3 Git hook override, env: ${git_env[*]}"
+  [ "$(env "${git_env[@]}" git -C "$WORKER_WT" config --get core.hooksPath)" = "$CASE_DIR/state/$id.git-hooks" ] \
+    || fail "the T3 Git hook override must still select the installed hook, env: ${git_env[*]}"
+  pass "fm-spawn.sh --backend t3code: the Git hook override is appended after inherited GIT_CONFIG entries"
+}
+
+test_spawn_secondmate_refuses_symlinked_claude_settings() {
+  local id=t3smlinkz home out rc target
+  t3_case spawn-secondmate-settings-link
+  home="$CASE_DIR/sm-home"
+  make_t3_secondmate_home "$home" "$id"
+  target="$CASE_DIR/outside-settings.json"
+  printf '{"env":{"OUTSIDE":"1"}}\n' > "$target"
+  mkdir -p "$home/.claude"
+  ln -s "$target" "$home/.claude/settings.local.json"
+  out=$(spawn_t3_secondmate "$id" "$home" claude claude-sonnet-5); rc=$?
+  [ "$rc" -ne 0 ] || fail "a symlinked Claude settings file must refuse the spawn"$'\n'"$out"
+  assert_contains "$out" "is a symlink" "the refusal names the symlink"
+  [ "$(cat "$target")" = '{"env":{"OUTSIDE":"1"}}' ] || fail "the symlink's target must be left untouched, got '$(cat "$target")'"
+  pass "fm-spawn.sh --backend t3code --secondmate: a symlinked .claude/settings.local.json is refused, never written through"
 }
 
 test_launch_gate_failure_returns_lease() {
@@ -2125,6 +2238,7 @@ fi
 
 test_native_restart_rearms_undelivered_stale_warning
 test_housekeeping_preserves_unknown_stale_recheck
+test_reported_unknown_stall_is_not_escalated_again_when_idle
 test_t3_stale_watcher failed dead codex fresh
 test_unreadable_thread_defers_like_busy
 test_stale_classifier_resolves_t3_thread
@@ -2155,6 +2269,7 @@ test_answer_script_reads_and_answers_questions
 test_failed_t3_secondmate_is_resumed_in_place
 test_t3_secondmate_missing_thread_reproves_close_before_replacement
 test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim
+test_frozen_flush_restamps_the_next_generation
 test_draining_archived_t3_secondmate_is_not_relaunched
 test_kill_interrupts_then_archives_and_tolerates_gone
 test_dispatcher_routes_and_validates_t3code_meta
@@ -2186,6 +2301,8 @@ test_spawn_refuses_raw_launch_command
 test_spawn_abort_returns_lease_only_after_archive ok
 test_spawn_abort_returns_lease_only_after_archive fail
 test_uncertain_thread_launch_keeps_lease
+test_spawn_appends_git_hook_after_inherited_git_config
+test_spawn_secondmate_refuses_symlinked_claude_settings
 test_launch_gate_failure_returns_lease
 test_refused_launch_turn_archives_thread_and_returns_lease
 test_misbound_thread_launch_returns_lease

@@ -25,7 +25,8 @@
 //     but off adds a stderr warning). Changes nothing.
 //   fm-t3-mcp.mjs project-ensure --root <abs-path> [--title <title>]
 //     The live T3 project whose workspaceRoot is <root> by real path, created
-//     when absent.
+//     when absent. A create that fails is looked up again, so a project a
+//     concurrent spawn registered meanwhile is used rather than refused.
 //   fm-t3-mcp.mjs project-read --project <id>
 //     That project's record (defaultModelSelection included); exit 3 with
 //     code project_not_found when T3 lists no live project with that id.
@@ -662,7 +663,14 @@ async function projectEnsure(flags) {
   const { session } = await verifiedSession(flags);
   const found = await projectForRoot(session, rootPath);
   if (found) return { ok: true, projectId: found.id, created: false };
-  const made = await session.call("t3_project_create", { title: flags.title || path.basename(rootPath), workspaceRoot: realOrRaw(rootPath) });
+  let made;
+  try {
+    made = await session.call("t3_project_create", { title: flags.title || path.basename(rootPath), workspaceRoot: realOrRaw(rootPath) });
+  } catch (err) {
+    const registered = await projectForRoot(session, rootPath);
+    if (registered) return { ok: true, projectId: registered.id, created: false };
+    throw err;
+  }
   const projectId = made?.id ?? made?.projectId ?? made?.project?.id;
   if (!projectId) throw new Refusal("project_unconfirmed", "t3_project_create returned no project id", 1);
   return { ok: true, projectId, created: true };

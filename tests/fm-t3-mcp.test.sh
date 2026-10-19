@@ -187,7 +187,17 @@ test_projects_by_real_path() {
   assert_equals project_not_found "$(field "$OUT" error.code)" "project-read refusal code"
   mcp project-ensure --root "$TMP_ROOT/proj"
   assert_equals true "$(field "$OUT" created)" "a deleted project's root registers again"
-  pass "fm-t3-mcp projects: matched by real path, deleted ones skipped, project-read returns the default model"
+  mkdir -p "$TMP_ROOT/proj-raced"
+  t3_fake_set 'w.dropReplyTools = { t3_project_create: 1 }'
+  mcp project-ensure --root "$TMP_ROOT/proj-raced"
+  expect_code 0 "$RC" "a create that failed after the project was registered must resolve to it: $ERR"
+  assert_equals false "$(field "$OUT" created)" "the resolved project was registered by the failed create, not this call"
+  FM_T3_ROOT="$(cd "$TMP_ROOT/proj-raced" && pwd -P)" FM_T3_ID="$(field "$OUT" projectId)" node -e '
+const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const live = w.projects.filter((p) => !p.deletedAt && p.workspaceRoot === process.env.FM_T3_ROOT);
+process.exit(live.length === 1 && live[0].id === process.env.FM_T3_ID ? 0 : 1);
+' "$T3_FAKE_WORLD" || fail "the root must hold exactly the one project project-ensure returned"
+  pass "fm-t3-mcp projects: matched by real path, deleted ones skipped, a failed create resolves to a registered project, project-read returns the default model"
 }
 
 test_launch_binds_workspace() {

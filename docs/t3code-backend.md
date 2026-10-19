@@ -92,6 +92,8 @@ The normal isolation and unlanded-work refusal rules still apply.
 T3 sets environment variables per provider instance, never per thread, so nothing can be typed into a pane before launch.
 Each harness reads its own configuration from the thread's working directory instead, and Firstmate writes the facts a pane would have exported into that directory before the launch turn.
 For `claude` that is an `env` block in the directory's `.claude/settings.local.json`, merged alongside the busy hooks a worker already carries there; for `codex` it is a `.codex/config.toml` holding a `[shell_environment_policy]` `set` table.
+The Claude `env` block keeps entries Firstmate did not write, such as a secondmate home's own, and lists the keys Firstmate wrote in `FM_T3CODE_ENV_KEYS` so a respawn replaces exactly those; a symlinked `.claude/settings.local.json` is refused.
+The Git hook override is appended after any `GIT_CONFIG_*` entries the spawning Firstmate inherited, which are carried into the block, so an inherited `credential.helper` survives.
 Firstmate-created untracked environment files are git-excluded and removed at teardown.
 An existing untracked `.codex/config.toml` without Firstmate's marker is preserved and refused.
 A symlinked `.codex` directory, config file, or tracked-overlay journal is refused.
@@ -153,7 +155,7 @@ Cleanup keeps all shared Firstmate safety checks.
 Before the slot returns to the pool, or before a secondmate home is removed, teardown interrupts any active run, archives the thread with `t3_thread_organize`, and requires T3 to read back `archived:true` with no active run, so no live thread can act in a slot another task may lease.
 T3 detaches the provider session as a separate effect after that read-back, so its Claude or Codex process can briefly outlive it: a worker's slot is cleared by teardown's worktree-process reaper, and a secondmate home, pooled or standalone, goes through the same reaper before it is returned or removed, keeping the home and its records when the process scan cannot complete.
 Secondmate retirement requires `lsof` to prove the home is quiet; without it, teardown preserves the home and records for retry.
-If spawn aborts after launching the thread and before sending its launch brief, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive and `treehouse return --force` steps.
+If spawn aborts after launching the thread and before T3 accepts its launch brief, including when T3 refuses the brief, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive and `treehouse return --force` steps.
 `t3_thread_launch` has no idempotency key, so a lost launch reply or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and never retries.
 A gate failure before `t3_thread_launch` is requested launched nothing, so spawn returns the lease.
 When the thread id is known, the helper attempts to archive it and reports its id, but even an accepted archive request leaves the lease held until the archive is verified.
