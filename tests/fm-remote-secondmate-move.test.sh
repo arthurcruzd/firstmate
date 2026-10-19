@@ -21,6 +21,9 @@ HOME_DIR="$TMP/home"
 FAKEBIN=$(fm_fakebin "$TMP/fake")
 CALLS="$TMP/ssh-calls"
 mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config"
+# A T3 endpoint runs only claude or codex, and an unpinned secondmate harness
+# mirrors whatever primary runs this test, so pin it.
+printf 'claude\n' > "$HOME_DIR/config/secondmate-harness"
 
 HERDR_LINE='- ios - iOS delivery (host: remote-mac; root: /srv/fm; home: /srv/fm-home; scope: iOS work; projects: alpha; added 2026-08-01)'
 T3_LINE='- ios - iOS delivery (host: remote-mac; root: /srv/fm; endpoint: t3code; home: /srv/fm-home; scope: iOS work; projects: alpha; added 2026-08-01)'
