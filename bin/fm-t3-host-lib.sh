@@ -28,7 +28,20 @@ fm_t3_relay_proc_started() {  # <pid>
     printf 'ticks:%s\n' "$(printf '%s' "$rest" | awk '{print $20}')"
     return 0
   fi
-  ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'
+  fm_t3_relay_lstart "$1" UTC0
+}
+
+# `ps -o lstart` renders in the reader's locale and time zone, while the relay
+# writes its record under its service manager's environment and the readers
+# run in the agent session's, so the stamp is pinned to the C locale and the
+# given TZ; an empty TZ means the machine's own zone, which a relay recorded
+# before the pin wrote under launchd.
+fm_t3_relay_lstart() {  # <pid> [tz]
+  if [ -n "${2:-}" ]; then
+    LC_ALL=C TZ=$2 ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'
+  else
+    (unset TZ; LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null) | sed 's/^ *//; s/ *$//'
+  fi
 }
 
 # fm_t3_relay_owns_home <state-dir>
@@ -42,11 +55,15 @@ fm_t3_relay_owns_home() {
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   [ -n "$started" ] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
-  # A relay started before the tick form existed recorded `ps -o lstart`, so
-  # either spelling of the same live process still owns the home.
+  # A relay started before the tick form or the pinned stamp existed recorded
+  # `ps -o lstart` in the C locale and the machine's zone (launchd) or in the
+  # caller's own environment, so each spelling of the same live process still
+  # owns the home.
   [ "$(fm_t3_relay_proc_started "$pid")" = "$started" ] \
+    || [ "$(fm_t3_relay_lstart "$pid")" = "$started" ] \
     || [ "$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//; s/ *$//')" = "$started" ] || return 1
-  cmd=$(ps -o command= -p "$pid" 2>/dev/null) || return 1
+  # Wide, so a narrow terminal width never cuts the command name off.
+  cmd=$(COLUMNS=10000 ps -o command= -p "$pid" 2>/dev/null) || return 1
   case "$cmd" in *fm-t3-host.sh*relay*) return 0 ;; esac
   return 1
 }
