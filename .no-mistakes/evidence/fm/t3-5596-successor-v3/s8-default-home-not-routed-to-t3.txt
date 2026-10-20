@@ -1,0 +1,25 @@
+## default-path home: config/t3code-token present and its T3 v0.1.0 server reachable, but NO config/backend, no FM_BACKEND, no --backend, no ambient HERDR/TMUX/CMUX/ZELLIJ env
+t3code-token
+config/backend: (absent)
+FM_BACKEND=(unset)
+$ node bin/fm-t3-mcp.mjs status --token-file <lab>/home2/config/t3code-token
+{"ok":true,"origin":"http://127.0.0.1:56029","access":"full-access","expiresAt":"2026-11-19T15:54:44.412Z","daysLeft":30,"environmentId":"9e8d3e59-1fc8-44a5-a346-fa37c08fba57","serverVersion":"0.1.0","recordedServerVersion":"0.1.0","telemetry":"off"}
+
+== selector the spawn will use (bin/fm-backend.sh fm_backend_name, sourced with FM_HOME=<lab>/home2):
+tmux
+== the same selector in the t3code-configured lab home, for contrast:
+t3code
+$ FM_HOME=<lab>/home2 TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh dflt1 <lab>/home2/projects/demo2 --scout --harness claude
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M5CXF9455B2MX43T6Y22ANCM/bin/backends/tmux.sh: line 76: tmux: command not found
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M5CXF9455B2MX43T6Y22ANCM/bin/backends/tmux.sh: line 98: tmux: command not found
+/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M5CXF9455B2MX43T6Y22ANCM/bin/backends/tmux.sh: line 102: tmux: command not found
+exit=1
+## routed to the default tmux backend (tmux is not installed on this host, so it stops there), not to T3
+no dflt1.meta written (no t3code metadata recorded)
+(eval):7: no matches found: <lab>/pool/.treehouse/demo2-*/1/demo2
+== T3 thread bound to the demo2 slot: {"ok":false,"error":{"code":"no_thread","message":"T3 has no project rooted at <lab>/pool/none"}}
+fm-t3-mcp: T3 has no project rooted at <lab>/pool/none (exit 5)
+== T3 project for the demo2 slot: {"ok":false,"error":{"code":"project_not_found","message":"T3 lists no live project <lab>/pool/none"}}
+fm-t3-mcp: T3 lists no live project <lab>/pool/none
+base  main  (repository default)
+🌳 No worktrees in pool.

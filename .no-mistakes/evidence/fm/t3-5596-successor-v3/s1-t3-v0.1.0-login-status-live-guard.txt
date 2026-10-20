@@ -1,0 +1,12 @@
+## commit under test: 3b9c719e; T3 server: `npx t3@0.1.0 serve --host 127.0.0.1 --port <port> --no-browser --base-dir <lab>/t3` with T3CODE_TELEMETRY_ENABLED=false
+$ <lab>/bin/t3 --version
+t3 v0.1.0
+$ FM_HOME=<lab>/home bin/fm-t3-mcp.mjs login --access full-access --url http://127.0.0.1:<port> --t3 <lab>/bin/t3 --base-dir <lab>/t3
+(ran above; token file written mode 0600:)
+-rw-------@ <lab>/home/config/t3code-token
+$ node bin/fm-t3-mcp.mjs status --token-file <lab>/home/config/t3code-token
+{"ok":true,"origin":"http://127.0.0.1:56029","access":"full-access","expiresAt":"2026-11-19T15:54:44.412Z","daysLeft":30,"environmentId":"9e8d3e59-1fc8-44a5-a346-fa37c08fba57","serverVersion":"0.1.0","recordedServerVersion":"0.1.0","telemetry":"off"}
+exit=0
+$ FM_T3CODE_LIVE_E2E=1 FM_T3CODE_LIVE_TOKEN_FILE=<lab>/home/config/t3code-token bash tests/fm-backend-t3code-live-e2e.test.sh
+ok - t3code live transport: T3 0.1.0 environment 9e8d3e59-1fc8-44a5-a346-fa37c08fba57 passes the gate (telemetry=off)
+exit=0

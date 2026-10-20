@@ -1,0 +1,44 @@
+$ FM_HOME=<lab>/home bin/fm-teardown.sh t3s1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+fm-captain-hold: origin t3s1 has no completed captain-call inventory
+REFUSED: scout task t3s1 has not passed the captain-call completion gate.
+Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown.
+exit=1 elapsed=2s
+== thread after teardown
+{"ok":true,"threadId":"mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-954a07/1/demo","turnAt":"2026-10-20T15:57:46.474Z"}
+
+== state/t3s1.meta after teardown
+t3s1.busy-gen
+t3s1.busy-state
+t3s1.git-hooks
+t3s1.inbox
+t3s1.meta
+t3s1.status
+t3s1.turn-ended
+== slot files after teardown
+-rw-r--r--@ <lab>/pool/.treehouse/demo-954a07/1/demo/.claude/settings.local.json
+-rw-------@ <lab>/pool/.treehouse/demo-954a07/1/demo/CLAUDE.local.md
+== treehouse pool
+base  main  (repository default)
+1     leased       <lab>/pool/.treehouse/demo-954a07/1/demo  (detached)  (held by t3s1)
+## first attempt was refused by the captain-call gate (the haiku scout ran 'complete --none' without its task id); firstmate completes the inventory:
+$ FM_HOME=<lab>/home bin/fm-captain-hold.sh complete t3s1 --none
+complete: t3s1 captain-call inventory reviewed
+exit=0
+$ FM_HOME=<lab>/home bin/fm-teardown.sh t3s1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+🌳 Worktree returned to pool.
+teardown t3s1 complete (window mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7, worktree <lab>/pool/.treehouse/demo-954a07/1/demo)
+Backlog: t3s1 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move t3s1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0 elapsed=6s
+== thread after teardown
+{"ok":true,"threadId":"mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7","exists":true,"archived":true,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-954a07/1/demo","turnAt":"2026-10-20T15:57:46.474Z"}
+
+== state/ after teardown
+(no t3s1 records left in state/)
+== slot files after teardown
+No such file or directory
+No such file or directory
+== treehouse pool
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/demo-954a07/1/demo  (detached)

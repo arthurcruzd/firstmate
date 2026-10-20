@@ -1,0 +1,22 @@
+## config/backend=t3code in the lab home
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh t3s1 <lab>/home/projects/demo --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/demo-954a07/1/demo. Run 'treehouse return <lab>/pool/.treehouse/demo-954a07/1/demo' to release it.
+spawned t3s1 harness=claude kind=scout window=fm-t3s1 worktree=<lab>/pool/.treehouse/demo-954a07/1/demo
+exit=0 elapsed=7s
+== state/t3s1.meta
+window=fm-t3s1
+endpoint_task_id=t3s1
+worktree=<lab>/pool/.treehouse/demo-954a07/1/demo
+project=<lab>/home/projects/demo
+harness=claude
+kind=scout
+tasktmp=/tmp/fm-t3s1
+model=claude-haiku-5-5
+effort=low
+busy_gen=g1792511748.79847.4010
+spawn_gen=s1792511749.78147.16554
+backend=t3code
+t3_thread_id=mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7
+t3_project_id=mcp:62b3de9a-496c-49d6-866f-441fc69ee4e2

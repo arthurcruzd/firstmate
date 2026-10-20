@@ -1,0 +1,10 @@
+== before interrupt
+{"ok":true,"threadId":"mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3A47688c27-1acd-4117-97c6-84f3e1dbd9a7:ordinal:3","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-954a07/1/demo","turnAt":"2026-10-20T15:57:21.331Z"}
+worker's 'sleep 240' process: 1 running
+$ FM_HOME=<lab>/home bin/fm-control.sh t3s1 interrupt
+interrupt-delivered t3s1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+exit=0 elapsed=1s
+== thread state after
+{"ok":true,"threadId":"mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-954a07/1/demo","turnAt":"2026-10-20T15:57:46.474Z"}
+
+worker's 'sleep 240' process after interrupt: 0 running

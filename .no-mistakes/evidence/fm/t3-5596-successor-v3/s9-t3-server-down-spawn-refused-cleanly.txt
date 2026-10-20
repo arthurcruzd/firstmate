@@ -1,0 +1,16 @@
+## lab T3 v0.1.0 server stopped (kill of its listener); config/backend=t3code still set
+$ node bin/fm-t3-mcp.mjs status --token-file <lab>/home/config/t3code-token
+{"ok":false,"error":{"code":"transport","message":"T3 at http://127.0.0.1:56029 is unreachable: ECONNREFUSED: fetch failed"}}
+fm-t3-mcp: T3 at http://127.0.0.1:56029 is unreachable: ECONNREFUSED: fetch failed
+exit=1
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh t3down <lab>/home/projects/demo --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-t3-mcp: T3 at http://127.0.0.1:56029 is unreachable: ECONNREFUSED: fetch failed
+exit=1 elapsed=1s
+== records after the refused spawn
+(no t3down records in state/)
+== treehouse pool (no slot left leased)
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/demo-954a07/1/demo  (detached)
+== slot channel files left behind:
+No such file or directory
+No such file or directory

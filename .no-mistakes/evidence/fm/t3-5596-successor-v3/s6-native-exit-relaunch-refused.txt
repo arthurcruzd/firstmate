@@ -1,0 +1,12 @@
+$ FM_HOME=<lab>/home bin/fm-control.sh t3s1 exit
+error: task t3s1 runs on the t3code backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread
+exit=1
+$ FM_HOME=<lab>/home bin/fm-control.sh t3s1 relaunch
+error: task t3s1 runs on the t3code backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch
+exit=1
+== thread still alive and unarchived after both refusals:
+{"ok":true,"threadId":"mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-954a07/1/demo","turnAt":"2026-10-20T15:57:46.474Z"}
+
+== meta unchanged (still bound to the same thread):
+backend=t3code
+t3_thread_id=mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7

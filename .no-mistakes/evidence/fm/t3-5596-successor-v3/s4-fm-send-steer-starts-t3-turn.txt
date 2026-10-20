@@ -1,0 +1,26 @@
+== before: {"ok":true,"threadId":"mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-954a07/1/demo","turnAt":"2026-10-20T15:56:16.349Z"}
+$ FM_HOME=<lab>/home bin/fm-send.sh t3s1 'Follow-up: also report the third line of README.md. Append it to data/t3s1/report.md under a heading "Steer", then set your done status line again.'
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+== right after: {"ok":true,"threadId":"mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3A47688c27-1acd-4117-97c6-84f3e1dbd9a7:ordinal:2","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-954a07/1/demo","turnAt":"2026-10-20T15:56:57.426Z"}
+== inbox
+001.msg
+handled
+
+<lab>/home/state/t3s1.inbox/handled:
+== after the steered turn
+{"ok":true,"threadId":"mcp:47688c27-1acd-4117-97c6-84f3e1dbd9a7","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/demo-954a07/1/demo","turnAt":"2026-10-20T15:57:09.369Z"}
+== state/t3s1.status (the steered turn wrote a second line)
+done [at=1792511760]: README.md line 1 is '# demo'; report written; no project files edited
+done [at=1792511827]: README.md line 1 is '# demo', line 3 added per steer; report updated
+== data/t3s1/report.md 'Steer' section
+## Steer
+
+Third line of README.md: `A scratch project for the T3 lab.`
