@@ -1675,7 +1675,8 @@ spawn_abort_cleanup() {
   # turn, archives the thread (it must never act in a returned slot), removes
   # the environment files the spawn wrote there as teardown does, and hands a
   # lease back only once both succeeded; once T3 accepted the turn, or its
-  # reply was lost, the agent may be working there, so both are left in place.
+  # outcome is unproven, the agent may be working there, so both are left in
+  # place.
   if [ "$T3CODE_CREATE_UNCERTAIN" = 1 ]; then
     # t3_thread_launch has no idempotency key, so a launch whose outcome was
     # lost may have left a thread whose id never came back.
@@ -7343,7 +7344,7 @@ fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0
 
 if [ "$T3CODE_LAUNCH_UNCONFIRMED" = 1 ]; then
-  echo "error: the launch brief for $ID may already have been delivered to T3 thread $T: its reply was lost after the request went out. The task record is kept; inspect the thread in T3 Code, and if the brief is absent resend only the identical brief text, which reuses its request id within the hour" >&2
+  echo "error: the launch brief for $ID may already have been delivered to T3 thread $T: its outcome is unproven (a lost reply or a T3 error that can follow a commit). The task record is kept; inspect the thread in T3 Code, and if the brief is absent resend only the identical brief text, which reuses its request id within the hour" >&2
   exit 1
 fi
 

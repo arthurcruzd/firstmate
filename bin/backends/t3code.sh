@@ -339,7 +339,8 @@ fm_backend_t3code_capture() {  # <thread-id> <lines>
 }
 
 # empty: T3 accepted the message; unconfirmed: the message may have landed
-# after a lost reply or failed retry; send-failed: proven not delivered.
+# (a lost reply, a T3 error that can follow a commit, or a failed retry of a
+# held request id); send-failed: proven not delivered.
 # docs/t3code-backend.md owns request-id retention and safe retry rules.
 fm_backend_t3code_send_text_submit() {  # <thread-id> <text> <retries> <enter-sleep> <settle>
   local rc=0
