@@ -132,7 +132,7 @@ The crew-hosted recovery ordering and arm-and-acknowledge rule are owned by the 
   Retire any other finished source with the adapter's `retire`, which stays safe and idempotent even for one that already retired.
   Retirement stops future completions; it is independent of acknowledging a result already captured, which only `handled` does.
 
-`process-event source stranded` or `process-event source failed to start` (queue keys `procevent:<source-id>:stranded:<claim-token>` and `procevent:<source-id>:launch-failed:<registration-identity>-<episode-nonce>`)
+`process-event source stranded` or `process-event source failed to start` (queue keys `procevent:<source-id>:stranded:<claim-token>` and `procevent:<source-id>:launch-failed:<registration-identity>-<episode-nonce>`, plus that key with `-outage` appended when a second mate's reply source is still not collecting six hours into the episode)
 : Nothing was captured: the source named in the payload is registered but nothing is confirmed to be collecting from it. There is no result file to read and no `handled` call to make; the ordinary drain acknowledgement consumes the row.
 : The payload says which shape it is and what clears it. Follow it exactly as the arming section above describes - a `start` is named only for the reused-pid strand, a leaderless group is a human check and reclaims itself once its group is empty, and a launch that never proved its claim closes its own episode once a runner of that source collects.
 

@@ -461,6 +461,10 @@ runner_file()  { printf '%s/%s.runner\n' "$REG" "$1"; }
 staging_file() { printf '%s/.%s.%s.output\n' "$REG" "$1" "$2"; }
 stranded_file() { printf '%s/.%s.stranded\n' "$REG" "$1"; }
 launch_failed_file() { printf '%s/.%s.launch-failed\n' "$REG" "$1"; }
+launch_outage_file() { printf '%s/.%s.launch-outage\n' "$REG" "$1"; }
+# How long a second mate's reply source may go without collecting before its
+# open launch-failure episode is announced again (report_launch_outages).
+LAUNCH_OUTAGE_SECONDS=21600
 
 # Let the source's own adapter apply and acknowledge one captured result. See
 # the header for why this exists and what each exit means. An already
@@ -1716,6 +1720,36 @@ end_launch_failure_episode() {  # <source-id>
   rm -f -- "$(launch_failed_file "$1")"
 }
 
+# Announce a second mate's reply-source launch-failure episode once more when
+# it is still open LAUNCH_OUTAGE_SECONDS (six hours) after it began.
+#
+# A laptop that sleeps opens an episode every time it drops off, so the attended
+# supervision host keeps each first announcement off MAIN while that mate's
+# machine is unreachable (bin/fm-branch-prompt.sh). This is what still surfaces
+# a machine that never comes back: the key carries the episode's own suffix
+# plus "-outage", which the host's offer rule leaves to MAIN
+# (.pi/extensions/lib/fm-branch-dispatch.ts). It only reads the episode marker,
+# whose mtime is the episode's start, so the episode itself is untouched, and
+# its own marker names the episode it announced, so one episode announces it
+# at most once and a later outage announces again.
+report_launch_outages() {
+  local marker id record
+  for marker in "$REG"/.*.launch-failed; do
+    [ -f "$marker" ] && [ ! -L "$marker" ] || continue
+    id=${marker##*/}; id=${id#.}; id=${id%.launch-failed}
+    fm_procevent_source_id_valid "$id" || continue
+    [ "$(source_field "$id" adapter 2>/dev/null || true)" = remote-reply ] || continue
+    record=$(head -n 1 -- "$marker" 2>/dev/null) || continue
+    record=${record// /-}
+    case "$record" in ''|*[!A-Za-z0-9-]*) continue ;; esac
+    [ "$(fm_path_age "$marker")" -ge "$LAUNCH_OUTAGE_SECONDS" ] || continue
+    announce_source_once "$(launch_outage_file "$id")" "$record" \
+      "procevent:$id:launch-failed:$record-outage" \
+      "check: process-event source $id has collected nothing for more than $((LAUNCH_OUTAGE_SECONDS / 3600)) hours: no runner of it has returned a result or a clean empty window since its launch first failed to prove its claim. For a second mate's reply source this usually means that mate's machine has been asleep, off, or unreachable that whole time, so its replies are not reaching this home; check the machine and its route, then bin/fm-crew-state.sh for the mate. This is announced once per outage; the episode still ends on its own when the source collects again." \
+      || true
+  done
+}
+
 # Shared marker discipline for the announcements above: <marker> holds the
 # generation last reported as its first field, written before the wake and
 # removed again if the wake does not land, so a failed announcement retries
@@ -1902,6 +1936,7 @@ cmd_reconcile() {
       fi
     done
   fi
+  [ ! -d "$REG" ] || report_launch_outages
   printf 'reconciled: published=%s started=%s stopped=%s uncertain=%s failed=%s\n' \
     "$published" "$started" "$stopped" "$uncertain" "$failed"
   [ "$failed" -eq 0 ]
@@ -2300,6 +2335,7 @@ cmd_retire() {
   rm -f -- "$(runner_file "$id")"
   rm -f -- "$(stranded_file "$id")"
   rm -f -- "$(launch_failed_file "$id")"
+  rm -f -- "$(launch_outage_file "$id")"
   rm -f -- "$REG/.$id.reply."*
   fm_procevent_source_lock_release "$id"
   # A retired source produces no further answer, so drop any decision binding it

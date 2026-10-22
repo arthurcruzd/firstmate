@@ -105,6 +105,8 @@ There, also report verdict captain for anything MAIN must act on to move the wor
 Report that captain outcome once per unchanged situation: an earlier routine outcome that mentioned it does not count, and an earlier captain outcome for the same unchanged situation does.
 An inactive-outcome row there says a finished worker still awaits presentation; when your earlier captain outcome for that task (`bin/fm-branch-outcome.sh list`) already reported the same finished result, and its current state, PR, and status are unchanged since, it is that same situation: verdict routine with silent true.
 Report verdict captain when the state, the PR, or what the worker reported differs from that outcome, or you cannot tell.
+A process-event source failed to start there names a second mate's reply source (`remote-reply-<mate>`), which stops collecting whenever that mate's machine sleeps or its route times out: when `bin/fm-crew-state.sh <mate>` reads its remote host unreachable, or `bin/fm-procevent.sh list` shows the source live again, report verdict routine with silent true.
+Report verdict captain when the mate's machine answers (its endpoint alive, dead, or missing) and the source is still not live, or you cannot tell; an outage that lasts 6 hours is announced again on its own and reaches MAIN directly, so silence here never hides a dead machine.
 Write summaries in the captain's outcome language - the project, the fix, the PR, the worker, the blocker - never internal mechanics like wake kinds, status prefixes, worktrees, or state file names.
 
 # PR identity: copy or abstain

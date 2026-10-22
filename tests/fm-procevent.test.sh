@@ -2402,6 +2402,48 @@ ep_repair
 pe "$HEP" retire episode-src >/dev/null 2>&1 || true
 pass "a launch that cannot confirm is announced once per failure episode"
 
+# --- a second mate's reply source still failing after six hours is announced once more
+# A laptop that sleeps opens a launch-failure episode every time it drops off,
+# and the attended supervision host keeps those first announcements off MAIN
+# while the machine is unreachable, so a machine that never comes back must
+# still surface: an episode still open six hours after it began is announced
+# once more, under the episode's own key plus "-outage", which the host leaves
+# to MAIN. Only a reply source gets it, and only once per episode.
+HLO="$TMP_ROOT/hlo"; new_home "$HLO"
+pe_register "$HLO" remote-reply remote-reply-sleepy -- "$EP_SOURCE_CMD" >/dev/null \
+  || fail "could not register the reply source fixture"
+pe_register "$HLO" lavish board-src -- "$EP_SOURCE_CMD" >/dev/null \
+  || fail "could not register the board source fixture"
+for lo_id in remote-reply-sleepy board-src; do
+  lo_src="$HLO/state/procevent/$lo_id.source"
+  awk '/^argv:$/ { print; exit } { print }' "$lo_src" > "$lo_src.tmp" && cat "$lo_src.tmp" > "$lo_src" && rm -f -- "$lo_src.tmp" \
+    || fail "could not damage the $lo_id registration"
+done
+lo_outage_keys() { awk -F '\t' '$3 == "check" && $4 ~ /-outage$/ { print $4 }' "$HLO/state/.wake-queue" 2>/dev/null || true; }
+lo_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HLO" reconcile) || true
+assert_contains "$lo_out" "failed=2" "both damaged sources were not reported failed: $lo_out"
+[ "$(launch_failed_wake_count "$HLO" remote-reply-sleepy)" = 1 ] \
+  || fail "the reply source's first launch failure was not announced: $lo_out"
+[ -z "$(lo_outage_keys)" ] || fail "a fresh episode was announced as a long outage: $(lo_outage_keys)"
+lo_first=$(launch_failed_wake_keys "$HLO" remote-reply-sleepy)
+touch -t 202001010000 "$HLO/state/procevent/.remote-reply-sleepy.launch-failed" "$HLO/state/procevent/.board-src.launch-failed" \
+  || fail "could not age the episode markers"
+lo_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HLO" reconcile) || true
+[ "$(lo_outage_keys)" = "$lo_first-outage" ] \
+  || fail "a reply source episode open past six hours was not announced once under its own key: $(lo_outage_keys) (first: $lo_first)"
+lo_wake=$(awk -F '\t' '$3 == "check" && $4 ~ /-outage$/ { print $5 }' "$HLO/state/.wake-queue")
+assert_contains "$lo_wake" "remote-reply-sleepy has collected nothing for more than 6 hours" \
+  "the long-outage wake does not name the source and the bound: $lo_wake"
+lo_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HLO" reconcile) || true
+[ "$(lo_outage_keys | grep -c .)" = 1 ] || fail "one long outage was announced twice: $(lo_outage_keys)"
+[ "$(launch_failed_wake_count "$HLO" remote-reply-sleepy)" = 2 ] \
+  || fail "the long outage changed the episode itself: $(launch_failed_wake_keys "$HLO" remote-reply-sleepy)"
+pe "$HLO" retire remote-reply-sleepy >/dev/null 2>&1 || true
+pe "$HLO" retire board-src >/dev/null 2>&1 || true
+[ ! -e "$HLO/state/procevent/.remote-reply-sleepy.launch-outage" ] \
+  || fail "retiring the source left its long-outage marker"
+pass "a second mate's reply source still failing after six hours is announced once more, and no other source is"
+
 # --- one outage of a flapping source is one episode --------------------------
 # The reported shape: a remote secondmate's host is offline, so its source's
 # launches fail to confirm, then a runner briefly holds the claim while ssh

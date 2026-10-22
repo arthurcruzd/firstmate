@@ -2469,6 +2469,7 @@ A later fresh failure gets a fresh key, because the watcher never re-surfaces a 
   The detached launch discards that output.
 - The episode ends automatically once a runner of that source returns a result or a clean empty window it relistens after.
   A runner that was merely slow to claim, or a host that comes back, needs no operator action.
+- A second mate's reply source whose episode is still open six hours after it began is announced once more, keyed by the episode's own key plus `-outage`, because the attended supervision host keeps a reply source's first announcement off main while that mate's machine is unreachable ([offer rule](pi-supervision-branch.md#wake-dispatch)).
 - A source stranded on a claim nothing may automatically displace is announced the same way, once per stranded claim generation, as described above.
 - `bin/fm-watch.sh` surfaces both under their own headlines - `process-event source stranded` and `process-event source failed to start` - rather than as a captured result.
 

@@ -599,6 +599,58 @@ test_dispatch_offer_takes_an_inactive_outcome_main_already_has() {
   pass "dispatch entry: the host takes an inactive-outcome check only when it repeats a done result main already has"
 }
 
+# A second mate's reply source stops collecting whenever that mate's machine
+# sleeps, so its launch-failure check is the attended host's, scoped to that
+# mate, for the branch prompt to judge. Any other source, an unknown mate, a
+# joined headline, the episode's long-outage re-announcement, and the Pi
+# watcher's offer keep the close on main.
+test_dispatch_offer_takes_a_secondmate_reply_source_launch_failure() {
+  local home state out key reason
+  home="$TMP_ROOT/dispatch-launch-failed"
+  state="$home/state"
+  mkdir -p "$state"
+  printf 'window=remote:mac\nproject=/remote/firstmate\nkind=secondmate\nremote_host=mac\n' > "$state/mac.meta"
+  printf 'project=demo\nwindow=fm-demo\n' > "$state/demo.meta"
+  key='procevent:remote-reply-mac:launch-failed:2049-2090177-1128518782'
+  reason="check: process-event source failed to start: $key"
+  append_wake "$state" check "$key" 'check: process-event source remote-reply-mac is registered but its launch did not prove it took the source'"'"'s claim'
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+
+  out=$(printf '%s\n' "$reason" | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=1" "a second mate's reply-source launch failure must be the host's"
+  assert_contains "$out" "rows=1 2" "the host must claim the launch-failure row beside the routine row"
+  assert_contains "$out" "tasks=mac demo" "the claim must be scoped to the mate"
+  assert_contains "$out" "unscoped=0" "the claim must not be unscoped like an away check row"
+  out=$(printf '%s\n' "$reason" | FM_HOME="$home" node --input-type=module -e '
+    const dispatch = await import(process.argv[1]);
+    const verdict = dispatch.branchOfferForWake(process.env.FM_HOME + "/state", process.argv[2], false);
+    process.stdout.write(`eligible=${verdict.eligible ? 1 : 0}\n`);
+  ' "$ROOT/.pi/extensions/lib/fm-branch-dispatch.ts" "$reason")
+  assert_contains "$out" "eligible=0" "the Pi watcher's offer must keep the close on main"
+  out=$(printf 'check: process-event result captured: procevent:board:1; process-event source failed to start: %s\n' "$key" | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a joined headline must stay main's"
+
+  append_wake "$state" check "$key-outage" 'check: process-event source remote-reply-mac has collected nothing for more than 6 hours'
+  out=$(printf 'check: process-event source failed to start: %s-outage\n' "$key" | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a long-outage re-announcement must reach main"
+  assert_contains "$out" "rows=1 2" "the long-outage row must stay main's"
+  out=$(printf '%s %s-outage\n' "$reason" "$key" | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a close naming the long-outage row beside a routine one must stay main's"
+
+  : > "$state/.wake-queue"
+  append_wake "$state" check procevent:board-src:launch-failed:12-34-56 'check: process-event source board-src is registered but its launch did not prove it took the source'"'"'s claim'
+  out=$(printf 'check: process-event source failed to start: procevent:board-src:launch-failed:12-34-56\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "any other source's launch failure must stay main's"
+  : > "$state/.wake-queue"
+  append_wake "$state" check procevent:remote-reply-gone:launch-failed:12-34-56 'check: process-event source remote-reply-gone is registered but its launch did not prove it took the source'"'"'s claim'
+  out=$(printf 'check: process-event source failed to start: procevent:remote-reply-gone:launch-failed:12-34-56\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a reply source for no recorded second mate must stay main's"
+  : > "$state/.wake-queue"
+  out=$(printf '%s\n' "$reason" | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a close whose row is no longer queued must stay main's"
+  pass "dispatch entry: the host takes a second mate's reply-source launch failure, and its long outage still reaches main"
+}
+
 # --- host loop ----------------------------------------------------------------
 
 
@@ -3157,6 +3209,7 @@ test_dispatch_entry_scopes_rows_and_renders_the_away_tail
 test_dispatch_offer_judges_the_resurface_by_its_queue
 test_dispatch_offer_takes_a_t3_task_declared_wait_recheck
 test_dispatch_offer_takes_an_inactive_outcome_main_already_has
+test_dispatch_offer_takes_a_secondmate_reply_source_launch_failure
 test_branch_outcomes_only_on_a_host_home_off_pi
 test_branch_outcomes_put_captain_first_and_collapse_routine_overflow
 test_branch_outcomes_collapse_repeated_captain_outcomes_per_task

@@ -152,6 +152,13 @@ export interface UnreadWakeScope {
    * main's too (branchOfferForWake).
    */
   inactiveLeftForMain: boolean;
+  /**
+   * The exact "key" field of every check row an attended host's scan claimed
+   * (a second mate's reply-source launch-failure row, remoteReplyLaunchFailureMate),
+   * so a `check: process-event source failed to start:` close is the host's
+   * only when every key it names is one of these (branchOfferForWake).
+   */
+  hostCheckKeys: string[];
 }
 
 const EMPTY_SCOPE: UnreadWakeScope = {
@@ -167,6 +174,7 @@ const EMPTY_SCOPE: UnreadWakeScope = {
   queuedRows: 0,
   taskByWakeKey: {},
   inactiveLeftForMain: false,
+  hostCheckKeys: [],
 };
 const UNSAFE_SCOPE: UnreadWakeScope = {
   status: "unsafe",
@@ -181,6 +189,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
   queuedRows: 0,
   taskByWakeKey: {},
   inactiveLeftForMain: false,
+  hostCheckKeys: [],
 };
 
 // scopeForUnreadWake is the single owner of branch-eligibility classification
@@ -525,6 +534,38 @@ function inactiveDoneAlreadyReported(
   }
 }
 
+// bin/fm-procevent.sh report_launch_failure's queue key for a second mate's
+// reply source (bin/fm-procevent-remote-reply.sh source-id): the source's
+// launch did not prove its claim, as it does not while the mate's machine
+// sleeps or its route times out. The same episode's long-outage re-announcement
+// (report_launch_outages) ends in "-outage" and does not match, so it stays
+// main's.
+const REMOTE_REPLY_LAUNCH_FAILED_KEY =
+  /^procevent:remote-reply-([A-Za-z0-9._-]+?):launch-failed:[A-Za-z0-9]+(?:-[0-9]+)*$/;
+
+// The second mate an attended host's branch may take a reply-source
+// launch-failure row for, or null when the row stays main's. The branch
+// prompt has the host judge it: an unreachable machine or an owned source
+// under the outage bound is routine and silent, and a reachable machine whose
+// source still cannot start is the captain's (bin/fm-branch-prompt.sh).
+function remoteReplyLaunchFailureMate(
+  key: string,
+  secondmates: ReadonlySet<string>,
+  metadata: ReadonlyMap<string, string>,
+): string | null {
+  const mate = key.match(REMOTE_REPLY_LAUNCH_FAILED_KEY)?.[1];
+  if (!mate || !secondmates.has(mate) || !metadata.get(mate)) return null;
+  return mate;
+}
+
+// The queue keys a close names when it is exactly bin/fm-watch.sh's
+// `check: process-event source failed to start: <keys>` headline, or null for
+// any other close, a joined headline included.
+function launchFailureCloseKeys(message: string): string[] | null {
+  const match = message.trim().match(/^check: process-event source failed to start:((?:\s+procevent:\S+)+)$/);
+  return match ? match[1].split(/\s+/).filter(Boolean) : null;
+}
+
 // Every row of the outcome store, or null when it is absent or any line fails
 // to parse.
 function readOutcomeStore(state: string): unknown[] | null {
@@ -597,6 +638,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
   let presentationCursor: ReturnType<typeof readPresentationCursor> | undefined;
   let outcomeStore: unknown[] | null | undefined;
   let inactiveLeftForMain = false;
+  const hostCheckKeys: string[] = [];
   for (const line of rows) {
     const fields = line.split("\t");
     if (fields.length < 5 || !/^[0-9]+$/.test(fields[1])) return UNSAFE_SCOPE;
@@ -625,17 +667,20 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
       }
       // On the attended supervision host, an inactive-outcome row that only
       // repeats a done result MAIN already has is the branch's, scoped to
-      // that child (inactiveDoneAlreadyReported).
+      // that child (inactiveDoneAlreadyReported), and so is a second mate's
+      // reply-source launch-failure row, scoped to that mate
+      // (remoteReplyLaunchFailureMate).
       const child = attendedHost && key.startsWith("inactive-outcome:")
         ? inactiveDoneAlreadyReported(state, fields[4] ?? "", metadata, () => {
           if (outcomeStore === undefined) outcomeStore = readOutcomeStore(state);
           return outcomeStore;
         })
-        : null;
+        : attendedHost ? remoteReplyLaunchFailureMate(key, secondmates, metadata) : null;
       if (child) {
         projects.add(metadata.get(child)!);
         eligibleTasks.add(child);
         eligibleSeqs.push(seq);
+        if (!key.startsWith("inactive-")) hostCheckKeys.push(key);
       } else if (key.startsWith("inactive-")) {
         inactiveLeftForMain = true;
       }
@@ -787,6 +832,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     queuedRows: rows.length,
     taskByWakeKey: Object.fromEntries(taskByKey),
     inactiveLeftForMain,
+    hostCheckKeys,
   };
 }
 
@@ -833,7 +879,11 @@ export interface BranchOfferVerdict {
 // the rows bin/fm-inactive-reconcile.sh queued: the branch may take it only
 // when every such row is one scopeForUnreadWake lets the branch claim (a done
 // result MAIN already has), so a row that still needs MAIN keeps the close on
-// main. The Pi watcher (attendedHost false) keeps it main's.
+// main. A `check: process-event source failed to start:` close there is the
+// branch's only when every key it names is a row the scan claimed (a second
+// mate's reply-source launch failure), so any other source, or an episode's
+// long-outage re-announcement, keeps it on main. The Pi watcher (attendedHost
+// false) keeps both main's.
 //
 // The away posture collapses that partition: every actionable row is
 // branch-eligible and the trigger class no longer forces anything to main
@@ -842,7 +892,8 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
   const heartbeat = /^heartbeat($|:)/.test(message);
   const isRearmResurface = message.trim() === "check: rearm-resurface";
   const isHostInactiveOutcome = attendedHost && message.trim() === "check: inactive-outcome";
-  const isCheckTrigger = /^check:/.test(message) && !isRearmResurface && !isHostInactiveOutcome;
+  const hostLaunchFailureKeys = attendedHost ? launchFailureCloseKeys(message) : null;
+  const isCheckTrigger = /^check:/.test(message) && !isRearmResurface && !isHostInactiveOutcome && !hostLaunchFailureKeys;
   const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
   const triggerKeys = /^signal:/.test(message)
     ? message
@@ -863,7 +914,8 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
   const attendedEligible = !isCheckTrigger && !isNeedsDecisionTrigger && (
     isRearmResurface
       ? nothingLeftForMain(attendedScope)
-      : attendedScope.eligible && !(isHostInactiveOutcome && attendedScope.inactiveLeftForMain)
+      : attendedScope.eligible && !(isHostInactiveOutcome && attendedScope.inactiveLeftForMain) &&
+        (hostLaunchFailureKeys?.every((key) => attendedScope.hostCheckKeys.includes(key)) ?? true)
   );
   const eligible = afk ? scope.eligible || (isRearmResurface && nothingLeftForMain(scope)) : attendedEligible;
   return { scope, heartbeat, eligible, awayOnly: Boolean(eligible && !attendedEligible) };
