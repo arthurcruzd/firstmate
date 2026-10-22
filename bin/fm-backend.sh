@@ -1081,7 +1081,7 @@ fm_backend_worktree_path() {  # <backend> <worktree-id>
   esac
 }
 
-# fm_backend_busy_state: native busy/idle/unknown for Herdr and T3 Code;
+# fm_backend_busy_state: native busy/idle/unknown for Herdr, Rex, and T3 Code;
 # backends without a native primitive report unknown. Recorded-task consumers
 # use fm-busy-lib.sh's shared classifier, which owns native-state precedence
 # and harness fallbacks. Delivery-only callers own their separate guards.

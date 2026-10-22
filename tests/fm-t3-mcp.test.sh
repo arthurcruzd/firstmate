@@ -708,6 +708,34 @@ test_jsonrpc_server_error_is_not_proven_refusal() {
   pass "fm-t3-mcp: a JSON-RPC server error after a send or launch is unconfirmed, never a proven refusal"
 }
 
+# T3's catch-all orchestration_error can follow a committed send or launch, so
+# it is unconfirmed, while a specific typed refusal still proves non-delivery.
+test_orchestration_error_is_not_proven_refusal() {
+  local thread project
+  fresh_case orchestration-error
+  thread=$(new_thread)
+  printf 'committed before the error' > "$TMP_ROOT/msg-orch"
+  t3_fake_set 'w.committedErrorTools = { t3_thread_send: "orchestration_error" }'
+  mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-orch" --client-request-id req-orch
+  expect_code 7 "$RC" "an orchestration_error after the send went out is unconfirmed, got '$OUT'"
+  assert_equals delivery_unconfirmed "$(field "$OUT" error.code)" "the send verdict is delivery_unconfirmed"
+  assert_equals 1 "$(t3_fake_items "$thread" "committed before the error")" "the fake committed the send before its error"
+  mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-orch" --client-request-id req-orch
+  expect_code 0 "$RC" "the retry under the same request id: $ERR"
+  assert_equals 1 "$(t3_fake_items "$thread" "committed before the error")" "the retry lands on the committed message"
+  t3_fake_set 'w.failTools = { t3_thread_send: { code: "thread_not_sendable", message: "Thread is archived and cannot receive messages." } }'
+  mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-orch" --client-request-id req-refused
+  expect_code 3 "$RC" "a specific typed refusal of the send is still proven non-delivery"
+  t3_fake_set 'w.failTools = {}'
+  mcp project-ensure --root "$TMP_ROOT/proj"
+  project=$(field "$OUT" projectId)
+  t3_fake_set 'w.committedErrorTools = { t3_thread_launch: "orchestration_error" }'
+  mcp launch --project "$project" --title fm-orch --model-selection "$SEL" --worktree "$WT"
+  expect_code 1 "$RC" "a launch answered with orchestration_error is uncertain, not refused, got '$OUT'"
+  assert_equals launch_unconfirmed "$(field "$OUT" error.code)" "the launch verdict is launch_unconfirmed"
+  pass "fm-t3-mcp: T3's orchestration_error after a send or launch is unconfirmed; a specific typed refusal stays proven"
+}
+
 # One wait is re-armed in slices under the 300 s Node's fetch allows a reply,
 # until the run ends or the caller's own timeout passes.
 test_long_wait_rearms_in_slices() {
@@ -769,5 +797,6 @@ test_helper_runs_through_symlinked_path
 test_empty_reply_is_never_success
 test_watch_escalates_a_replaced_approval
 test_jsonrpc_server_error_is_not_proven_refusal
+test_orchestration_error_is_not_proven_refusal
 test_long_wait_rearms_in_slices
 test_capture_clamps_lines_and_closes_session

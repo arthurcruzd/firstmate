@@ -164,8 +164,10 @@ console.error("error: " + d.error.message);
 }
 
 # One logical delivery keeps one client request id across retries and
-# restarts: T3 derives the message id from it, so a resend after a lost reply
-# lands on the message T3 already committed instead of a second one. A caller
+# restarts: T3 derives the message id from it within the auth session that
+# sent it, so a resend after a lost reply lands on the message T3 already
+# committed instead of a second one, until the captain signs in again; under
+# a new sign-in the same id is a new delivery and can duplicate. A caller
 # that holds its own logical delivery (the away daemon's frozen digest) passes
 # its id in FM_T3CODE_CLIENT_REQUEST_ID, with no expiry. Otherwise the id is
 # recorded under state/t3code-sends, keyed by thread and text, until an

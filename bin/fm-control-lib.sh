@@ -372,7 +372,7 @@ fm_control_backend_exit_supported() {  # <backend>
 # nightlies refused a driver change outright), never the fresh agent a
 # relaunch promises. So t3code has no replacement to launch and a relaunch
 # is refused before anything is stopped (docs/t3code-backend.md "Active
-# limits"). zellij, orca, and cmux never reach this table: they fail
+# limits"). zellij, orca, cmux, and paseo never reach this table: they fail
 # fm_control_backend_state_verified first.
 fm_control_backend_relaunch_supported() {  # <backend>
   case "${1-}" in

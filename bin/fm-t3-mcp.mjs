@@ -49,19 +49,24 @@
 //     access, instance, model, and every requested option value; a refused
 //     thread that does not then read back archived with no active run exits
 //     1, because it may still be live. A read-back that fails also archives
-//     and exits 1, since the thread exists but its binding is unproven. A transport or unexpected failure of the
+//     and exits 1, since the thread exists but its binding is unproven. T3's
+//     catch-all orchestration_error can follow a created thread, so it exits
+//     1 as well. A transport or unexpected failure of the
 //     gate, before t3_thread_launch is requested, exits 8: no thread was
 //     launched. Without --message-file the thread is created idle.
 //   fm-t3-mcp.mjs send --thread <id> --message-file <file> --client-request-id <id>
 //     t3_thread_send mode auto: start an idle thread's next turn or steer the
 //     running one. T3 derives the message and command ids from the client
-//     request id, so a retry with the same id is the same delivery. T3 commits
-//     a send before it replies, so a reply lost after the request went out
-//     exits 7 (delivery_unconfirmed): the message may have landed, and only a
-//     retry with the same client request id is safe. A refusal before the
-//     request went out, or T3's own typed refusal, is proven non-delivery for
-//     this attempt; exit 3 is only T3's refusal of the send itself, so a
-//     typed failure of the gate's reads exits 1.
+//     request id within the auth session that sent it, so a retry with the
+//     same id under the same sign-in is the same delivery; after a fresh
+//     sign-in it is a new delivery and can duplicate. T3 commits a send
+//     before it replies, so a reply lost after the request went out, or T3's
+//     catch-all orchestration_error, exits 7 (delivery_unconfirmed): the
+//     message may have landed, and only a retry with the same client request
+//     id is safe. A refusal before the request went out, or T3's own specific
+//     typed refusal, is proven non-delivery for this attempt; exit 3 is only
+//     T3's refusal of the send itself, so a typed failure of the gate's reads
+//     exits 1.
 //   fm-t3-mcp.mjs state --thread <id>
 //     exists, archived, status, activeRunId, pendingRequestCount,
 //     worktreePath, and turnAt (the latest run's completion, else its start or
@@ -134,7 +139,7 @@
 // (no credential, expired credential, revoked credential, environment
 // mismatch, capability gate, or a launch binding mismatch whose thread read
 // back archived); 5 and 6 as thread-for-root says; 7 a
-// mutation whose request went out but whose reply was lost (send); 8 a launch
+// mutation whose request went out but whose outcome is unproven (send); 8 a launch
 // that failed before t3_thread_launch was requested (launch). A failure prints {"ok":false,"error":{...}} on stdout and one line on stderr.
 // A credential within EXPIRY_WARN_DAYS of expiry adds a stderr warning on
 // every verb and a `credentialWarning` field on status.
@@ -176,6 +181,9 @@ const WAIT_SLICE_MS = 240_000;
 // JSON-RPC errors that refuse the request itself: parse error, invalid
 // request, unknown method, invalid params.
 const REFUSED_REQUEST_CODES = new Set([-32700, -32600, -32601, -32602]);
+// T3's catch-all tool failure, which can follow a committed mutation, so it
+// never proves a send or launch was not applied.
+const UNPROVEN_TOOL_ERROR = "orchestration_error";
 const CAPTURE_LINES_MAX = 500;
 // The activity item T3 keeps for each permission approval, and the status it
 // holds until the approval is answered (docs/verification/runtime-backends.md).
@@ -842,7 +850,15 @@ async function launch(flags) {
     workspaceStrategy,
     ...(message ? { message } : {}),
   };
-  const out = await session.call("t3_thread_launch", args);
+  let out;
+  try {
+    out = await session.call("t3_thread_launch", args);
+  } catch (err) {
+    if (err instanceof Refusal && err.code === UNPROVEN_TOOL_ERROR) {
+      throw new Refusal("launch_unconfirmed", `${err.message}, which can follow a created thread; inspect t3_thread_list before retrying`, 1);
+    }
+    throw err;
+  }
   if (!out?.threadId) throw new Refusal("launch_unconfirmed", "t3_thread_launch returned no threadId; inspect t3_thread_list before retrying", 1);
   const archiveLaunched = () => archiveThread(session, out.threadId, ARCHIVE_TIMEOUT_MS).then(() => true, () => false);
   // Prove the binding T3 recorded before anyone relies on it.
@@ -899,12 +915,13 @@ async function send(flags) {
   try {
     out = await session.call("t3_thread_send", args);
   } catch (err) {
-    // A typed T3 refusal (3) or a refused credential (4) proves the message
-    // was not taken; anything else happened after the request went out.
-    if (err instanceof Refusal && (err.exit === 3 || err.exit === 4)) throw err;
+    // A specific typed T3 refusal (3) or a refused credential (4) proves the
+    // message was not taken; anything else happened after the request went
+    // out.
+    if (err instanceof Refusal && (err.exit === 3 || err.exit === 4) && err.code !== UNPROVEN_TOOL_ERROR) throw err;
     throw new Refusal(
       "delivery_unconfirmed",
-      `the reply to t3_thread_send on thread ${args.threadId} was lost (${err.message}); T3 may have committed it, so retry only with client request id ${args.clientRequestId}`,
+      `the outcome of t3_thread_send on thread ${args.threadId} is unproven (${err.message}); T3 may have committed it, so retry only with client request id ${args.clientRequestId}`,
       7,
       { threadId: args.threadId, clientRequestId: args.clientRequestId },
     );

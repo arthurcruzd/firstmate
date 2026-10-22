@@ -38,7 +38,9 @@
 //   ({name: count}: answer 200 with an empty event stream and no effect, as a
 //   server that shuts down cleanly before replying), rpcErrorTools ({name:
 //   code}: apply the call once, then answer with a JSON-RPC error of that
-//   code, as a server that failed after committing), waitCapMs (one
+//   code, as a server that failed after committing), committedErrorTools
+//   ({name: code}: apply the call once, then answer with a tool error of that
+//   code, as T3's catch-all orchestration_error after a commit), waitCapMs (one
 //   t3_thread_wait times out after at most this long), probePath (each log
 //   line records whether it exists), providers (the orchestrator_capabilities
 //   catalog; default FAKE_PROVIDERS), projects ([{id, title, workspaceRoot,
@@ -382,6 +384,14 @@ async function mcp(req, res) {
       saveWorld(fresh);
       log(fresh, { ...entry, rpcError: code });
       return json(res, 200, { jsonrpc: "2.0", id: msg.id, error: { code, message: "internal error" } }, { "mcp-session-id": "sess-fake" });
+    }
+    if ((w.committedErrorTools ?? {})[msg.params.name] !== undefined) {
+      const fresh = loadWorld();
+      const code = fresh.committedErrorTools[msg.params.name];
+      delete fresh.committedErrorTools[msg.params.name];
+      saveWorld(fresh);
+      log(fresh, { ...entry, committedError: code });
+      return json(res, 200, { jsonrpc: "2.0", id: msg.id, result: err(code, "The operation could not be completed.") }, { "mcp-session-id": "sess-fake" });
     }
   } else {
     return json(res, 200, { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
