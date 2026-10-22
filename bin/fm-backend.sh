@@ -36,7 +36,6 @@
 # rex`/`FM_BACKEND=rex`/config/backend, and behind runtime auto-detection when
 # firstmate itself runs directly inside a Rex block (TERM_PROGRAM=rex with
 # REX_BLOCK); see docs/rex-backend.md.
-# marker is not a selection; see docs/paseo-backend.md.
 # The experimental T3 Code adapter owns agent sessions over T3's /mcp while
 # Treehouse owns task worktrees. It is selected explicitly only.
 # Codex App is intentionally not in the known set yet.
