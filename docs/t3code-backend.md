@@ -127,7 +127,7 @@ T3 derives the message id from the client request id and commits a send before i
 For ordinary sends and doorbells, the adapter reuses the id stored in a record keyed by thread and text for up to 60 minutes from creation, ending that delivery earlier on confirmation or a typed send refusal.
 After that window, identical text starts a new delivery, so verify an older unconfirmed send in T3 Code before resending it.
 An accepted delivery's outcome (its request id, `messageId`, `runId`, and `delivery`) is kept for a day as `state/t3code-sends/<request-id>.accepted`, so it can be reconciled against T3's own message and run.
-The submit primitive reports `empty` when T3 accepts the message, `unconfirmed` when its reply was lost, and `send-failed` only for proven non-delivery.
+The submit primitive reports `empty` when T3 accepts the message, `unconfirmed` when its reply was lost or T3 answered with a JSON-RPC server error, which does not prove the message was not taken, and `send-failed` only for proven non-delivery.
 The direct-submit plane of `fm-send.sh` reports `unconfirmed` as exit 3 with any reply expectation kept armed; an inbox steer's exit status still follows the [durable-record contract](../bin/fm-send.sh).
 After `unconfirmed`, an unmarked send can reuse its request id by resending identical text within that window; a marked secondmate request is not resent, because a rerun mints a new reply correlation and so a new message.
 While the logical delivery still holds its id, a retry that fails for any reason other than T3 refusing the send, including an unreachable server, stays `unconfirmed` and keeps that id.
@@ -162,6 +162,7 @@ If spawn aborts after launching the thread and before T3 accepts its launch brie
 After a proven close it removes the environment files the spawn wrote into the slot, as teardown does, and keeps the lease when that fails.
 `t3_thread_launch` has no idempotency key, so a lost launch reply or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and never retries.
 A gate failure before `t3_thread_launch` is requested launched nothing, so spawn returns the lease.
+A leased path that fails the worktree isolation check may be the spawning checkout itself, so spawn neither cleans nor returns it and prints the manual `treehouse return --force` step to run once it is inspected.
 When the thread id is known, the helper attempts to archive it and reports its id, but even an accepted archive request leaves the lease held until the archive is verified.
 A lost reply to the launch brief means the brief may already be running, so spawn keeps the task record, lease, and thread, never resends the brief itself, and exits nonzero with the thread to inspect.
 An identical brief resend follows the [ordinary-send retention window above](#current-lifecycle-and-safety); verify delivery in T3 Code before resending after that window.
@@ -242,7 +243,7 @@ Keep each task's recorded thread id and use normal steering and teardown after s
 If a task's thread no longer reads back, release the task by hand:
 
 1. Archive the task's thread in T3 Code and satisfy the [cleanup proof above](#current-lifecycle-and-safety) before releasing its worktree or home.
-2. For a worker, undo the per-worktree environment with `bin/fm-t3code-codex-env.sh cleanup <worktree>`, then remove `CLAUDE.local.md` and `.claude/settings.local.json` from the worktree.
+2. For a worker, undo the per-worktree environment with `bin/fm-t3code-codex-env.sh cleanup <worktree>`, then remove `.claude/settings.local.json` and, unless the project tracks it, `CLAUDE.local.md` from the worktree.
    Skipping this hands the next holder of the slot a hidden `.codex/config.toml` overlay carrying the dead task's environment, and refuses the next T3 Codex spawn there.
    For a secondmate, release its own tasks in this same order, then run `bin/fm-t3code-codex-env.sh cleanup <home>`, remove the keys `FM_T3CODE_ENV_KEYS` lists, and `FM_T3CODE_ENV_KEYS` itself, from the home's `.claude/settings.local.json`, keeping the home's own entries, and remove the `config/t3code-token` symlink before releasing the home.
 3. For a worker, return its slot with `treehouse return --force <worktree>` from its project.
