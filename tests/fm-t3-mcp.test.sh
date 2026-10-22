@@ -652,6 +652,88 @@ test_watch_reports_failed_waits_not_timeout() {
   pass "fm-t3-mcp watch: waits that all fail are an error, not a timeout"
 }
 
+# Approval A is escalated, then answered in T3 Code, and approval B arrives
+# before the next watch: the count is unchanged, but B is a new request.
+test_watch_escalates_a_replaced_approval() {
+  local sig
+  fresh_case watch-approvals
+  t3_fake_set 'w.threads = { "thread-p": { threadId: "thread-p", projectId: "p", status: "running", activeRunId: "run-p", archived: false, worktreePath: null,
+    items: [{ itemId: "item-msg", type: "user_message", status: "completed", text: "go" }, { itemId: "item-appr-a", type: "approval_request", status: "waiting", text: "run rm?" }],
+    runs: [{ runId: "run-p", ordinal: 1, status: "running" }],
+    runtimeRequests: [{ id: "req-appr-a", kind: "approval", status: "pending" }] } }'
+  mcp watch --thread thread-p --timeout-ms 200
+  expect_code 0 "$RC" "watch: $ERR"
+  assert_equals blocked "$(field "$OUT" event)" "a pending approval is a blocked event"
+  sig=$(field "$OUT" signature)
+  assert_equals 'q:;a:1:item-appr-a' "$sig" "the signature names the approval's own activity item"
+  mcp watch --thread thread-p --timeout-ms 200 --escalated "thread-p=$sig"
+  assert_equals timeout "$(field "$OUT" event)" "the escalated approval does not block again"
+  t3_fake_set 'const t = w.threads["thread-p"]; t.items[1].status = "completed"; t.runtimeRequests[0].status = "resolved";
+    t.items.push({ itemId: "item-appr-b", type: "approval_request", status: "waiting", text: "run curl?" }); t.runtimeRequests.push({ id: "req-appr-b", kind: "approval", status: "pending" })'
+  mcp watch --thread thread-p --timeout-ms 200 --escalated "thread-p=$sig"
+  expect_code 0 "$RC" "watch after the replacement: $ERR"
+  assert_equals blocked "$(field "$OUT" event)" "a replacement approval with the same count is escalated"
+  assert_equals 'q:;a:1:item-appr-b' "$(field "$OUT" signature)" "the new signature names the new approval"
+  mcp requests --thread thread-p
+  assert_equals 'q:;a:1:item-appr-b' "$(field "$OUT" signature)" "requests computes the same signature as watch"
+  assert_equals 1 "$(field "$OUT" approvals)" "requests still counts the approval"
+  pass "fm-t3-mcp watch: each pending approval is identified, so one answered and replaced between watches escalates again"
+}
+
+# A JSON-RPC server error can follow a committed mutation, so only a refusal of
+# the request itself is proof that nothing was applied.
+test_jsonrpc_server_error_is_not_proven_refusal() {
+  local thread project
+  fresh_case rpc-server-error
+  thread=$(new_thread)
+  printf 'committed once' > "$TMP_ROOT/msg-rpc"
+  t3_fake_set 'w.rpcErrorTools = { t3_thread_send: -32603 }'
+  mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-rpc" --client-request-id req-rpc
+  expect_code 7 "$RC" "a server error after the send went out is unconfirmed, got '$OUT'"
+  assert_equals 1 "$(t3_fake_items "$thread" "committed once")" "the fake committed the send before its error"
+  mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-rpc" --client-request-id req-rpc
+  expect_code 0 "$RC" "the retry under the same request id: $ERR"
+  assert_equals 1 "$(t3_fake_items "$thread" "committed once")" "the retry lands on the committed message"
+  mcp project-ensure --root "$TMP_ROOT/proj"
+  project=$(field "$OUT" projectId)
+  t3_fake_set 'w.rpcErrorTools = { t3_thread_launch: -32603 }'
+  mcp launch --project "$project" --title fm-rpc --model-selection "$SEL" --worktree "$WT"
+  expect_code 1 "$RC" "a launch answered with a server error is uncertain, not refused, got '$OUT'"
+  pass "fm-t3-mcp: a JSON-RPC server error after a send or launch is unconfirmed, never a proven refusal"
+}
+
+# One wait is re-armed in slices under the 300 s Node's fetch allows a reply,
+# until the run ends or the caller's own timeout passes.
+test_long_wait_rearms_in_slices() {
+  local ender first
+  fresh_case wait-slices
+  t3_fake_set 'w.waitCapMs = 200; w.threads = { "thread-s": { threadId: "thread-s", projectId: "p", status: "running", activeRunId: "run-s", archived: false, worktreePath: null, items: [],
+    runs: [{ runId: "run-s", ordinal: 1, status: "running" }] } }'
+  ( sleep 0.8; t3_fake_set 'w.threads["thread-s"].runs[0].status = "completed"; w.threads["thread-s"].activeRunId = null; w.threads["thread-s"].status = "completed"' ) &
+  ender=$!
+  mcp wait --thread thread-s --run run-s --timeout-ms 600000
+  wait "$ender"
+  expect_code 0 "$RC" "wait: $ERR"
+  assert_equals completed "$(field "$OUT" status)" "the wait outlasts each bounded slice until the run ends"
+  assert_equals false "$(field "$OUT" timedOut)" "a run that ended inside the caller's timeout is not a timeout"
+  first=$(t3_fake_calls t3_thread_wait | head -1)
+  assert_equals 240000 "$(field "$first" timeoutMs)" "one wait asks T3 for at most 240 s"
+  [ "$(t3_fake_calls t3_thread_wait | wc -l)" -ge 2 ] || fail "a slice that timed out before the deadline must re-arm"
+  pass "fm-t3-mcp wait: a long wait re-arms in slices under Node's 300 s reply limit"
+}
+
+test_capture_clamps_lines_and_closes_session() {
+  local thread
+  fresh_case capture-clamp
+  thread=$(new_thread)
+  : > "$T3_FAKE_LOG"
+  mcp capture --thread "$thread" --lines 1000
+  expect_code 0 "$RC" "a capture above 500 lines reads the last 500: $ERR"
+  case "$(printf '%s\n' "$OUT" | tail -1)" in 't3code: status='*) ;; *) fail "the clamped capture still ends with the status line, got '$OUT'" ;; esac
+  assert_grep '"method":"DELETE","session":"sess-fake"' "$T3_FAKE_LOG" "the verb ends the MCP session it opened"
+  pass "fm-t3-mcp capture: --lines above 500 reads the last 500, and the verb ends its MCP session"
+}
+
 t3_fake_start "$TMP_ROOT/server"
 test_login_writes_private_credential_and_never_prints_token
 test_login_origin_defaults
@@ -679,3 +761,7 @@ test_watch_is_event_driven_and_bounded
 test_watch_reports_failed_waits_not_timeout
 test_helper_runs_through_symlinked_path
 test_empty_reply_is_never_success
+test_watch_escalates_a_replaced_approval
+test_jsonrpc_server_error_is_not_proven_refusal
+test_long_wait_rearms_in_slices
+test_capture_clamps_lines_and_closes_session

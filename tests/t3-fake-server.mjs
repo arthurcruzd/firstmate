@@ -36,12 +36,17 @@
 //   without a reply or effect that many times), dropReplyTools ({name:
 //   count}: apply the call, then close without a reply), emptyReplyTools
 //   ({name: count}: answer 200 with an empty event stream and no effect, as a
-//   server that shuts down cleanly before replying), probePath (each log
+//   server that shuts down cleanly before replying), rpcErrorTools ({name:
+//   code}: apply the call once, then answer with a JSON-RPC error of that
+//   code, as a server that failed after committing), waitCapMs (one
+//   t3_thread_wait times out after at most this long), probePath (each log
 //   line records whether it exists), providers (the orchestrator_capabilities
 //   catalog; default FAKE_PROVIDERS), projects ([{id, title, workspaceRoot,
 //   defaultModelSelection, deletedAt}]), threads ({id: detail plus items,
 //   runs, and runtimeRequests [{id, kind: user_input|approval, status,
-//   questions}]}).
+//   questions}]}). An approval's activity item is an items entry {itemId,
+//   type: "approval_request", status} the world keeps beside its request.
+// DELETE /mcp ends a session and is logged with the session id it names.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -310,7 +315,7 @@ async function callTool(w, name, a) {
 // t3_thread_wait: T3 selects the exact runId, else the latest run by ordinal,
 // and resolves when that run is terminal or the timeout passes.
 async function waitRun(a) {
-  const deadline = Date.now() + Math.max(1, a.timeoutMs ?? 600_000);
+  const deadline = Date.now() + Math.max(1, Math.min(a.timeoutMs ?? 600_000, loadWorld().waitCapMs ?? Infinity));
   for (;;) {
     const w = loadWorld();
     if (settle(w)) saveWorld(w);
@@ -370,6 +375,14 @@ async function mcp(req, res) {
       log(fresh, { ...entry, replyDropped: true });
       return req.socket.destroy();
     }
+    if ((w.rpcErrorTools ?? {})[msg.params.name] !== undefined) {
+      const fresh = loadWorld();
+      const code = fresh.rpcErrorTools[msg.params.name];
+      delete fresh.rpcErrorTools[msg.params.name];
+      saveWorld(fresh);
+      log(fresh, { ...entry, rpcError: code });
+      return json(res, 200, { jsonrpc: "2.0", id: msg.id, error: { code, message: "internal error" } }, { "mcp-session-id": "sess-fake" });
+    }
   } else {
     return json(res, 200, { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
   }
@@ -387,6 +400,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
   try {
     if (req.method === "POST" && url.pathname === "/mcp") return await mcp(req, res);
+    if (req.method === "DELETE" && url.pathname === "/mcp") {
+      log(loadWorld(), { path: url.pathname, method: "DELETE", session: req.headers["mcp-session-id"] ?? null });
+      res.writeHead(200);
+      return res.end();
+    }
     if (req.method === "POST" && url.pathname === "/oauth/mcp/register") {
       const b = JSON.parse(await body(req));
       const id = `client-${randomBytes(4).toString("hex")}`;

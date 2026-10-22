@@ -3507,7 +3507,8 @@ cleanup_firstmate_home_children() {
           "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
         if [ "$child_backend" = t3code ]; then
           "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$child_wt" || return 1
-          rm -f "$child_wt/CLAUDE.local.md"
+          git -C "$child_wt" ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1 \
+            || rm -f "$child_wt/CLAUDE.local.md"
         fi
         if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
           teardown_scrub_scratch_copy "$child_wt" || return 1
@@ -3869,7 +3870,7 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   remove_harness_worktree_wiring "$WT"
   if [ "$BACKEND" = t3code ]; then
     "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$WT" || exit 1
-    rm -f "$WT/CLAUDE.local.md"
+    git -C "$WT" ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1 || rm -f "$WT/CLAUDE.local.md"
   fi
   # Kills remaining processes in the worktree (including the agent), resets, returns
   # to pool. treehouse resolves the pool from the working directory, so run it from

@@ -4838,8 +4838,8 @@ EOF
         exit 1
       }
       [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
+      validate_spawn_worktree "treehouse get --lease" "$WT (leased to $ID; once inspected, release it with 'treehouse return --force $WT' from $PROJ_ABS)"
       T3CODE_LEASED=1
-      validate_spawn_worktree "treehouse get --lease" "$W"
       T3CODE_CREATE_UNCERTAIN=1
       T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
         "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$WT" "$T3CODE_MODEL_SELECTION") || {

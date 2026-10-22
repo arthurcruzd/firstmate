@@ -439,7 +439,7 @@ fm_backend_t3code_events_capable() {  # <session>
 fm_backend_t3code_wait_transition() {  # <session> <timeout_secs> <state_dir> <thread...>
   local timeout=$2 state=$3 thread marker out
   shift 3
-  local -a args=(watch --timeout-ms "$((timeout * 1000))")
+  local -a args=(watch --timeout-ms "$(awk -v s="$timeout" 'BEGIN { printf "%d", s * 1000 }')")
   for thread in "$@"; do
     args+=(--thread "$thread")
     marker=$(fm_backend_t3code_escalation_marker "$state" "$thread")
@@ -488,6 +488,7 @@ fm_backend_t3code_transition_note() {  # <record>
   questions=${signature#q:}
   questions=${questions%%;*}
   approvals=${signature##*;a:}
+  approvals=${approvals%%:*}
   [ -z "$questions" ] || printf 'T3 question %s pending - read and answer with bin/fm-t3-answer.sh' "$questions"
   if [ "${approvals:-0}" != 0 ]; then
     [ -z "$questions" ] || printf '; '

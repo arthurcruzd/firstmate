@@ -71,11 +71,13 @@
 //     t3_thread_read: the thread record and its latest run, unchanged. T3
 //     caps --limit at 100.
 //   fm-t3-mcp.mjs capture --thread <id> [--lines <n>]
-//     The activity view rendered as a bounded plain-text tail; the one verb
-//     whose stdout is text rather than JSON.
+//     The activity view rendered as a plain-text tail of at most 500 lines (a
+//     larger --lines reads 500); the one verb whose stdout is text rather
+//     than JSON.
 //   fm-t3-mcp.mjs wait --thread <id> [--run <run-id>] [--timeout-ms <n>]
 //     t3_thread_wait until that run (the latest run without --run) is
-//     terminal or the timeout passes.
+//     terminal or the timeout passes. Every wait re-arms in slices of at
+//     most 240 s, under the 300 s Node's fetch allows one reply.
 //   fm-t3-mcp.mjs interrupt --thread <id> [--timeout-ms <n>]
 //     t3_thread_interrupt (T3 stops the latest active run), then
 //     t3_thread_wait on exactly the run T3 named; cancel is confirmed only
@@ -86,20 +88,23 @@
 //     The thread's pending runtime requests: questions (each user-input
 //     request id with its questions, from t3_pending_request_list/read) and
 //     approvals, the count of pending requests those tools cannot see or
-//     answer (permission approvals, answered only in T3 Code itself).
+//     answer (permission approvals, answered only in T3 Code itself). The
+//     signature names the question ids, the approval count, and the activity
+//     item id of each approval T3 shows among the thread's last 100 items.
 //   fm-t3-mcp.mjs respond --thread <id> --request <request-id> --answers-file <file>
 //     t3_pending_request_respond with the JSON object in <file>, keyed by
 //     question id. It cannot approve a permission request.
 //   fm-t3-mcp.mjs watch --thread <id>... --timeout-ms <n> [--escalated <id>=<signature>]...
 //     The T3 event wait for the watcher. It first reads every thread: one
 //     whose pending requests changed from its --escalated signature reports
-//     event:blocked with that signature, its question ids, and its approval
-//     count; a thread given --escalated with nothing pending is listed in
-//     cleared. Otherwise it waits on the exact active run of every thread at
-//     once and reports event:run-ended for the first that turns terminal,
-//     event:timeout when none does, or event:none when no thread has an
-//     active run (the caller sleeps instead of re-arming). When every wait
-//     failed rather than returned, the first failure is the verb's error.
+//     event:blocked with that signature (as requests computes it), its
+//     question ids, and its approval count; a thread given --escalated with
+//     nothing pending is listed in cleared. Otherwise it waits on the exact
+//     active run of every thread at once and reports event:run-ended for the
+//     first that turns terminal, event:timeout when none does, or event:none
+//     when no thread has an active run (the caller sleeps instead of
+//     re-arming). When every wait failed rather than returned, the first
+//     failure is the verb's error.
 //   fm-t3-mcp.mjs archive --thread <id> [--timeout-ms <n>]
 //     t3_thread_organize archive, then read back until the thread reports
 //     archived:true and activeRunId:null (closed=true). A thread the verified
@@ -121,11 +126,14 @@
 // recorded at sign-in, so a different T3 on the same origin is never driven
 // with this credential.
 //
-// Exit: 0 success; 1 transport or unexpected failure; 2 invalid use; 3 a typed
-// T3 failure (tool error or JSON-RPC error; error.code carries T3's code when
-// it has one); 4 a local refusal (no credential, expired credential, revoked
-// credential, environment mismatch, capability gate, or a launch binding
-// mismatch whose thread was archived); 5 and 6 as thread-for-root says; 7 a
+// Exit: 0 success; 1 transport or unexpected failure, including a JSON-RPC
+// server error, which does not prove the request was not applied; 2 invalid
+// use; 3 a typed T3 failure (a tool error, or a JSON-RPC error refusing the
+// request itself: parse error, invalid request, unknown method, or invalid
+// params; error.code carries T3's code when it has one); 4 a local refusal
+// (no credential, expired credential, revoked credential, environment
+// mismatch, capability gate, or a launch binding mismatch whose thread was
+// archived); 5 and 6 as thread-for-root says; 7 a
 // mutation whose request went out but whose reply was lost (send); 8 a launch
 // that failed before t3_thread_launch was requested (launch). A failure prints {"ok":false,"error":{...}} on stdout and one line on stderr.
 // A credential within EXPIRY_WARN_DAYS of expiry adds a stderr warning on
@@ -159,6 +167,19 @@ const ENVIRONMENT_TOOL = "t3_environment_read";
 const EXPIRY_WARN_DAYS = 5;
 const DAY_MS = 86_400_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+const SESSION_CLOSE_TIMEOUT_MS = 2_000;
+// Node's fetch drops a reply that takes longer than 300 s, so one
+// t3_thread_wait, plus its 15 s grace, stays under that and a longer wait
+// re-arms until its own deadline.
+const WAIT_SLICE_MS = 240_000;
+// JSON-RPC errors that refuse the request itself: parse error, invalid
+// request, unknown method, invalid params.
+const REFUSED_REQUEST_CODES = new Set([-32700, -32600, -32601, -32602]);
+const CAPTURE_LINES_MAX = 500;
+// The activity item T3 keeps for each permission approval, and the statuses
+// it holds while the approval waits on a human.
+const APPROVAL_ITEM = "approval_request";
+const OPEN_ITEM_STATUSES = new Set(["pending", "waiting"]);
 // The pairing code must cover every scope T3 grants a full-access mcp-client:
 // T3 0.1.0 adds settings:write and source-control:write to the read and
 // operate scopes of the 0.0.46 nightlies, and refuses a code that lacks one.
@@ -174,6 +195,8 @@ const DRIVERS = {
   codex: { driverKind: "codex", effortOption: "reasoningEffort" },
 };
 const REPEATABLE = new Set(["option", "thread", "escalated"]);
+// Every MCP session this invocation opened, ended when the verb returns.
+const SESSIONS = new Set();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -328,6 +351,7 @@ export class McpSession {
     this.nextId = 1;
     this.timeoutMs = timeoutMs;
     this.server = null;
+    SESSIONS.add(this);
   }
 
   async rpc(method, params, { notify = false, timeoutMs, signal } = {}) {
@@ -382,9 +406,23 @@ export class McpSession {
     }
     if (!msg || !("result" in msg || msg.error)) throw new Refusal("transport", `T3 /mcp returned no reply to ${method}`, 1);
     if (msg.error) {
-      throw new Refusal(String(msg.error.code ?? "rpc_error"), `T3 ${method} failed: ${msg.error.message ?? "unknown error"}`, 3);
+      throw new Refusal(String(msg.error.code ?? "rpc_error"), `T3 ${method} failed: ${msg.error.message ?? "unknown error"}`, REFUSED_REQUEST_CODES.has(msg.error.code) ? 3 : 1);
     }
     return msg.result;
+  }
+
+  // Best effort: a session T3 opened is ended rather than left to its expiry.
+  async close() {
+    if (!this.sid) return;
+    try {
+      await fetch(`${this.origin}/mcp`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${this.token}`, "mcp-protocol-version": PROTOCOL, "mcp-session-id": this.sid },
+        signal: AbortSignal.timeout(SESSION_CLOSE_TIMEOUT_MS),
+      });
+    } catch {
+      // The server ends an abandoned session on its own.
+    }
   }
 
   async open() {
@@ -899,17 +937,14 @@ export function renderCapture(out, lines) {
   return [...body, tail].slice(-lines).join("\n");
 }
 
+// The last <lines> items of the activity view, with the last page read.
 // t3_thread_read pages forward from the oldest item, so the tail starts from
 // the thread's itemCount and widens backwards if that undercounts the visible
 // timeline (forked or handed-off threads).
-async function capture(flags) {
-  const threadId = need(flags, "thread");
-  const lines = positiveInt(flags, "lines", 40, 500);
-  const { session } = await verifiedSession(flags);
+async function readTail(session, threadId, itemCount, lines, maxCharsPerItem) {
   const read = (afterPosition) =>
-    session.call("t3_thread_read", { threadId, view: "activity", limit: READ_LIMIT_MAX, maxCharsPerItem: 600, runLimit: 1, ...(afterPosition >= 0 ? { afterPosition } : {}) });
-  const head = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
-  let start = Math.max(0, (head.itemCount ?? 0) - lines);
+    session.call("t3_thread_read", { threadId, view: "activity", limit: READ_LIMIT_MAX, maxCharsPerItem, runLimit: 1, ...(afterPosition >= 0 ? { afterPosition } : {}) });
+  let start = Math.max(0, itemCount - lines);
   for (;;) {
     let out = await read(start - 1);
     const items = [...(out?.items ?? [])];
@@ -917,15 +952,30 @@ async function capture(flags) {
       out = await read(out.nextPosition);
       items.push(...(out?.items ?? []));
     }
-    if (items.length >= lines || start === 0) return { text: renderCapture({ ...out, items: items.slice(-lines) }, lines) };
+    if (items.length >= lines || start === 0) return { out, items: items.slice(-lines) };
     start = Math.max(0, start - lines);
   }
 }
 
-// One t3_thread_wait; runId selects the exact run, else T3 waits on the
+async function capture(flags) {
+  const threadId = need(flags, "thread");
+  const lines = Math.min(positiveInt(flags, "lines", 40), CAPTURE_LINES_MAX);
+  const { session } = await verifiedSession(flags);
+  const head = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+  const { out, items } = await readTail(session, threadId, head.itemCount ?? 0, lines, 600);
+  return { text: renderCapture({ ...out, items }, lines) };
+}
+
+// t3_thread_wait in slices of at most WAIT_SLICE_MS until the run is terminal
+// or timeoutMs passes; runId selects the exact run, else T3 waits on the
 // thread's latest run.
-function waitRun(session, threadId, runId, timeoutMs, signal) {
-  return session.call("t3_thread_wait", { threadId, ...(runId ? { runId } : {}), timeoutMs }, { timeoutMs: timeoutMs + 15_000, signal });
+async function waitRun(session, threadId, runId, timeoutMs, signal) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const slice = Math.min(WAIT_SLICE_MS, Math.max(1, deadline - Date.now()));
+    const out = await session.call("t3_thread_wait", { threadId, ...(runId ? { runId } : {}), timeoutMs: slice }, { timeoutMs: slice + 15_000, signal });
+    if (out?.timedOut !== true || Date.now() >= deadline) return out;
+  }
 }
 
 async function wait(flags) {
@@ -961,23 +1011,33 @@ function threadOf(out) {
 
 // The pending runtime requests on one thread: the questions T3's
 // pending-request tools can read and answer, and the remainder of
-// pendingRequestCount, which are approvals those tools cannot see.
-async function pendingOf(session, threadId, pendingRequestCount) {
-  if (!pendingRequestCount) return { questions: [], approvals: 0 };
+// pendingRequestCount, which are approvals those tools cannot see. Each
+// approval is identified by the id of its open approval_request item among
+// the thread's last READ_LIMIT_MAX activity items, so an approval answered and
+// replaced by another between two reads is a new set; a pending request T3
+// shows no such item for is counted only.
+async function pendingOf(session, threadId, t) {
+  const count = t.pendingRequestCount ?? 0;
+  if (!count) return { questions: [], approvals: 0, approvalIds: [] };
   const listed = await session.call("t3_pending_request_list", { threadId });
   const ids = [...new Set(listed?.requestIds ?? [])].sort();
-  return { questions: ids, approvals: Math.max(0, pendingRequestCount - ids.length) };
+  const approvals = Math.max(0, count - ids.length);
+  if (!approvals) return { questions: ids, approvals, approvalIds: [] };
+  const { items } = await readTail(session, threadId, t.itemCount ?? 0, READ_LIMIT_MAX, 1);
+  const open = items.filter((it) => it?.type === APPROVAL_ITEM && OPEN_ITEM_STATUSES.has(it.status)).map((it) => it.itemId);
+  return { questions: ids, approvals, approvalIds: open.slice(-approvals) };
 }
 
 // The signature the watcher stores once it has escalated a thread's pending
-// requests, so the same requests never wake it twice.
-const pendingSignature = (p) => `q:${p.questions.join(",")};a:${p.approvals}`;
+// requests, so the same requests never wake it twice:
+// q:<question ids>;a:<approval count>[:<approval item ids>].
+const pendingSignature = (p) => `q:${p.questions.join(",")};a:${p.approvals}${p.approvalIds.length ? `:${p.approvalIds.join(",")}` : ""}`;
 
 async function requests(flags) {
   const threadId = need(flags, "thread");
   const { session } = await verifiedSession(flags);
   const t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
-  const pending = await pendingOf(session, threadId, t.pendingRequestCount ?? 0);
+  const pending = await pendingOf(session, threadId, t);
   const questions = [];
   for (const requestId of pending.questions) {
     const q = await session.call("t3_pending_request_read", { threadId, requestId });
@@ -1025,7 +1085,7 @@ async function watch(flags) {
       throw err;
     }
     if (t.archived === true || t.archivedAt) continue;
-    const pending = await pendingOf(session, threadId, t.pendingRequestCount ?? 0);
+    const pending = await pendingOf(session, threadId, t);
     const signature = pendingSignature(pending);
     if (pending.questions.length || pending.approvals) {
       if (escalated.get(threadId) !== signature) return { ok: true, event: "blocked", threadId, signature, questions: pending.questions, approvals: pending.approvals, cleared };
@@ -1140,7 +1200,12 @@ async function main(argv) {
   const [verb, ...rest] = argv;
   const fn = VERBS[verb];
   if (!fn) usage(`unknown verb '${verb ?? ""}' (verbs: ${Object.keys(VERBS).join(", ")})`);
-  const out = await fn(parseFlags(rest));
+  let out;
+  try {
+    out = await fn(parseFlags(rest));
+  } finally {
+    await Promise.all([...SESSIONS].map((s) => s.close()));
+  }
   if (verb === "capture") process.stdout.write(`${out.text}\n`);
   else process.stdout.write(`${JSON.stringify(out)}\n`);
 }

@@ -2390,6 +2390,104 @@ fm_secondmate_liveness_relaunch "$1" smgone && echo relaunched=yes || echo "rela
   pass "secondmate liveness backend=t3code: a missing thread re-proves its archive before replacement, and an unproved close spawns nothing"
 }
 
+# Treehouse handing back the spawning project itself is refused by the
+# isolation guard; the abort then leaves that checkout and its lease alone.
+test_spawn_rejected_lease_is_neither_cleaned_nor_returned() {
+  local id=t3rejectz out rc
+  t3_case spawn-rejected-lease
+  t3_worker_setup "$id"
+  mkdir -p "$WORKER_PROJ/.claude"
+  printf '{"permissions":{"allow":["Bash(ls)"]}}\n' > "$WORKER_PROJ/.claude/settings.local.json"
+  WORKER_WT=$WORKER_PROJ
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "a lease on the spawning project must be refused"$'\n'"$out"
+  assert_contains "$out" "did not yield an isolated worktree" "the isolation guard must refuse the project itself"
+  assert_contains "$out" "treehouse return --force $WORKER_PROJ" "the refusal must name the manual return"
+  assert_grep "Bash(ls)" "$WORKER_PROJ/.claude/settings.local.json" "the abort must leave the project's own settings in place"
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -eq 0 ] \
+    || fail "the abort must not return a path the isolation guard rejected"
+  [ -z "$(t3_dispatch_types)" ] || fail "no thread may be launched on a rejected path, got '$(t3_dispatch_types)'"
+  pass "fm-spawn.sh --backend t3code: a lease the isolation guard rejects is neither cleaned nor returned"
+}
+
+# A Codex worker never writes CLAUDE.local.md, so one the project tracks is
+# project instructions that teardown leaves in the slot.
+test_teardown_keeps_tracked_claude_local_md() {
+  local proj wt data state id out rc neutral fb thread=mcp:5a9b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d
+  id="t3teardownz2"
+  t3_case teardown-tracked-claude-local running
+  t3_world "$(t3_thread_json "$thread" running false)"
+  proj="$CASE_DIR/project"; wt="$CASE_DIR/wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
+  fm_git_worktree "$proj" "$wt" "fm/$id"
+  printf 'project instructions\n' > "$wt/CLAUDE.local.md"
+  git -C "$wt" add CLAUDE.local.md
+  git -C "$wt" -c user.name=t -c user.email=t@example.invalid -c core.hooksPath=/dev/null commit -qm instructions
+  mkdir -p "$data/$id" "$state" "$CASE_DIR/home/state"
+  printf 'report\n' > "$data/$id/report.md"
+  touch "$state/.last-watcher-beat"
+  fm_write_meta "$state/$id.meta" \
+    "window=fm-$id" "endpoint_task_id=$id" "worktree=$wt" "project=$proj" \
+    "harness=codex" "kind=scout" "mode=no-mistakes" "yolo=off" \
+    "backend=t3code" "t3_thread_id=$thread" "t3_project_id=proj-1" \
+    "decisions_reviewed=1" "decision_keys="
+  fb=$(make_treehouse_fakebin "$CASE_DIR")
+  neutral=$(neutral_fm_root "$CASE_DIR/neutral")
+  out=$( PATH="$fb:$PATH" FM_T3_TREEHOUSE_LOG="$LOG" FM_T3_TREEHOUSE_WT="$wt" \
+    FM_ROOT_OVERRIDE="$neutral" FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$ROOT/bin/fm-teardown.sh" "$id" 2>&1 )
+  rc=$?
+  expect_code 0 "$rc" "t3code scout teardown should succeed once the report exists"$'\n'"$out"
+  assert_grep "project instructions" "$wt/CLAUDE.local.md" "teardown must keep a CLAUDE.local.md the project tracks"
+  pass "fm-teardown.sh backend=t3code: a tracked CLAUDE.local.md stays in the slot"
+}
+
+# The watcher accepts a fractional poll interval, so the T3 event wait does too.
+test_fractional_poll_event_wait() {
+  local state rec rc
+  t3_case push-fractional running
+  state="$CASE_DIR/state"; mkdir -p "$state"
+  rec=$(t3_run '. "$0/bin/fm-transition-lib.sh"; fm_backend_t3code_wait_transition sess 0.5 "$1" thread-live' "$state" 2>&1); rc=$?
+  expect_code 1 "$rc" "a fractional poll must run a full event wait, got '$rec'"
+  assert_equals 500 "$(field_of_last_wait_call)" "the wait budget is the poll in milliseconds"
+  t3_world_set 'w.threads["thread-live"].runtimeRequests = [{ id: "req-q1", kind: "user_input", status: "pending", questions: [] }]'
+  rec=$(t3_run '. "$0/bin/fm-transition-lib.sh"; fm_backend_t3code_wait_transition sess 0.5 "$1" thread-live' "$state" 2>&1); rc=$?
+  expect_code 0 "$rc" "a fractional poll must still escalate a pending request, got '$rec'"
+  assert_contains "$rec" "thread-live"$'\t'"q:req-q1;a:0" "the pending question is reported under a fractional poll"
+  pass "t3code push wait: a fractional poll interval runs the event wait with its budget in milliseconds"
+}
+
+field_of_last_wait_call() {
+  node -e '
+let last = null;
+for (const line of require("fs").readFileSync(process.argv[1], "utf8").split("\n")) {
+  if (!line) continue;
+  const e = JSON.parse(line);
+  if (e.tool === "t3_thread_wait") last = e.arguments;
+}
+process.stdout.write(String(last?.timeoutMs ?? ""));
+' "$LOG"
+}
+
+# Two task records that resolve the same endpoint: the stale recheck removes
+# the marker it is iterating, not the one the endpoint maps back to.
+test_housekeeping_removes_the_iterated_stale_marker() {
+  local state
+  t3_case housekeeping-shared-endpoint running
+  state="$CASE_DIR/state"; mkdir -p "$state"
+  fm_write_meta "$state/aworker.meta" "window=fm-aworker" "backend=t3code" "t3_thread_id=thread-live" "harness=claude"
+  fm_write_meta "$state/worker.meta" "window=fm-worker" "backend=t3code" "t3_thread_id=thread-live" "harness=claude"
+  printf 1 > "$state/.subsuper-stale-worker"
+  t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    _now() { printf 1000; }
+    LOG="$1/daemon.log"
+    FM_STATE_OVERRIDE=$1 FM_ESCALATE_BATCH_SECS=999999 FM_STALE_ESCALATE_SECS=5
+    housekeeping "$1"
+  ' "$state" || fail "housekeeping failed"
+  assert_absent "$state/.subsuper-stale-worker" "a busy endpoint must clear the very marker being rechecked"
+  pass "away housekeeping clears the stale marker it rechecked when two records share an endpoint"
+}
+
 if [ -n "${FM_TEST_ONLY:-}" ]; then
   "$FM_TEST_ONLY"
   exit
@@ -2472,3 +2570,7 @@ test_launch_gate_failure_returns_lease
 test_refused_launch_turn_archives_thread_and_returns_lease
 test_misbound_thread_launch_returns_lease
 test_uncertain_launch_message_keeps_task_record
+test_spawn_rejected_lease_is_neither_cleaned_nor_returned
+test_teardown_keeps_tracked_claude_local_md
+test_fractional_poll_event_wait
+test_housekeeping_removes_the_iterated_stale_marker

@@ -555,10 +555,11 @@ stale_marker_record() {  # <window> <state>  — create if absent
 }
 
 stale_marker_remove() {  # <window> <state>
-  local win=$1 state=$2 key
-  key=$(_stale_key "$(window_to_task "$win" "$state")")
-  rm -f "$state/.subsuper-stale-$key" "$state/.subsuper-dialog-$key" \
-    "$state/.subsuper-reported-stale-$key"
+  stale_marker_remove_key "$(_stale_key "$(window_to_task "$1" "$2")")" "$2"
+}
+
+stale_marker_remove_key() {  # <key> <state>
+  rm -f "$2/.subsuper-stale-$1" "$2/.subsuper-dialog-$1" "$2/.subsuper-reported-stale-$1"
 }
 
 # The name a stale detail carried after "blocked-on-prompt: ". The trailing
@@ -1389,7 +1390,7 @@ housekeeping() {  # <state>
     win=$(window_for_task "$key" "$state" 2>/dev/null || true)
     if [ -z "$win" ]; then
       # Window gone (task torn down): drop the marker, nothing to escalate.
-      rm -f "$marker" "$state/.subsuper-dialog-$key" "$state/.subsuper-reported-stale-$key"; continue
+      stale_marker_remove_key "$key" "$state"; continue
     fi
     task=$(window_to_task "$win" "$state")
     last=$(status_declared_wait_line "$state/$task.status")
@@ -1401,14 +1402,14 @@ housekeeping() {  # <state>
     [ "$age" -ge "${FM_STALE_ESCALATE_SECS:-$STALE_ESCALATE_SECS_DEFAULT}" ] || continue
     stale_window_is_busy "$win" "$state"
     case "$?" in
-      0|2) stale_marker_remove "$win" "$state" ;;
+      0|2) stale_marker_remove_key "$key" "$state" ;;
       3) if [ ! -e "$state/.subsuper-reported-stale-$key" ] \
            && escalate_add "$state" "stale persisted ${age}s (possible wedge): $win"; then
            _now > "$state/.subsuper-reported-stale-$key"
          fi ;;
       *)
         if [ -e "$state/.subsuper-reported-stale-$key" ]; then
-          stale_marker_remove "$win" "$state"
+          stale_marker_remove_key "$key" "$state"
           continue
         fi
         dialog_name=$(cat "$state/.subsuper-dialog-$key" 2>/dev/null || true)
@@ -1418,7 +1419,7 @@ housekeeping() {  # <state>
           persisted="stale persisted ${age}s (possible wedge): $win"
         fi
         if escalate_add "$state" "$persisted"; then
-          stale_marker_remove "$win" "$state"
+          stale_marker_remove_key "$key" "$state"
         fi
         ;;
     esac
