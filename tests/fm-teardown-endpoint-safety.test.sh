@@ -938,8 +938,7 @@ assert_reassigned_slot_left_alone() {  # <case> <id> <other> <description>
 }
 
 # The tracked Codex overlay bin/fm-t3code-codex-env.sh installs needs a Python
-# with tomllib (3.11+); without one the overlay half of the case is reported
-# skipped and the slot-ownership assertions still run.
+# with tomllib (3.11+); without one the T3 overlay case is reported skipped.
 tomllib_python_available() {
   local candidate
   for candidate in python3 python3.14 python3.13 python3.12 python3.11; do
@@ -949,40 +948,16 @@ tomllib_python_available() {
 }
 
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
-  local dir id=stale-task other=reassigned-task worker rc overlay_installed=0 window t3_meta=()
-  local thread=mcp:8c9d0e1f-2a3b-4c5d-8e6f-7a8b9c0d1e2f
+  local dir id=stale-task other=reassigned-task worker rc
 
   # Dirty slot, --force, and a live worker inside it: --force authorizes
   # discarding this task's unlanded work, which is already gone with the slot,
   # never the other task's live work.
   dir=$(make_case slot-reassigned)
   mark_case_as_treehouse_pool "$dir"
-  mkdir -p "$dir/worktree/.codex"
-  printf 'model = "gpt-5.6-sol"\n' > "$dir/worktree/.codex/config.toml"
-  git -C "$dir/worktree" add .codex/config.toml
-  git -C "$dir/worktree" -c user.name=t -c user.email=t@example.invalid commit -qm "project Codex config"
-  if tomllib_python_available; then
-    "$ROOT/bin/fm-t3code-codex-env.sh" install "$dir/worktree" "FM_TASK_ID=$other" || fail "install reassigned task's overlay"
-    overlay_installed=1
-  else
-    printf 'note: reassigned-slot Codex overlay check skipped: no Python 3.11+ (tomllib) interpreter on PATH\n'
-  fi
-  cp "$dir/worktree/.codex/config.toml" "$dir/other-overlay.toml"
-  # The stale task runs on T3 Code, whose teardown undoes a Codex overlay, so
-  # only the slot's ownership keeps that cleanup off the claimant's overlay.
-  window="firstmate:fm-$id"
-  if command -v node >/dev/null 2>&1; then
-    t3_fake_start "$dir/t3-server"
-    t3_fake_case "$dir/t3-case" "{\"threads\":{\"$thread\":{\"threadId\":\"$thread\",\"projectId\":\"proj-1\",\"status\":\"completed\",\"activeRunId\":null,\"archived\":false,\"worktreePath\":\"$dir/worktree\",\"pendingRequestCount\":0,\"items\":[],\"runs\":[]}}}"
-    t3_fake_credential "$dir/home/config/t3code-token"
-    window="fm-$id"
-    t3_meta=(backend=t3code "t3_thread_id=$thread" t3_project_id=proj-1 harness=codex)
-  else
-    printf 'note: reassigned-slot T3 teardown check skipped: node absent\n'
-  fi
   fm_write_meta "$dir/home/state/$id.meta" \
-    "window=$window" "endpoint_task_id=$id" \
-    "worktree=$dir/worktree" "project=$dir/project" "kind=scout" ${t3_meta[@]+"${t3_meta[@]}"}
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
   claim_pool_slot "$dir" "$other" "$dir/other-home"
   # Staged in this shell, not a command substitution: a background child of a
   # $(...) subshell does not outlive it, and the point of this worker is to be
@@ -996,14 +971,8 @@ test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
   set -e
 
   [ "$rc" -eq 0 ] || fail "teardown of a task whose slot was reassigned failed: $(cat "$dir/stderr")"
-  if [ "${#t3_meta[@]}" -gt 0 ]; then
-    [ "$(t3_fake_mutations)" = "t3_thread_organize" ] || fail "teardown must still archive the stale task's own T3 thread, got '$(t3_fake_mutations)'"
-    t3_fake_stop
-  fi
   kill -0 "$worker" 2>/dev/null || fail "teardown killed the worker holding the reassigned pool slot"
   assert_present "$dir/worktree/sentinel" "teardown reset a pool slot another task had claimed"
-  cmp -s "$dir/other-overlay.toml" "$dir/worktree/.codex/config.toml" || fail "teardown changed the other task's Codex overlay"
-  [ "$overlay_installed" != 1 ] || [ "$(git -C "$dir/worktree" ls-files -v -- .codex/config.toml)" = "S .codex/config.toml" ] || fail "teardown cleared the other task's overlay protection"
   assert_reassigned_slot_left_alone "$dir" "$id" "$other" "dirty reassigned slot with --force"
   assert_contains "$(cat "$dir/stderr")" "$dir/other-home" \
     "the warning should name the claimant's home"
@@ -1062,6 +1031,45 @@ test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
     "unreadable-claim refusal should name the claim file to inspect"
 
   pass "fm-teardown: a pool slot claimed by another task is left alone while the task's own cleanup finishes"
+}
+
+# A T3 task whose pool slot was reassigned still archives its own thread, but
+# T3's slot cleanup undoes a tracked Codex overlay, so only the slot's
+# ownership keeps it off the claimant's overlay.
+test_reassigned_pool_slot_keeps_claimant_codex_overlay_on_t3() {
+  local dir id=stale-t3-task other=reassigned-task rc=0 mutations
+  local thread=mcp:8c9d0e1f-2a3b-4c5d-8e6f-7a8b9c0d1e2f
+  command -v node >/dev/null 2>&1 || { printf 'note: %s skipped: node absent\n' "${FUNCNAME[0]}"; return 0; }
+  tomllib_python_available || { printf 'note: %s skipped: no Python 3.11+ (tomllib) interpreter on PATH\n' "${FUNCNAME[0]}"; return 0; }
+
+  dir=$(make_case slot-reassigned-t3)
+  mark_case_as_treehouse_pool "$dir"
+  mkdir -p "$dir/worktree/.codex"
+  printf 'model = "gpt-5.6-sol"\n' > "$dir/worktree/.codex/config.toml"
+  git -C "$dir/worktree" add .codex/config.toml
+  git -C "$dir/worktree" -c user.name=t -c user.email=t@example.invalid commit -qm "project Codex config"
+  "$ROOT/bin/fm-t3code-codex-env.sh" install "$dir/worktree" "FM_TASK_ID=$other" || fail "install reassigned task's overlay"
+  cp "$dir/worktree/.codex/config.toml" "$dir/other-overlay.toml"
+  t3_fake_start "$dir/t3-server"
+  t3_fake_case "$dir/t3-case" "{\"threads\":{\"$thread\":{\"threadId\":\"$thread\",\"projectId\":\"proj-1\",\"status\":\"completed\",\"activeRunId\":null,\"archived\":false,\"worktreePath\":\"$dir/worktree\",\"pendingRequestCount\":0,\"items\":[],\"runs\":[]}}}"
+  t3_fake_credential "$dir/home/config/t3code-token"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout" \
+    backend=t3code "t3_thread_id=$thread" t3_project_id=proj-1 harness=codex
+  claim_pool_slot "$dir" "$other" "$dir/other-home"
+
+  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" || rc=$?
+  mutations=$(t3_fake_mutations)
+  t3_fake_stop
+
+  [ "$rc" -eq 0 ] || fail "teardown of a T3 task whose slot was reassigned failed: $(cat "$dir/stderr")"
+  [ "$mutations" = "t3_thread_organize" ] || fail "teardown must still archive the stale task's own T3 thread, got '$mutations'"
+  assert_present "$dir/worktree/sentinel" "teardown reset a pool slot another task had claimed"
+  cmp -s "$dir/other-overlay.toml" "$dir/worktree/.codex/config.toml" || fail "teardown changed the other task's Codex overlay"
+  [ "$(git -C "$dir/worktree" ls-files -v -- .codex/config.toml)" = "S .codex/config.toml" ] || fail "teardown cleared the other task's overlay protection"
+  assert_reassigned_slot_left_alone "$dir" "$id" "$other" "T3 task on a reassigned slot with --force"
+  pass "fm-teardown backend=t3code: a reassigned pool slot keeps its claimant's Codex overlay while the task's own thread is archived"
 }
 
 # The reuse collision where BOTH records survive: the stale task's record still
@@ -1521,6 +1529,7 @@ test_reused_pool_slot_refuses_before_touching_the_other_task
 test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
+test_reassigned_pool_slot_keeps_claimant_codex_overlay_on_t3
 test_stale_record_on_claimed_slot_retires_then_claimant_tears_down
 test_own_and_absent_slot_claims_still_tear_down
 test_recorded_endpoint_that_changed_directory_still_tears_down
