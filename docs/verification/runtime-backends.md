@@ -2592,6 +2592,19 @@ The first line is the sign-in with only the read and operate scopes; the second 
 | `fm-control.sh exit` | refused before anything was sent |
 | Teardown, including the archive read-back and slot return | 23.5 s; the thread read `archived:true` with no active run, the record was removed, and the slot read `available` |
 
+### Permission approvals in the activity view
+
+The approval part of the pending-request signature was checked against the stable `t3 v0.1.0` source (tag `v0.1.0`, commit `81493efb`); no permission approval was triggered on the live lab server.
+Paths are in the T3 Code repository at that tag.
+
+- `t3_pending_request_list` returns only `user_input` requests (`apps/server/src/mcp/toolkits/thread/handlers.ts:203-208`), while `pendingRequestCount` counts every pending runtime request (`apps/server/src/mcp/OrchestratorMcpService.ts:771`), so the question tools cannot list an approval.
+- `t3_thread_read` with `view: "activity"` returns every visible turn item, while the default `messages` view keeps only messages and plans (`apps/server/src/orchestration-v2/ProjectionStore.ts:5196`); `itemCount` is the length of the whole visible timeline in either view (`ProjectionStore.ts:5237`), so a tail read can start from it.
+- Each activity item carries its turn-item id as `itemId` and its status as `status` (`packages/contracts/src/orchestratorMcp.ts:412-423`, built at `OrchestratorMcpService.ts:889` and `:896`), and an `approval_request` item is rendered in that view (`OrchestratorMcpService.ts:838`); T3 Code's own mobile activity list handles the same type (`apps/mobile/src/lib/threadActivity.ts:451`).
+- Both drivers Firstmate runs create the item with `type: "approval_request"` and `status: "waiting"`: Claude at `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts:5763-5779` and Codex at `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts:4190-4204`; every other adapter at that tag uses `waiting` too.
+- The item id is derived from the runtime request id as `turn-item:runtime-request:<requestId>` (`packages/provider-core/src/server/IdAllocator.ts:293-294`), so each approval has its own stable id.
+- Answering the request moves the item to `completed`, or `cancelled` on a decline or cancel (`apps/server/src/orchestration-v2/Orchestrator.ts:7407-7410` and `:7477`), so only an unanswered approval reads `waiting`.
+- `maxCharsPerItem` accepts 1 to 50000 (`packages/contracts/src/orchestratorMcp.ts:363`); the helper reads the activity view at 600, the value `capture` already uses live.
+
 ### Claude pull-request tools
 
 T3's `link_pull_request`, `list_thread_pull_requests`, and `unlink_pull_request` tools crashed a Claude session on a pre-V2 T3 build, so Claude workers were told not to call them.
@@ -2631,7 +2644,7 @@ tests/fm-daemon.test.sh
 ```
 
 The fake models the T3 protocol facts that hide defects when simplified: cursor paging, the read cap of 100, a wait on the exact run or else the latest by ordinal, an interrupt and an archive whose run ends asynchronously, a send committed before a reply that can be lost, and a pending-request count that includes approvals the question tools cannot see.
-`tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, catalog-resolved selection, launch binding and configuration read-back with their uncertain and refused outcomes, send idempotency and the lost-reply verdict, capture and its read cap, exact-run interrupt claims, pending questions, the bounded event wait, the proven archive, and paged supervisor lookup.
+`tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, catalog-resolved selection, launch binding and configuration read-back with their uncertain and refused outcomes, send idempotency and the lost-reply verdict including a JSON-RPC server error, capture and its 500-line bound, exact-run interrupt claims, pending questions and the per-approval signature, the bounded event wait and its re-armed slices, session close, the proven archive, and paged supervisor lookup.
 `tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment, the Claude pull-request-tool version boundary, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort and uncertain-launch lease retention, tracked Codex configuration preservation, the exit and relaunch refusals, lost-reply resends through `fm-send.sh`, the push escalation of pending questions and `bin/fm-t3-answer.sh`, failed-run secondmate resume, the secondmate home shutdown barrier for pooled and standalone homes, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
 `tests/fm-backend-t3code.test.sh` also covers the refusal to replace a T3 secondmate whose thread cannot be proven closed, and `tests/fm-secondmate-liveness.test.sh` pins the unchanged best-effort close on tmux.
 `tests/fm-daemon.test.sh` covers discovery precedence and native busy state.

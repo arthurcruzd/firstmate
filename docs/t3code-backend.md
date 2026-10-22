@@ -198,14 +198,14 @@ Teardown still requires a proven archive before returning the worktree.
 T3 accepts an `mcp-client` session only on `/mcp`, so its WebSocket event stream is not available to this credential.
 `t3_thread_wait` is itself event-driven on T3's stored run updates, so the watcher's push splice uses it instead: each cycle makes one bounded `fm-t3-mcp.mjs watch` call across the recorded T3 workers.
 A new or changed set of pending requests is escalated at once, once per set, as a `blocked` wake that names the question ids and any permission approvals.
-Each approval is identified by its `approval_request` activity item among the thread's last 100 items, so an approval answered and replaced by another before the next cycle is a new set.
+Each approval is identified by its `approval_request` activity item, which T3 holds at status `waiting` until it is answered, among the thread's last 100 items, so an approval answered and replaced by another before the next cycle is a new set ([source evidence](verification/runtime-backends.md#permission-approvals-in-the-activity-view)).
 Otherwise the call waits on each thread's exact active run and returns as soon as one turns terminal, so the poll loop reconciles that turn without waiting out its interval; with no active run it sleeps the interval instead of re-arming.
 The poll loop, its wedge timer, and the `FM_BUSY_TURN_MAX_SECS` bound on a running thread remain the backstop, and a server the call cannot read drops the cycle to plain polling.
 Secondmate threads stay off the splice, as on Herdr.
 In a home that also records Herdr workers, Herdr keeps the push wait and the T3 workers stay on the poll loop, so adding a T3 task never slows Herdr escalation.
 
 Read and answer a worker's pending questions with [`bin/fm-t3-answer.sh`](../bin/fm-t3-answer.sh), which uses T3's `t3_pending_request_*` tools.
-Those tools cannot see or approve a permission request, so an approval is surfaced as a count and answered only in T3 Code itself.
+Those tools list and answer questions only; a permission approval is visible through `t3_thread_read`'s activity view as an `approval_request` item, which is how the wake identifies it, but no `/mcp` tool answers it, so it is surfaced as a count and answered only in T3 Code itself.
 
 <a id="away-mode"></a>
 

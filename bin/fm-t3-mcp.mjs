@@ -176,10 +176,10 @@ const WAIT_SLICE_MS = 240_000;
 // request, unknown method, invalid params.
 const REFUSED_REQUEST_CODES = new Set([-32700, -32600, -32601, -32602]);
 const CAPTURE_LINES_MAX = 500;
-// The activity item T3 keeps for each permission approval, and the statuses
-// it holds while the approval waits on a human.
+// The activity item T3 keeps for each permission approval, and the status it
+// holds until the approval is answered (docs/verification/runtime-backends.md).
 const APPROVAL_ITEM = "approval_request";
-const OPEN_ITEM_STATUSES = new Set(["pending", "waiting"]);
+const APPROVAL_WAITING = "waiting";
 // The pairing code must cover every scope T3 grants a full-access mcp-client:
 // T3 0.1.0 adds settings:write and source-control:write to the read and
 // operate scopes of the 0.0.46 nightlies, and refuses a code that lacks one.
@@ -941,9 +941,9 @@ export function renderCapture(out, lines) {
 // t3_thread_read pages forward from the oldest item, so the tail starts from
 // the thread's itemCount and widens backwards if that undercounts the visible
 // timeline (forked or handed-off threads).
-async function readTail(session, threadId, itemCount, lines, maxCharsPerItem) {
+async function readTail(session, threadId, itemCount, lines) {
   const read = (afterPosition) =>
-    session.call("t3_thread_read", { threadId, view: "activity", limit: READ_LIMIT_MAX, maxCharsPerItem, runLimit: 1, ...(afterPosition >= 0 ? { afterPosition } : {}) });
+    session.call("t3_thread_read", { threadId, view: "activity", limit: READ_LIMIT_MAX, maxCharsPerItem: 600, runLimit: 1, ...(afterPosition >= 0 ? { afterPosition } : {}) });
   let start = Math.max(0, itemCount - lines);
   for (;;) {
     let out = await read(start - 1);
@@ -962,7 +962,7 @@ async function capture(flags) {
   const lines = Math.min(positiveInt(flags, "lines", 40), CAPTURE_LINES_MAX);
   const { session } = await verifiedSession(flags);
   const head = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
-  const { out, items } = await readTail(session, threadId, head.itemCount ?? 0, lines, 600);
+  const { out, items } = await readTail(session, threadId, head.itemCount ?? 0, lines);
   return { text: renderCapture({ ...out, items }, lines) };
 }
 
@@ -1012,7 +1012,7 @@ function threadOf(out) {
 // The pending runtime requests on one thread: the questions T3's
 // pending-request tools can read and answer, and the remainder of
 // pendingRequestCount, which are approvals those tools cannot see. Each
-// approval is identified by the id of its open approval_request item among
+// approval is identified by the id of its waiting approval_request item among
 // the thread's last READ_LIMIT_MAX activity items, so an approval answered and
 // replaced by another between two reads is a new set; a pending request T3
 // shows no such item for is counted only.
@@ -1023,8 +1023,8 @@ async function pendingOf(session, threadId, t) {
   const ids = [...new Set(listed?.requestIds ?? [])].sort();
   const approvals = Math.max(0, count - ids.length);
   if (!approvals) return { questions: ids, approvals, approvalIds: [] };
-  const { items } = await readTail(session, threadId, t.itemCount ?? 0, READ_LIMIT_MAX, 1);
-  const open = items.filter((it) => it?.type === APPROVAL_ITEM && OPEN_ITEM_STATUSES.has(it.status)).map((it) => it.itemId);
+  const { items } = await readTail(session, threadId, t.itemCount ?? 0, READ_LIMIT_MAX);
+  const open = items.filter((it) => it?.type === APPROVAL_ITEM && it.status === APPROVAL_WAITING).map((it) => it.itemId);
   return { questions: ids, approvals, approvalIds: open.slice(-approvals) };
 }
 
