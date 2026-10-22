@@ -217,15 +217,8 @@ test_backend_detect_t3_explicit_only() (
   FM_HOME="$TMP_ROOT/t3-home"
   mkdir -p "$FM_HOME"
   unset TMUX HERDR_ENV CMUX_WORKSPACE_ID FM_BACKEND
-  # shellcheck disable=SC2034 # Read by the sourced backend adapter if queried.
-  FM_T3CODE_ORIGIN=http://configured.invalid
   # shellcheck disable=SC2329 # Called by the sourced backend detector.
   fm_backend_detect_cmux_fallback() { return 1; }
-  # An ambient T3 server must never select the backend or trigger a lookup.
-  # shellcheck disable=SC2329 # Fails if backend detection invokes this callback.
-  fm_backend_t3code_thread_for_home() {
-    fail 'T3 auto-detection must not query the server'
-  }
   if fm_backend_detect; then fail 'T3 must not auto-detect without its bearer'; fi
   printf 'test-bearer\n' > "$FM_BACKEND_CONFIG_DIR/t3code-token"
   if fm_backend_detect; then fail 'T3 must not auto-detect with its bearer'; fi

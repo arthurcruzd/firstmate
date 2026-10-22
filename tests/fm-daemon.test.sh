@@ -3227,8 +3227,7 @@ test_discover_supervisor_t3code_after_env_tmux_and_herdr() {
       fail "two live T3 threads must not resolve a target"
     fi
     [ "$out" = firstmate:0 ] || fail "an ambiguous home falls through to the default target: $out"
-    assert_contains "$(cat "$dir/ambiguous.err")" "t-a, t-b" "the ambiguity error must reach stderr naming the ids"
-    assert_contains "$(cat "$dir/ambiguous.err")" "FM_SUPERVISOR_TARGET" "the ambiguity error must tell the operator how to pin the target"
+    assert_contains "$(cat "$dir/ambiguous.err")" "error: 2 live T3 threads run in $dir (t-a, t-b)" "discovery must pass the adapter's ambiguity error through to stderr"
 
     : > "$dir/calls"
     export FM_FAKE_T3_THREAD=thread-captain

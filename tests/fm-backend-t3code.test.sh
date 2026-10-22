@@ -13,6 +13,8 @@ set -u
 # shellcheck source=tests/t3-fake-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/t3-fake-lib.sh"
 
+command -v node >/dev/null 2>&1 || { echo "skip: node absent"; exit 0; }
+
 TMP_ROOT=$(fm_test_tmproot fm-backend-t3code-tests)
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
 # Lifecycle cases install their own recording stub before this dependency stub.
@@ -20,15 +22,29 @@ fm_fake_exit0 "$FAKEBIN" treehouse
 export PATH="$FAKEBIN:$PATH"
 t3_fake_start "$TMP_ROOT/server"
 WATCH_PID=
+PROVIDER_PID=
+# fm-spawn.sh creates each task's /tmp/fm-<id> outside TMP_ROOT, so every id a
+# case spawns is recorded (t3_task_id) and its directory removed on exit.
+T3_TASK_IDS="$TMP_ROOT/task-ids"
 cleanup() {
-  if [ -n "$WATCH_PID" ]; then
-    kill "$WATCH_PID" 2>/dev/null || true
-    wait "$WATCH_PID" 2>/dev/null || true
+  local pid id
+  for pid in "$WATCH_PID" "$PROVIDER_PID"; do
+    [ -n "$pid" ] || continue
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  if [ -f "$T3_TASK_IDS" ]; then
+    while IFS= read -r id; do
+      [ -z "$id" ] || rm -rf "/tmp/fm-$id"
+    done < "$T3_TASK_IDS"
   fi
   t3_fake_stop
   fm_test_cleanup
 }
 trap cleanup EXIT
+t3_task_id() {  # <id>
+  printf '%s\n' "$1" >> "$T3_TASK_IDS"
+}
 # A claude spawn writes workspace trust into the launching user's own store
 # (${CLAUDE_CONFIG_DIR:-$HOME}), so both are pinned to a throwaway home.
 SPAWN_HOME="$TMP_ROOT/user-home"
@@ -1249,6 +1265,7 @@ test_spawn_codex_preserves_tracked_codex_config() {
   local proj wt data state id out rc fb neutral original
   t3_require_tomllib test_spawn_codex_preserves_tracked_codex_config || return 0
   id="t3codextrk2"
+  t3_task_id "$id"
   t3_case spawn-codex-tracked-compatible
   proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
   fm_git_worktree "$proj" "$wt" "fm/$id"
@@ -1367,6 +1384,7 @@ test_spawn_claude_refuses_tracked_claude_local_md() {
 test_spawn_claude_refuses_worktree_symlink() {
   local proj wt data state id out rc fb target exclude
   id=t3claudelink
+  t3_task_id "$id"
   t3_case spawn-claude-symlink
   proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
   fm_git_worktree "$proj" "$wt" "fm/$id"
@@ -1466,6 +1484,7 @@ test_codex_cleanup_without_journal_needs_no_python() {
 test_spawn_leases_slot_creates_thread_and_starts_launch_turn() {
   local proj wt data state id out fb thread
   id="t3spawnz1"
+  t3_task_id "$id"
   t3_case spawn
   proj="$CASE_DIR/spawn-project"
   wt="$CASE_DIR/spawn-wt"
@@ -1529,7 +1548,6 @@ test_spawn_leases_slot_creates_thread_and_starts_launch_turn() {
   t3_excluded "$wt" CLAUDE.local.md || fail "CLAUDE.local.md must be git-excluded"
   [ "$(t3_log_line_of 'r.tool === "t3_thread_launch"')" -gt "$(t3_log_line_of 'r.tool === "treehouse"')" ] \
     || fail "the thread launch must follow the lease"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh --backend t3code: leases the slot, launches the thread on it, records metadata, sends the launch brief"
 }
 
@@ -1537,6 +1555,7 @@ test_spawn_codex_scout_writes_toml_env_with_traceparent() {
   local proj wt data state id out fb toml tp
   t3_require_tomllib test_spawn_codex_scout_writes_toml_env_with_traceparent || return 0
   id="t3codexz1"
+  t3_task_id "$id"
   t3_case spawn-codex
   proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
   fm_git_worktree "$proj" "$wt" "fm/$id"
@@ -1568,7 +1587,6 @@ test_spawn_codex_scout_writes_toml_env_with_traceparent() {
   assert_absent "$wt/CLAUDE.local.md" "a codex worker gets no Claude channel statement"
   t3_excluded "$wt" .codex/config.toml || fail "config.toml must be git-excluded"
   [ "$(t3_dispatch_types)" = "t3_thread_launch t3_thread_send" ] || fail "spawn must launch then send the brief, got '$(t3_dispatch_types)'"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh --backend t3code codex: writes .codex/config.toml with GOTMPDIR, FM_TASK_ID, and TRACEPARENT"
 }
 
@@ -1578,6 +1596,7 @@ test_spawn_codex_scout_writes_toml_env_with_traceparent() {
 # config dir, so the bearer is read from there.
 make_t3_secondmate_home() {  # <home> <id>
   local home=$1 id=$2
+  t3_task_id "$id"
   mkdir -p "$home/bin" "$home/data"
   printf '# Firstmate\n' > "$home/AGENTS.md"
   printf '%s\n' "$id" > "$home/.fm-secondmate-home"
@@ -1677,7 +1696,6 @@ test_spawn_secondmate_runs_thread_in_home_with_env() {
   cmp -s "$home/config/t3code-token" "$CONFIG/t3code-token" || fail "the home's credential link must resolve to the primary's credential"
   printf 'rotated\n' > "$CONFIG/t3code-token"
   [ "$(cat "$home/config/t3code-token")" = rotated ] || fail "a fresh primary sign-in must reach the secondmate home"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh --backend t3code --secondmate: project on the home, root-strategy thread, charter message, launch prefix as settings env"
 }
 
@@ -1699,7 +1717,6 @@ test_spawn_codex_secondmate_writes_toml_env() {
   assert_t3_secondmate_env read_toml "codex secondmate config.toml" "$home" "$thread" persistent "$id"
   t3_excluded "$home" .codex/config.toml || fail "config.toml must be git-excluded in the home"
   assert_absent "$home/.claude/settings.local.json" "a codex secondmate writes no Claude settings"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh --backend t3code --secondmate codex: launch prefix as .codex/config.toml shell_environment_policy"
 }
 
@@ -1731,6 +1748,7 @@ test_spawn_refuses_t3code_when_token_rejected() {
 # worktree the fake treehouse leases for it, in the current case.
 t3_worker_setup() {
   local id=$1
+  t3_task_id "$id"
   WORKER_PROJ="$CASE_DIR/spawn-project"; WORKER_WT="$CASE_DIR/spawn-wt"
   fm_git_worktree "$WORKER_PROJ" "$WORKER_WT" "fm/$id"
   mkdir -p "$CASE_DIR/data/$id" "$CASE_DIR/state" "$CASE_DIR/home/state"
@@ -1787,6 +1805,7 @@ test_spawn_abort_returns_lease_only_after_archive() {  # <ok|fail>
   # thread exists and before its record is published.
   t3_worker_setup "$id"
   printf 'blocker\n' > "$WORKER_WT/.claude"
+  printf '.claude\n' >> "$(git -C "$WORKER_WT" rev-parse --git-path info/exclude)"
   out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
   [ "$rc" -ne 0 ] || fail "the blocked spawn should abort"$'\n'"$out"
   return_line=$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')
@@ -1919,6 +1938,53 @@ test_misbound_thread_launch_returns_lease() {
   pass "fm-spawn.sh --backend t3code: a thread T3 bound elsewhere is archived and the lease returned"
 }
 
+# The lease is returned with --force, which discards what the slot holds, so a
+# slot holding uncommitted work gets no thread and is never returned.
+test_dirty_leased_slot_is_kept_without_a_thread() {
+  local id=t3dirtyz out rc
+  t3_case spawn-dirty-slot
+  t3_worker_setup "$id"
+  printf 'uncommitted\n' > "$WORKER_WT/work-in-progress.txt"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "a leased slot holding uncommitted work must refuse the spawn"$'\n'"$out"
+  assert_contains "$out" "refusing to discard uncommitted work" "the refusal names the uncommitted work"
+  assert_contains "$out" "treehouse return --force $WORKER_WT" "the refusal must name the manual return"
+  [ -z "$(t3_dispatch_types)" ] || fail "no thread may be launched on a slot holding uncommitted work, got '$(t3_dispatch_types)'"
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -eq 0 ] \
+    || fail "a slot holding uncommitted work must never be force-returned"$'\n'"$out"
+  assert_absent "$CASE_DIR/state/$id.meta" "a refused spawn records nothing"
+  pass "fm-spawn.sh --backend t3code: a leased slot holding uncommitted work gets no thread and keeps its lease"
+}
+
+# A secondmate home outlives an aborted spawn, so once the thread's archive is
+# proven the T3 environment the spawn wrote there leaves with it, and the
+# home's own settings stay.
+test_aborted_t3_secondmate_spawn_removes_home_env() {
+  local harness model id home out rc settings
+  for harness in claude codex; do
+    case "$harness" in claude) model=claude-sonnet-5 ;; codex) model=gpt-5.6-sol ;; esac
+    id="t3smabortz$harness"
+    t3_case "spawn-secondmate-abort-$harness"
+    t3_world_set 'w.failTools = { t3_thread_send: { code: "turn_refused", message: "launch turn refused" } }'
+    home="$CASE_DIR/sm-home"
+    make_t3_secondmate_home "$home" "$id"
+    settings="$home/.claude/settings.local.json"
+    mkdir -p "$home/.claude"
+    printf '{"permissions":{"allow":["Bash(ls:*)"]},"env":{"CAPTAIN_VAR":"keep"}}\n' > "$settings"
+    out=$(spawn_t3_secondmate "$id" "$home" "$harness" "$model"); rc=$?
+    expect_code 1 "$rc" "a refused $harness secondmate launch turn must abort spawn"$'\n'"$out"
+    [ "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" -gt "$(t3_log_line_of 'r.tool === "t3_thread_send"')" ] \
+      || fail "the aborted $harness secondmate's thread must be archived"$'\n'"$out"
+    [ "$(t3_json_field "$settings" 'JSON.stringify(d)')" = '{"permissions":{"allow":["Bash(ls:*)"]},"env":{"CAPTAIN_VAR":"keep"}}' ] \
+      || fail "an aborted $harness secondmate spawn must leave only the home's own settings, got '$(cat "$settings")'"
+    assert_absent "$home/.codex/config.toml" "an aborted $harness secondmate spawn must not leave its Codex environment"
+    [ ! -L "$home/config/t3code-token" ] || fail "an aborted $harness secondmate spawn must not leave the credential link"
+    [ -e "$CONFIG/t3code-token" ] || fail "removing the home's credential link must leave the primary's credential"
+    assert_absent "$CASE_DIR/home/state/$id.meta" "the rolled-back secondmate leaves no record"
+  done
+  pass "fm-spawn.sh --backend t3code --secondmate: an aborted spawn archives its thread, then removes the T3 environment it wrote into the home"
+}
+
 test_uncertain_launch_message_keeps_task_record() {
   local id=t3uncertainturn out rc thread
   t3_case spawn-uncertain-turn
@@ -1936,7 +2002,6 @@ test_uncertain_launch_message_keeps_task_record() {
   [ "$(t3_dispatch_types)" = "t3_thread_launch t3_thread_send" ] || fail "the thread must be neither archived nor relaunched, got '$(t3_dispatch_types)'"
   [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -eq 0 ] || fail "a possibly running worker must keep its lease"
   [ -d "$CASE_DIR/state/$id.git-hooks" ] || fail "an uncertain accepted launch must keep the Git hook directory its thread uses"$'\n'"$out"
-  rm -rf "/tmp/fm-$id"
   pass "fm-spawn.sh --backend t3code: a launch brief whose reply is lost is reported unconfirmed and keeps its task record"
 }
 
@@ -1978,8 +2043,9 @@ test_scout_teardown_stops_and_archives_before_slot_return() {
 }
 
 test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete() {
-  local home data state config id out rc thread=mcp:4e0f2a6b-9d3c-4b5e-af4f-0123456789cd archive_line harness=${1:-claude} journal='' provider
+  local home data state config id out rc thread=mcp:4e0f2a6b-9d3c-4b5e-af4f-0123456789cd archive_line harness=${1:-claude} journal='' nolsof
   t3_require_tomllib test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete || return 0
+  command -v lsof >/dev/null 2>&1 || { printf 'note: %s skipped: lsof is required to prove a process left the home\n' "${FUNCNAME[0]}"; return 0; }
   id="t3smtdz1-$harness"
   t3_case "teardown-secondmate-$harness" running
   t3_world "$(t3_thread_json "$thread" running false)"
@@ -2006,31 +2072,28 @@ test_secondmate_teardown_archives_thread_before_home_removal_without_project_del
   # T3 detaches the provider asynchronously after the archive reads back, so a
   # process rooted in the home can outlive the proven archive.
   (cd "$home/state" && exec sleep 300) &
-  provider=$!
-  if command -v lsof >/dev/null 2>&1; then
-    local nolsof="$CASE_DIR/nolsof"
-    mkdir -p "$nolsof"
-    printf '#!/usr/bin/env bash\nexit 1\n' > "$nolsof/lsof"
-    chmod +x "$nolsof/lsof"
-    out=$( PATH="$nolsof:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE_DIR/home" \
-      FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
-      "$ROOT/bin/fm-teardown.sh" "$id" --force 2>&1 )
-    rc=$?
-    [ "$rc" -ne 0 ] || fail "teardown must refuse when it cannot prove the home's processes ended"$'\n'"$out"
-    assert_contains "$out" "cannot determine leaked processes" "the refusal names the unproven process scan"
-    assert_present "$home/AGENTS.md" "an unproven shutdown keeps the secondmate home"
-    assert_present "$state/$id.meta" "an unproven shutdown keeps the endpoint record"
-    kill -0 "$provider" 2>/dev/null || fail "the refused teardown must not have touched the provider"
-  fi
+  PROVIDER_PID=$!
+  nolsof="$CASE_DIR/nolsof"
+  mkdir -p "$nolsof"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$nolsof/lsof"
+  chmod +x "$nolsof/lsof"
+  out=$( PATH="$nolsof:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE_DIR/home" \
+    FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
+    "$ROOT/bin/fm-teardown.sh" "$id" --force 2>&1 )
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "teardown must refuse when it cannot prove the home's processes ended"$'\n'"$out"
+  assert_contains "$out" "cannot determine leaked processes" "the refusal names the unproven process scan"
+  assert_present "$home/AGENTS.md" "an unproven shutdown keeps the secondmate home"
+  assert_present "$state/$id.meta" "an unproven shutdown keeps the endpoint record"
+  kill -0 "$PROVIDER_PID" 2>/dev/null || fail "the refused teardown must not have touched the provider"
   out=$( FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE_DIR/home" \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     "$ROOT/bin/fm-teardown.sh" "$id" --force 2>&1 )
   rc=$?
   expect_code 0 "$rc" "t3code secondmate teardown should succeed"$'\n'"$out"
-  if command -v lsof >/dev/null 2>&1; then
-    kill -0 "$provider" 2>/dev/null && { kill "$provider"; fail "a provider process rooted in the home must be ended before the home is removed"; }
-  fi
-  wait "$provider" 2>/dev/null || true
+  ! kill -0 "$PROVIDER_PID" 2>/dev/null || fail "a provider process rooted in the home must be ended before the home is removed"
+  wait "$PROVIDER_PID" 2>/dev/null || true
+  PROVIDER_PID=
   [ "$(t3_dispatch_types)" = "t3_thread_interrupt t3_thread_organize" ] \
     || fail "secondmate teardown must interrupt then archive exactly once and never delete the project, got '$(t3_dispatch_types)'"
   archive_line=$(t3_log_line_of 'r.tool === "t3_thread_organize"')
@@ -2335,6 +2398,47 @@ TH
   pass "fm-teardown.sh backend=t3code pooled secondmate: the slot returns only after the provider ended, without the T3 environment the spawn wrote"
 }
 
+# A T3 secondmate torn down as the child of another secondmate goes through
+# the same shutdown barrier before its own home is removed.
+test_nested_t3_secondmate_home_reaped_before_removal() {
+  local id=t3smnestz child=t3smnestzchild thread=mcp:1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b child_thread=mcp:6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d
+  local home child_home data state out rc h
+  command -v lsof >/dev/null 2>&1 || { printf 'note: %s skipped: lsof is required to prove a process left the home\n' "${FUNCNAME[0]}"; return 0; }
+  t3_case teardown-secondmate-nested running
+  t3_world "$(t3_thread_json "$thread" running false)" "$(t3_thread_json "$child_thread" running false)"
+  home="$CASE_DIR/sm-home"; child_home="$CASE_DIR/child-home"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
+  for h in "$home" "$child_home"; do
+    mkdir -p "$h/state" "$h/data" "$h/config" "$h/projects" "$h/bin"
+    printf '# Firstmate\n' > "$h/AGENTS.md"
+  done
+  printf '%s\n' "$id" > "$home/.fm-secondmate-home"
+  printf '%s\n' "$child" > "$child_home/.fm-secondmate-home"
+  mkdir -p "$data" "$state"
+  touch "$state/.last-watcher-beat"
+  fm_write_meta "$state/$id.meta" \
+    "window=fm-$id" "endpoint_task_id=$id" "worktree=$home" "project=$home" \
+    "harness=claude" "kind=secondmate" "mode=secondmate" "yolo=off" \
+    "backend=t3code" "t3_thread_id=$thread" "t3_project_id=proj-sm" "home=$home"
+  fm_write_meta "$home/state/$child.meta" \
+    "window=fm-$child" "endpoint_task_id=$child" "worktree=$child_home" "project=$child_home" \
+    "harness=claude" "kind=secondmate" "mode=secondmate" "yolo=off" \
+    "backend=t3code" "t3_thread_id=$child_thread" "t3_project_id=proj-sm" "home=$child_home"
+  (cd "$child_home/state" && exec sleep 300) &
+  PROVIDER_PID=$!
+  out=$( FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE_DIR/home" \
+    FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$ROOT/bin/fm-teardown.sh" "$id" --force 2>&1 )
+  rc=$?
+  expect_code 0 "$rc" "forced teardown of a T3 secondmate with a nested T3 secondmate should succeed"$'\n'"$out"
+  ! kill -0 "$PROVIDER_PID" 2>/dev/null || fail "a provider process rooted in the nested secondmate's home must be ended before that home is removed"$'\n'"$out"
+  wait "$PROVIDER_PID" 2>/dev/null || true
+  PROVIDER_PID=
+  [ "$(t3_fake_calls t3_thread_organize | grep -c "$child_thread")" = 1 ] || fail "the nested secondmate's thread must be archived"
+  assert_absent "$child_home" "teardown should remove the nested secondmate home"
+  assert_absent "$home" "teardown should remove the secondmate home"
+  pass "fm-teardown.sh backend=t3code: a nested T3 secondmate's home is reaped before it is removed"
+}
+
 # The Claude PR-tool clause is scoped to servers older than the first build
 # on which T3's pull-request tools were verified safe in a Claude session.
 test_claude_pr_tool_clause_version_boundary() {
@@ -2569,6 +2673,9 @@ test_spawn_secondmate_refuses_symlinked_claude_settings
 test_launch_gate_failure_returns_lease
 test_refused_launch_turn_archives_thread_and_returns_lease
 test_misbound_thread_launch_returns_lease
+test_dirty_leased_slot_is_kept_without_a_thread
+test_aborted_t3_secondmate_spawn_removes_home_env
+test_nested_t3_secondmate_home_reaped_before_removal
 test_uncertain_launch_message_keeps_task_record
 test_spawn_rejected_lease_is_neither_cleaned_nor_returned
 test_teardown_keeps_tracked_claude_local_md

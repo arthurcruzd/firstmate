@@ -250,6 +250,12 @@ test_launch_refusals() {
   t3_fake_set 'delete w.bindInstance; w.bindRuntimeMode = "auto-accept-edits"'
   mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
   expect_code 4 "$RC" "a thread below full access is refused"
+  t3_fake_set 'w.archiveKeepsRun = true'
+  printf 'brief' > "$TMP_ROOT/launch-message"
+  mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT" --message-file "$TMP_ROOT/launch-message"
+  expect_code 1 "$RC" "a mis-bound thread whose accepted archive never reads back closed is an uncertain outcome"
+  assert_contains "$ERR" "its archive is unproven" "the uncertain refusal says the archive is unproven"
+  t3_fake_set 'delete w.archiveKeepsRun'
   t3_fake_set 'w.failTools = { t3_thread_organize: { code: "boom", message: "archive failed" } }'
   mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
   expect_code 1 "$RC" "a mis-bound thread whose archive failed is an uncertain outcome"
@@ -269,7 +275,7 @@ test_launch_refusals() {
   expect_code 8 "$RC" "a gate transport failure before the launch request launched nothing"
   assert_contains "$ERR" "no thread was launched" "the failure says no thread exists"
   [ -z "$(t3_fake_calls t3_thread_launch)" ] || fail "no launch may be requested after the gate failed"
-  pass "fm-t3-mcp launch: refuses a binding T3 did not honor, reports a lost, unproven, or unarchivable launch as uncertain, and a gate failure as no launch"
+  pass "fm-t3-mcp launch: refuses a binding T3 did not honor, reports a lost, unproven, or unarchived launch as uncertain, and a gate failure as no launch"
 }
 
 new_thread() {  # -> thread id
@@ -294,7 +300,7 @@ test_send_state_capture_interrupt_archive() {
   assert_equals started "$(field "$OUT" delivery)" "an idle thread starts a turn"
   assert_contains "$(t3_fake_calls t3_thread_send | tail -1)" '"mode":"auto","clientRequestId":"req-1"' "send uses mode auto with the request id"
   mcp send --thread "$thread" --message-file "$msg" --client-request-id req-1
-  assert_equals started "$(field "$OUT" delivery)" "a repeated request id is the same message"
+  assert_equals 2 "$(t3_fake_calls t3_thread_send | grep -c '"clientRequestId":"req-1"')" "a retry sends the same client request id again"
   mcp state --thread "$thread"
   assert_equals running "$(field "$OUT" status)" "a started thread runs"
   [ -n "$(field "$OUT" activeRunId)" ] || fail "a running thread has an active run"

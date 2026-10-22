@@ -47,9 +47,9 @@
 //     own checkout). Reads the thread and its t3_thread_configuration back and
 //     archives and refuses it unless T3 bound exactly that workspace, full
 //     access, instance, model, and every requested option value; a refused
-//     thread whose archive fails exits 1, because it may still be live. A
-//     read-back that fails also archives and exits 1, since the thread exists
-//     but its binding is unproven. A transport or unexpected failure of the
+//     thread that does not then read back archived with no active run exits
+//     1, because it may still be live. A read-back that fails also archives
+//     and exits 1, since the thread exists but its binding is unproven. A transport or unexpected failure of the
 //     gate, before t3_thread_launch is requested, exits 8: no thread was
 //     launched. Without --message-file the thread is created idle.
 //   fm-t3-mcp.mjs send --thread <id> --message-file <file> --client-request-id <id>
@@ -132,8 +132,8 @@
 // request itself: parse error, invalid request, unknown method, or invalid
 // params; error.code carries T3's code when it has one); 4 a local refusal
 // (no credential, expired credential, revoked credential, environment
-// mismatch, capability gate, or a launch binding mismatch whose thread was
-// archived); 5 and 6 as thread-for-root says; 7 a
+// mismatch, capability gate, or a launch binding mismatch whose thread read
+// back archived); 5 and 6 as thread-for-root says; 7 a
 // mutation whose request went out but whose reply was lost (send); 8 a launch
 // that failed before t3_thread_launch was requested (launch). A failure prints {"ok":false,"error":{...}} on stdout and one line on stderr.
 // A credential within EXPIRY_WARN_DAYS of expiry adds a stderr warning on
@@ -167,6 +167,7 @@ const ENVIRONMENT_TOOL = "t3_environment_read";
 const EXPIRY_WARN_DAYS = 5;
 const DAY_MS = 86_400_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+const ARCHIVE_TIMEOUT_MS = 15_000;
 const SESSION_CLOSE_TIMEOUT_MS = 2_000;
 // Node's fetch drops a reply that takes longer than 300 s, so one
 // t3_thread_wait, plus its 15 s grace, stays under that and a longer wait
@@ -843,7 +844,7 @@ async function launch(flags) {
   };
   const out = await session.call("t3_thread_launch", args);
   if (!out?.threadId) throw new Refusal("launch_unconfirmed", "t3_thread_launch returned no threadId; inspect t3_thread_list before retrying", 1);
-  const archiveLaunched = () => session.call("t3_thread_organize", { threadId: out.threadId, action: "archive" }).then(() => true, () => false);
+  const archiveLaunched = () => archiveThread(session, out.threadId, ARCHIVE_TIMEOUT_MS).then(() => true, () => false);
   // Prove the binding T3 recorded before anyone relies on it.
   let t;
   let config;
@@ -854,7 +855,7 @@ async function launch(flags) {
     const archived = await archiveLaunched();
     throw new Refusal(
       "binding_unconfirmed",
-      `T3 launched thread ${out.threadId} but reading back its binding failed (${e.message}); ${archived ? "asked T3 to archive it, so confirm it is archived" : "its archive failed, so archive it"} in T3 Code`,
+      `T3 launched thread ${out.threadId} but reading back its binding failed (${e.message}); ${archived ? "it then read back archived with no active run" : "its archive is unproven, so archive it in T3 Code"}`,
       1,
       { threadId: out.threadId },
     );
@@ -864,7 +865,7 @@ async function launch(flags) {
     const archived = await archiveLaunched();
     throw new Refusal(
       "binding_mismatch",
-      `T3 bound thread ${out.threadId} to ${problems.join(", ")}, not the requested ${worktree ? "worktree" : "project root"} and model selection at full access; ${archived ? "archived it" : "its archive failed, so archive it in T3 Code"}`,
+      `T3 bound thread ${out.threadId} to ${problems.join(", ")}, not the requested ${worktree ? "worktree" : "project root"} and model selection at full access; ${archived ? "archived it" : "its archive is unproven, so archive it in T3 Code"}`,
       archived ? 4 : 1,
       { threadId: out.threadId },
     );
@@ -1116,8 +1117,14 @@ async function watch(flags) {
 
 async function archive(flags) {
   const threadId = need(flags, "thread");
-  const timeoutMs = positiveInt(flags, "timeout-ms", 15_000, 600_000);
+  const timeoutMs = positiveInt(flags, "timeout-ms", ARCHIVE_TIMEOUT_MS, 600_000);
   const { session } = await verifiedSession(flags);
+  return archiveThread(session, threadId, timeoutMs);
+}
+
+// t3_thread_organize archive, then the read-back that proves the close:
+// archived:true and activeRunId:null, or a thread the server no longer has.
+async function archiveThread(session, threadId, timeoutMs) {
   try {
     await session.call("t3_thread_organize", { threadId, action: "archive" });
   } catch (err) {

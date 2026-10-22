@@ -1503,6 +1503,7 @@ ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
 T3CODE_ABORT_CLEANUP=0
 T3CODE_LEASED=0
+T3CODE_HOME_ENV=0
 T3CODE_CLAUDE_CHANNEL_WRITTEN=0
 T3CODE_CREATE_UNCERTAIN=0
 T3CODE_LAUNCH_UNCONFIRMED=0
@@ -1669,16 +1670,17 @@ spawn_abort_cleanup() {
       fi
     fi
   fi
-  # Nothing has run in a leased slot until T3 accepts the launch turn, so an
-  # abort before that, including one after T3 refused the turn, archives the
-  # thread (it must never act in a returned slot), removes the environment
-  # files the spawn wrote there as teardown does, and hands the lease back only
-  # once both succeeded; once T3 accepted the turn, or its reply was lost, the
-  # agent may be working there, so both are left in place.
+  # Nothing has run in a leased slot or secondmate home until T3 accepts the
+  # launch turn, so an abort before that, including one after T3 refused the
+  # turn, archives the thread (it must never act in a returned slot), removes
+  # the environment files the spawn wrote there as teardown does, and hands a
+  # lease back only once both succeeded; once T3 accepted the turn, or its
+  # reply was lost, the agent may be working there, so both are left in place.
   if [ "$T3CODE_CREATE_UNCERTAIN" = 1 ]; then
     # t3_thread_launch has no idempotency key, so a launch whose outcome was
     # lost may have left a thread whose id never came back.
     T3CODE_CREATE_UNCERTAIN=0
+    T3CODE_HOME_ENV=0
     if [ "$T3CODE_LEASED" = 1 ]; then
       T3CODE_LEASED=0
       echo "warning: the T3 thread launch for $ID did not report an outcome; the leased worktree $WT stays leased until any thread T3 bound to it is found in T3 Code and archived, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
@@ -1688,6 +1690,7 @@ spawn_abort_cleanup() {
   elif [ "$T3CODE_ABORT_CLEANUP" = 1 ]; then
     T3CODE_ABORT_CLEANUP=0
     if ! fm_backend_kill t3code "$T"; then
+      T3CODE_HOME_ENV=0
       if [ "$T3CODE_LEASED" = 1 ]; then
         T3CODE_LEASED=0
         echo "warning: could not stop and archive T3 thread $T for $ID, so the leased worktree $WT stays leased; archive the thread in T3 Code, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
@@ -1695,6 +1698,11 @@ spawn_abort_cleanup() {
         echo "warning: could not stop and archive T3 thread $T for $ID; archive it in T3 Code" >&2
       fi
     fi
+  fi
+  if [ "$T3CODE_HOME_ENV" = 1 ]; then
+    T3CODE_HOME_ENV=0
+    fm_backend_t3code_home_env_cleanup "$PROJ_ABS" \
+      || echo "warning: could not remove the T3 environment this spawn wrote into $PROJ_ABS for $ID; remove it before the home runs again" >&2
   fi
   if [ "$T3CODE_LEASED" = 1 ] && [ -n "${WT:-}" ]; then
     T3CODE_LEASED=0
@@ -4815,6 +4823,7 @@ EOF
     if [ "$KIND" = secondmate ]; then
       # The home's own daemon and crew call the same server, so they read the
       # primary's credential through a link rather than a copy of the secret.
+      T3CODE_HOME_ENV=1
       if ! { mkdir -p "$PROJ_ABS/config" &&
         ln -sfn "$(cd "$CONFIG" && pwd -P)/t3code-token" "$PROJ_ABS/config/t3code-token"; }; then
         echo "error: could not link the T3 credential into $PROJ_ABS/config for $ID" >&2
@@ -4839,6 +4848,10 @@ EOF
       }
       [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
       validate_spawn_worktree "treehouse get --lease" "$WT (leased to $ID; once inspected, release it with 'treehouse return --force $WT' from $PROJ_ABS)"
+      freshen_spawn_worktree_base "$WT" "$BASE_BRANCH" || {
+        echo "error: $WT stays leased to $ID; once inspected, release it with 'treehouse return --force $WT' from $PROJ_ABS" >&2
+        exit 1
+      }
       T3CODE_LEASED=1
       T3CODE_CREATE_UNCERTAIN=1
       T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
@@ -5507,7 +5520,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     SPAWN_SLOT_CLAIMED=1
   fi
 fi
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$BACKEND" != t3code ]; then
   freshen_spawn_worktree_base "$WT" "$BASE_BRANCH" || exit 1
 fi
 
@@ -7077,6 +7090,7 @@ if [ "$BACKEND" = t3code ]; then
   }
   T3CODE_ABORT_CLEANUP=0
   T3CODE_LEASED=0
+  T3CODE_HOME_ENV=0
 else
   if ! (umask 077 && mkdir "$LAUNCH_DIR") 2>/dev/null; then
     if [ -L "$LAUNCH_DIR" ] || [ ! -d "$LAUNCH_DIR" ] || [ ! -O "$LAUNCH_DIR" ] ||
