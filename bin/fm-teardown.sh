@@ -358,6 +358,14 @@ teardown_require_backend_prerequisites() {  # <backend> <task-id>
     return 1
   fi
 }
+
+# Retiring a T3 secondmate home needs lsof to prove its provider processes
+# have left it (t3code_secondmate_home_shutdown_barrier).
+t3code_secondmate_lsof_check() {  # <task-id> <home>
+  command -v lsof >/dev/null 2>&1 && return 0
+  echo "REFUSED: cannot prove T3 secondmate $1's provider processes have left ${2:-its home} (lsof is unavailable); preserving the home and its records for retry" >&2
+  return 1
+}
 for _teardown_source in \
   fm-tasks-axi-lib.sh \
   fm-backlog-transition-lib.sh \
@@ -1243,6 +1251,7 @@ teardown_require_backend_prerequisites "$BACKEND" "$ID" || exit 1
 # even under --force.
 if [ "$BACKEND" = t3code ]; then
   fm_backend_runtime_check t3code || exit 1
+  [ "$TEARDOWN_META_KIND" != secondmate ] || t3code_secondmate_lsof_check "$ID" "$(fm_meta_get "$META" home)" || exit 1
 fi
 if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
   "$FM_ROOT/bin/fm-guard.sh" || true
@@ -2812,10 +2821,7 @@ EOF
 # home, before it is returned or removed; without lsof nothing can prove the
 # home is quiet, and the home and its records are kept.
 t3code_secondmate_home_shutdown_barrier() {  # <home> <task-id>
-  if ! command -v lsof >/dev/null 2>&1; then
-    echo "REFUSED: cannot prove T3 secondmate $2's provider processes have left $1 (lsof is unavailable); preserving the home and its records for retry" >&2
-    return 1
-  fi
+  t3code_secondmate_lsof_check "$2" "$1" || return 1
   reap_task_worktree_processes "secondmate home" "$1"
 }
 
@@ -3193,6 +3199,7 @@ validate_firstmate_home_children_removal() {
     if [ "$child_kind" = secondmate ]; then
       child_home=$(meta_value "$child_meta" home)
       [ -n "$child_home" ] || child_home=$child_wt
+      [ "$child_backend" != t3code ] || t3code_secondmate_lsof_check "$child_id" "$child_home" || return 1
       validate_firstmate_home_for_removal "$child_home" "child firstmate home" "$child_id" >/dev/null || return 1
       validate_firstmate_home_children_removal "$child_home" || return 1
     elif [ "$child_backend" = orca ]; then

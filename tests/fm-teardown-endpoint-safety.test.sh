@@ -4,6 +4,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/t3-fake-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/t3-fake-lib.sh"
 
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
 TMP_ROOT=$(fm_test_tmproot fm-teardown-endpoint-safety)
@@ -947,7 +949,8 @@ tomllib_python_available() {
 }
 
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
-  local dir id=stale-task other=reassigned-task worker rc overlay_installed=0
+  local dir id=stale-task other=reassigned-task worker rc overlay_installed=0 window t3_meta=()
+  local thread=mcp:8c9d0e1f-2a3b-4c5d-8e6f-7a8b9c0d1e2f
 
   # Dirty slot, --force, and a live worker inside it: --force authorizes
   # discarding this task's unlanded work, which is already gone with the slot,
@@ -965,9 +968,21 @@ test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
     printf 'note: reassigned-slot Codex overlay check skipped: no Python 3.11+ (tomllib) interpreter on PATH\n'
   fi
   cp "$dir/worktree/.codex/config.toml" "$dir/other-overlay.toml"
+  # The stale task runs on T3 Code, whose teardown undoes a Codex overlay, so
+  # only the slot's ownership keeps that cleanup off the claimant's overlay.
+  window="firstmate:fm-$id"
+  if command -v node >/dev/null 2>&1; then
+    t3_fake_start "$dir/t3-server"
+    t3_fake_case "$dir/t3-case" "{\"threads\":{\"$thread\":{\"threadId\":\"$thread\",\"projectId\":\"proj-1\",\"status\":\"completed\",\"activeRunId\":null,\"archived\":false,\"worktreePath\":\"$dir/worktree\",\"pendingRequestCount\":0,\"items\":[],\"runs\":[]}}}"
+    t3_fake_credential "$dir/home/config/t3code-token"
+    window="fm-$id"
+    t3_meta=(backend=t3code "t3_thread_id=$thread" t3_project_id=proj-1 harness=codex)
+  else
+    printf 'note: reassigned-slot T3 teardown check skipped: node absent\n'
+  fi
   fm_write_meta "$dir/home/state/$id.meta" \
-    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
-    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+    "window=$window" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout" ${t3_meta[@]+"${t3_meta[@]}"}
   claim_pool_slot "$dir" "$other" "$dir/other-home"
   # Staged in this shell, not a command substitution: a background child of a
   # $(...) subshell does not outlive it, and the point of this worker is to be
@@ -981,6 +996,10 @@ test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot() {
   set -e
 
   [ "$rc" -eq 0 ] || fail "teardown of a task whose slot was reassigned failed: $(cat "$dir/stderr")"
+  if [ "${#t3_meta[@]}" -gt 0 ]; then
+    [ "$(t3_fake_mutations)" = "t3_thread_organize" ] || fail "teardown must still archive the stale task's own T3 thread, got '$(t3_fake_mutations)'"
+    t3_fake_stop
+  fi
   kill -0 "$worker" 2>/dev/null || fail "teardown killed the worker holding the reassigned pool slot"
   assert_present "$dir/worktree/sentinel" "teardown reset a pool slot another task had claimed"
   cmp -s "$dir/other-overlay.toml" "$dir/worktree/.codex/config.toml" || fail "teardown changed the other task's Codex overlay"

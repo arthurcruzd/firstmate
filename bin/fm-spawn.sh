@@ -1686,7 +1686,7 @@ spawn_abort_cleanup() {
       T3CODE_LEASED=0
       echo "warning: the T3 thread launch for $ID did not report an outcome; the leased worktree $WT stays leased until any thread T3 bound to it is found in T3 Code and archived, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
     else
-      echo "warning: the T3 thread launch for $ID did not report an outcome; find and archive any thread it left in T3 Code before reusing its home" >&2
+      echo "warning: the T3 thread launch for $ID did not report an outcome; find and archive any thread it left in T3 Code, then remove the $PROJ_ABS/config/t3code-token link this spawn added, before reusing its home" >&2
     fi
   elif [ "$T3CODE_ABORT_CLEANUP" = 1 ]; then
     T3CODE_ABORT_CLEANUP=0
@@ -1694,9 +1694,11 @@ spawn_abort_cleanup() {
       T3CODE_HOME_ENV=0
       if [ "$T3CODE_LEASED" = 1 ]; then
         T3CODE_LEASED=0
-        echo "warning: could not stop and archive T3 thread $T for $ID, so the leased worktree $WT stays leased; archive the thread in T3 Code, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
+        local t3_env_files="$WT/.claude/settings.local.json"
+        [ "$T3CODE_CLAUDE_CHANNEL_WRITTEN" != 1 ] || t3_env_files="$t3_env_files and $WT/CLAUDE.local.md"
+        echo "warning: could not stop and archive T3 thread $T for $ID, so the leased worktree $WT stays leased; archive the thread in T3 Code, undo the T3 environment this spawn wrote with '$SCRIPT_DIR/fm-t3code-codex-env.sh cleanup $WT' and by removing $t3_env_files, then run 'treehouse return --force $WT' from $PROJ_ABS" >&2
       else
-        echo "warning: could not stop and archive T3 thread $T for $ID; archive it in T3 Code" >&2
+        echo "warning: could not stop and archive T3 thread $T for $ID; archive it in T3 Code, then remove the T3 environment this spawn wrote into $PROJ_ABS: run '$SCRIPT_DIR/fm-t3code-codex-env.sh cleanup $PROJ_ABS', remove the keys FM_T3CODE_ENV_KEYS lists, and FM_T3CODE_ENV_KEYS itself, from its .claude/settings.local.json, and remove its config/t3code-token link" >&2
       fi
     fi
   fi

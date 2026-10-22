@@ -2091,6 +2091,15 @@ test_secondmate_teardown_archives_thread_before_home_removal_without_project_del
   # process rooted in the home can outlive the proven archive.
   (cd "$home/state" && exec sleep 300) &
   PROVIDER_PID=$!
+  out=$( PATH="$(fm_test_base_path_sans "$PATH" lsof)" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE_DIR/home" \
+    FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
+    "$ROOT/bin/fm-teardown.sh" "$id" --force 2>&1 )
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "teardown must refuse a T3 secondmate when lsof is unavailable"$'\n'"$out"
+  assert_contains "$out" "lsof is unavailable" "the refusal names the missing lsof"
+  [ -z "$(t3_dispatch_types)" ] || fail "a missing lsof must refuse before the thread is interrupted or archived, got '$(t3_dispatch_types)'"
+  assert_present "$state/$id.meta" "a missing lsof keeps the endpoint record"
+  [ -z "$journal" ] || assert_present "$journal" "a missing lsof keeps the T3 environment the home still runs on"
   nolsof="$CASE_DIR/nolsof"
   mkdir -p "$nolsof"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$nolsof/lsof"
