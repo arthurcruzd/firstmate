@@ -1,0 +1,26 @@
+ok - fm-t3-mcp login: PKCE sign-in writes a 0600 credential with the environment id and prints no secret
+ok - fm-t3-mcp login: the origin defaults to FM_T3CODE_ORIGIN, then T3's runtime file, else refuses naming both
+ok - fm-t3-mcp login: refuses every ceiling but full-access before any request
+ok - fm-t3-mcp status: gate passes over JSON and SSE replies with the 2025-06-18 protocol header
+ok - fm-t3-mcp gate: refuses a server missing a required tool or its identity tool
+ok - fm-t3-mcp: refuses a server whose environment id differs from the credential's
+ok - fm-t3-mcp credential: refuses expired, missing, and over-readable credentials, and warns before expiry
+ok - fm-t3-mcp: a 401 from a revoked credential is a local refusal naming a fresh sign-in
+ok - fm-t3-mcp projects: matched by real path, deleted ones skipped, a failed create resolves to a registered project, project-read returns the default model
+ok - fm-t3-mcp launch: idle full-access thread on the existing worktree or the project root, with the given model selection
+ok - fm-t3-mcp launch: refuses a binding T3 did not honor, reports a lost, unproven, or unarchivable launch as uncertain, and a gate failure as no launch
+ok - fm-t3-mcp thread verbs: idempotent send, state and turn time, bounded capture, interrupt claims, and proven archive
+ok - fm-t3-mcp thread-for-root: only an unarchived, running, worktree-less thread on the root resolves
+ok - fm-t3-mcp: tool errors exit 3 with T3's code, an unreachable server exits 1
+ok - fm-t3-mcp status: reports telemetry off only when the server process proves it, and warns otherwise
+ok - fm-t3-mcp read: --limit is capped at T3's own 100
+ok - fm-t3-mcp interrupt: confirmation waits on exactly the run T3 interrupted, never a later run
+ok - fm-t3-mcp send: a reply lost after commit exits 7, and the same-id retry lands as one delivery
+ok - fm-t3-mcp thread-for-root: every page is read, forks count, subagents do not
+ok - fm-t3-mcp resolve-selection: driver, model, and options come from T3's catalog; an effort override keeps other options
+ok - fm-t3-mcp launch: t3_thread_configuration must read back the instance, model, and every requested option
+ok - fm-t3-mcp requests/respond: questions are read and answered by id; approvals are counted, never answered
+ok - fm-t3-mcp watch: exact-run waits end on a terminal run, idle threads never wait, and pending requests block once per signature
+ok - fm-t3-mcp watch: waits that all fail are an error, not a timeout
+ok - fm-t3-mcp: a helper reached through a symlinked path runs its verb instead of exiting silently
+ok - fm-t3-mcp: an empty reply is never success: a send stays unconfirmed and a read fails

@@ -1,0 +1,13 @@
+implicit selection with T3/Paseo markers: tmux
+explicit config selection: t3code
+environment override: tmux
+{"ok":false,"error":{"code":"no_credential","message":"no T3 credential at /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M5GM9SCQCAEEWHR79KQ7VKAC/.test-phase-tmp/local/config/absent; the captain signs in with: bin/fm-t3-mcp.mjs login --access full-access"}}
+fm-t3-mcp: no T3 credential at /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M5GM9SCQCAEEWHR79KQ7VKAC/.test-phase-tmp/local/config/absent; the captain signs in with: bin/fm-t3-mcp.mjs login --access full-access
+missing credential exit: 4
+Installed TOML: {'model': 'project-model', 'shell_environment_policy': {'set': {'FM_TASK_ID': 'live-check'}}}
+ordinary staging preserves original configuration bytes
+cleanup restored original CRLF bytes; Git flag: H .codex/config.toml
+error: /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M5GM9SCQCAEEWHR79KQ7VKAC/.test-phase-tmp/local/repo/.codex/config.toml: already defines [shell_environment_policy]; refusing to replace the project's policy table
+existing project policy refused (exit 1)
+error: /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M5GM9SCQCAEEWHR79KQ7VKAC/.test-phase-tmp/local/repo/.codex/config.toml: configuration changed while the Firstmate overlay was installed; preserve the journal and reconcile configuration before cleanup
+cleanup refused changed file and retained bytes and recovery journal (exit 1)

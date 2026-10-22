@@ -1,0 +1,5 @@
+skip: live: no T3 credential at /home/fm/.no-mistakes/worktrees/9ebe5b46efa6/01M5GM9SCQCAEEWHR79KQ7VKAC/.test-phase-tmp/no-credential/t3code-token
+node: /home/fm/.local/node/bin/node
+treehouse: /home/fm/.local/bin/treehouse
+t3: absent from PATH
+t3code: absent from PATH
