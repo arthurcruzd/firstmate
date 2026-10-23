@@ -1,0 +1,17 @@
+## commit under test: 8b2fb3ff; T3 server: t3 v0.1.0 (npx t3@0.1.0 package) serve --host 127.0.0.1 --port <port> --no-browser --base-dir <lab>/t3, T3CODE_TELEMETRY_ENABLED=false
+## lab home minted with bin/fm-lab-home.sh create; FM_HOME=<lab>/home (physical path); config/backend=t3code
+$ <lab>/bin/t3 --version
+t3 v0.1.0
+$ FM_HOME=<lab>/home node bin/fm-t3-mcp.mjs login --access full-access --url http://127.0.0.1:<port> --t3 <lab>/bin/t3 --base-dir <lab>/t3   (token never printed; file mode below)
+-rw-------@ <lab>/home/config/t3code-token
+$ FM_HOME=<lab>/home node bin/fm-t3-mcp.mjs status
+{"ok":true,"origin":"http://127.0.0.1:57543","access":"full-access","expiresAt":"2026-11-22T02:24:13.140Z","daysLeft":30,"environmentId":"af4a3285-a82d-49d1-94f9-8a8001baf3e4","serverVersion":"0.1.0","recordedServerVersion":"0.1.0","telemetry":"off"}
+
+$ FM_T3CODE_LIVE_E2E=1 FM_T3CODE_LIVE_TOKEN_FILE=<lab>/home/config/t3code-token bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
+FM_TEST_BEGIN 2026-10-23T02:29:51Z tests/fm-backend-t3code-live-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
+ok - t3code live transport: T3 0.1.0 environment af4a3285-a82d-49d1-94f9-8a8001baf3e4 passes the gate (telemetry=off)
+FM_TEST_END 2026-10-23T02:29:51Z tests/fm-backend-t3code-live-e2e.test.sh exit=0 duration_ms=628 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=713
+FM_TEST_SUMMARY_FAMILY family=live-harness-optin count=1 duration_ms=628 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-backend-t3code-live-e2e.test.sh duration_ms=628
+exit=0

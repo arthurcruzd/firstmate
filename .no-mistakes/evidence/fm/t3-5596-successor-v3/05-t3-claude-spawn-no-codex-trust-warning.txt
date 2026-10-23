@@ -1,0 +1,17 @@
+== S6 claude harness on the same T3 home with an unreadable Codex config: the Codex trust warning is codex-only
+--- CODEX_HOME=<lab>/codex-cfg/missing (no config.toml)
+$ FM_HOME=/private<lab>/home CODEX_HOME=<lab>/codex-cfg/missing bin/fm-spawn.sh cl1 <lab>/home/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+   (<lab> is under /var/folders, a symlink to /private/var/folders; the project path is given through the symlink)
+exit=0 elapsed=5s
+--- stdout
+spawned cl1 harness=claude kind=scout window=fm-cl1 worktree=<lab>/pool/.treehouse/.treehouse/labproj-3cff71/6/labproj
+--- stderr (watcher-down banner lines elided)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/.treehouse/labproj-3cff71/6/labproj. Run 'treehouse return <lab>/pool/.treehouse/.treehouse/labproj-3cff71/6/labproj' to release it.
+--- trust-warning line count: 0
+--- T3 thread bound by the spawn (from its teardown record): mcp:d4d0afd4-12ef-477f-b90b-652d9f9b9acd
+

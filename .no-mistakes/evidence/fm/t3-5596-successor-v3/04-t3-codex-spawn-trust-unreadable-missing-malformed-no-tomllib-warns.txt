@@ -1,0 +1,59 @@
+== S3 unreadable: CODEX_HOME has no config.toml
+--- CODEX_HOME=<lab>/codex-cfg/missing (no config.toml)
+$ FM_HOME=/private<lab>/home CODEX_HOME=<lab>/codex-cfg/missing bin/fm-spawn.sh c3 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+   (<lab> is under /var/folders, a symlink to /private/var/folders; the project path is given through the symlink)
+exit=0 elapsed=5s
+--- stdout
+spawned c3 harness=codex kind=scout window=fm-c3 worktree=<lab>/pool/.treehouse/.treehouse/labproj-3cff71/3/labproj
+--- stderr (watcher-down banner lines elided)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+warning: could not confirm that <lab>/codex-cfg/missing/config.toml trusts <lab>/home/projects/labproj; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects."<main checkout>"] trust_level = "trusted", see docs/t3code-backend.md#setup)
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/.treehouse/labproj-3cff71/3/labproj. Run 'treehouse return <lab>/pool/.treehouse/.treehouse/labproj-3cff71/3/labproj' to release it.
+--- trust-warning line count: 1
+--- T3 thread bound by the spawn (from its teardown record): mcp:9a7300d2-1a14-43f4-b849-db64b6a00cf9
+
+== S4 unreadable: config.toml is malformed TOML yet textually names the project as trusted (adversarial: no text-match fallback)
+--- CODEX_HOME=<lab>/codex-cfg/malformed/config.toml:
+[projects."/private<lab>/home/projects/labproj"
+trust_level = trusted
+$ FM_HOME=/private<lab>/home CODEX_HOME=<lab>/codex-cfg/malformed bin/fm-spawn.sh c4 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+   (<lab> is under /var/folders, a symlink to /private/var/folders; the project path is given through the symlink)
+exit=0 elapsed=4s
+--- stdout
+spawned c4 harness=codex kind=scout window=fm-c4 worktree=<lab>/pool/.treehouse/.treehouse/labproj-3cff71/4/labproj
+--- stderr (watcher-down banner lines elided)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+warning: could not confirm that <lab>/codex-cfg/malformed/config.toml trusts <lab>/home/projects/labproj; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects."<main checkout>"] trust_level = "trusted", see docs/t3code-backend.md#setup)
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/.treehouse/labproj-3cff71/4/labproj. Run 'treehouse return <lab>/pool/.treehouse/.treehouse/labproj-3cff71/4/labproj' to release it.
+--- trust-warning line count: 1
+--- T3 thread bound by the spawn (from its teardown record): mcp:9ee4539a-cb8b-4ef8-93f7-bd66db6953ca
+
+S5 shim: <lab>/nopy-shim holds python3, python3.14, python3.13, python3.12, python3.11 wrappers that exec macOS /usr/bin/python3 3.9.6 (no tomllib)
+== S5 unreadable: Codex config DOES trust the project, but no Python with tomllib is on PATH (adversarial: unreadable must warn, never assume trusted)
+--- CODEX_HOME=<lab>/codex-cfg/trusted/config.toml:
+[projects."/private<lab>/home/projects/labproj"]
+trust_level = "trusted"
+$ FM_HOME=/private<lab>/home CODEX_HOME=<lab>/codex-cfg/trusted PATH=<lab>/nopy-shim:$PATH bin/fm-spawn.sh c5 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+   (<lab> is under /var/folders, a symlink to /private/var/folders; the project path is given through the symlink)
+exit=0 elapsed=4s
+--- stdout
+spawned c5 harness=codex kind=scout window=fm-c5 worktree=<lab>/pool/.treehouse/.treehouse/labproj-3cff71/5/labproj
+--- stderr (watcher-down banner lines elided)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+warning: could not confirm that <lab>/codex-cfg/trusted/config.toml trusts <lab>/home/projects/labproj; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects."<main checkout>"] trust_level = "trusted", see docs/t3code-backend.md#setup)
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/.treehouse/labproj-3cff71/5/labproj. Run 'treehouse return <lab>/pool/.treehouse/.treehouse/labproj-3cff71/5/labproj' to release it.
+--- trust-warning line count: 1
+--- T3 thread bound by the spawn (from its teardown record): mcp:fe0e99bd-f261-4582-b51b-4c963bc7f72e
+

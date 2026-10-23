@@ -1,0 +1,71 @@
+# Teardown of every lab task through bin/fm-teardown.sh (FM_HOME=/private<lab>/home).
+# First attempt refused each scout at the captain-call completion gate (normal, not T3-specific); after 'bin/fm-captain-hold.sh complete <id> --none' (c2 refused --none because its worker wrote a blocked status line, so c2 used --force).
+
+$ bin/fm-teardown.sh c1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+teardown: reaping leaked worktree process(es) for c1: 15670
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+🌳 Worktree returned to pool.
+teardown c1 complete (window mcp:84bc8ed7-20ab-47d5-be9f-4549c9ebfa5d, worktree <lab>/pool/.treehouse/.treehouse/labproj-3cff71/1/labproj)
+Backlog: c1 just finished (this home keeps no markdown backlog at /private<lab>/home/data/backlog.md). Update /private<lab>/home/data/backlog.md - move c1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+$ bin/fm-teardown.sh c3
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+teardown: reaping leaked worktree process(es) for c3: 48278
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+🌳 Worktree returned to pool.
+teardown c3 complete (window mcp:9a7300d2-1a14-43f4-b849-db64b6a00cf9, worktree <lab>/pool/.treehouse/.treehouse/labproj-3cff71/3/labproj)
+Backlog: c3 just finished (this home keeps no markdown backlog at /private<lab>/home/data/backlog.md). Update /private<lab>/home/data/backlog.md - move c3 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+$ bin/fm-teardown.sh c4
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+teardown: reaping leaked worktree process(es) for c4: 53355
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+🌳 Worktree returned to pool.
+teardown c4 complete (window mcp:9ee4539a-cb8b-4ef8-93f7-bd66db6953ca, worktree <lab>/pool/.treehouse/.treehouse/labproj-3cff71/4/labproj)
+Backlog: c4 just finished (this home keeps no markdown backlog at /private<lab>/home/data/backlog.md). Update /private<lab>/home/data/backlog.md - move c4 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+$ bin/fm-teardown.sh c5
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+teardown: reaping leaked worktree process(es) for c5: 57196
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+🌳 Worktree returned to pool.
+teardown c5 complete (window mcp:fe0e99bd-f261-4582-b51b-4c963bc7f72e, worktree <lab>/pool/.treehouse/.treehouse/labproj-3cff71/5/labproj)
+Backlog: c5 just finished (this home keeps no markdown backlog at /private<lab>/home/data/backlog.md). Update /private<lab>/home/data/backlog.md - move c5 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+$ bin/fm-teardown.sh cl1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+teardown: reaping leaked worktree process(es) for cl1: 75941 76173
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+🌳 Worktree returned to pool.
+teardown cl1 complete (window mcp:d4d0afd4-12ef-477f-b90b-652d9f9b9acd, worktree <lab>/pool/.treehouse/.treehouse/labproj-3cff71/6/labproj)
+Backlog: cl1 just finished (this home keeps no markdown backlog at /private<lab>/home/data/backlog.md). Update /private<lab>/home/data/backlog.md - move cl1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+$ bin/fm-teardown.sh c2 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+teardown: reaping leaked worktree process(es) for c2: 26208
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+🌳 Worktree returned to pool.
+teardown c2 complete (window mcp:659dfa58-1683-427f-91da-009cc0529bec, worktree <lab>/pool/.treehouse/.treehouse/labproj-3cff71/2/labproj)
+Backlog: c2 just finished (this home keeps no markdown backlog at /private<lab>/home/data/backlog.md). Update /private<lab>/home/data/backlog.md - move c2 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+# After teardown, read directly from the lab T3, and the returned pool slots:
+mcp:84bc8ed7-20ab-47d5-be9f-4549c9ebfa5d archived=True activeRunId=None
+mcp:659dfa58-1683-427f-91da-009cc0529bec archived=True activeRunId=None
+mcp:9ee4539a-cb8b-4ef8-93f7-bd66db6953ca archived=True activeRunId=None
+mcp:fe0e99bd-f261-4582-b51b-4c963bc7f72e archived=True activeRunId=None
+mcp:d4d0afd4-12ef-477f-b90b-652d9f9b9acd archived=True activeRunId=None
+mcp:9a7300d2-1a14-43f4-b849-db64b6a00cf9 archived=True activeRunId=None
+slot 1: .git README.md | git status: '' | skip-worktree flags: ''
+slot 2: .git README.md | git status: '' | skip-worktree flags: ''
+slot 3: .git README.md | git status: '' | skip-worktree flags: ''
+slot 4: .git README.md | git status: '' | skip-worktree flags: ''
+slot 5: .git README.md | git status: '' | skip-worktree flags: ''
+slot 6: .git README.md | git status: '' | skip-worktree flags: ''
+state/ after: (empty means no task records remain)

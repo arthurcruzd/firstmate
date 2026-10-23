@@ -1,0 +1,30 @@
+# Default path: two fresh lab homes with NO config/backend, each holding a valid lab T3 credential (config/t3code-token), on this host without tmux.
+# Same codex scout spawn with CODEX_HOME pointing at a directory with no config.toml (would warn if the T3 arm ran).
+
+== branch code (8b2fb3ff), FM_HOME=/private<lab>/home2
+$ CODEX_HOME=<lab>/codex-cfg/missing bin/fm-spawn.sh d1 /private<lab>/home2/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+exit=1
+--- stdout:
+--- stderr:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home2
+<branch>/bin/backends/tmux.sh: line 76: tmux: command not found
+<branch>/bin/backends/tmux.sh: line 98: tmux: command not found
+<branch>/bin/backends/tmux.sh: line 102: tmux: command not found
+--- trust-warning lines: 0; state files: 0
+
+== base code (69999915, git archive into <lab>/main-code), FM_HOME=/private<lab>/home3
+$ CODEX_HOME=<lab>/codex-cfg/missing bin/fm-spawn.sh d2 /private<lab>/home3/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+exit=1
+--- stdout:
+--- stderr:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home3
+<base>/bin/backends/tmux.sh: line 76: tmux: command not found
+<base>/bin/backends/tmux.sh: line 98: tmux: command not found
+<base>/bin/backends/tmux.sh: line 102: tmux: command not found
+--- trust-warning lines: 0; state files: 0
+
+== lab T3 project inventory right after both default-home spawns (read-only t3_project_list + t3_thread_list): only the t3code home's project exists
+{"projectId":"mcp:933c0bac-ed2a-451c-8d24-de9fb5bda785","workspaceRoot":"/private<lab>/home/projects/labproj","threads":6,"unarchived":6}
+== now (after teardown and the archive-proof threads):
+{"projectId":"mcp:933c0bac-ed2a-451c-8d24-de9fb5bda785","workspaceRoot":"/private<lab>/home/projects/labproj","threads":0,"unarchived":0}
+(t3_thread_list's default filter omits archived threads, so all eight lab threads now read as archived/absent from the default listing)

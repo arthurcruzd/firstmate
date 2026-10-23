@@ -1,0 +1,20 @@
+== S1 untrusted: Codex config trusts only the project's PARENT directory (adversarial: parent trust must not count)
+--- CODEX_HOME=<lab>/codex-cfg/parent-only/config.toml:
+[projects."/private<lab>/home/projects"]
+trust_level = "trusted"
+$ FM_HOME=/private<lab>/home CODEX_HOME=<lab>/codex-cfg/parent-only bin/fm-spawn.sh c1 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+   (<lab> is under /var/folders, a symlink to /private/var/folders; the project path is given through the symlink)
+exit=0 elapsed=3s
+--- stdout
+spawned c1 harness=codex kind=scout window=fm-c1 worktree=<lab>/pool/.treehouse/.treehouse/labproj-3cff71/1/labproj
+--- stderr (watcher-down banner lines elided)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+warning: could not confirm that <lab>/codex-cfg/parent-only/config.toml trusts <lab>/home/projects/labproj; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects."<main checkout>"] trust_level = "trusted", see docs/t3code-backend.md#setup)
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/.treehouse/labproj-3cff71/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/.treehouse/labproj-3cff71/1/labproj' to release it.
+--- trust-warning line count: 1
+--- T3 thread bound by the spawn (from its teardown record): mcp:84bc8ed7-20ab-47d5-be9f-4549c9ebfa5d
+

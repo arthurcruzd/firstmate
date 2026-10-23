@@ -1,0 +1,49 @@
+# Launch-archive proof against the real lab T3 v0.1.0, through a logging reverse proxy (<lab>/scripts/lag-proxy.mjs).
+# After t3_thread_launch, the proxy rewrites the threadId of the first t3_thread_read and of t3_thread_organize to an id T3 never issued,
+# so the REAL server answers both not-found - the projection lag right after a launch. Every reply below comes from T3 itself.
+# 'new' = this commit's bin/fm-t3-mcp.mjs; 'old' = HEAD~1's copy (git show HEAD~1:bin/fm-t3-mcp.mjs). Each ran through its own fresh proxy and a copy of the lab credential whose origin names that proxy.
+
+===== new helper
+$ node bin/fm-t3-mcp.mjs launch --project mcp:933c0bac-ed2a-451c-8d24-de9fb5bda785 --title archive-proof-new --model-selection '{"instanceId":"codex","model":"gpt-6-luna","options":[{"id":"reasoningEffort","value":"low"}]}' --token-file <lab>/proxy/new-token
+exit=1
+--- stdout
+{"ok":false,"error":{"code":"binding_unconfirmed","message":"T3 launched thread mcp:07c6533a-b337-42ca-9a16-65522af29437 but reading back its binding failed (T3 t3_thread_read failed: Thread mcp:00000000-0000-4000-8000-00000000dead is no longer available.); its archive is unproven, so archive it in T3 Code","threadId":"mcp:07c6533a-b337-42ca-9a16-65522af29437"}}
+--- stderr
+fm-t3-mcp: T3 launched thread mcp:07c6533a-b337-42ca-9a16-65522af29437 but reading back its binding failed (T3 t3_thread_read failed: Thread mcp:00000000-0000-4000-8000-00000000dead is no longer available.); its archive is unproven, so archive it in T3 Code
+--- proxy log
+2026-10-23T02:27:58.843Z listening 59001 -> http://127.0.0.1:57543
+2026-10-23T02:28:06.804Z POST /mcp initialize -> 200
+2026-10-23T02:28:06.812Z POST /mcp notifications/initialized -> 202
+2026-10-23T02:28:06.836Z POST /mcp tools/list -> 200
+2026-10-23T02:28:06.843Z POST /mcp tools/call t3_environment_read -> 200
+2026-10-23T02:28:06.866Z POST /mcp tools/call t3_thread_launch -> 200 -> threadId mcp:07c6533a-b337-42ca-9a16-65522af29437
+2026-10-23T02:28:06.870Z POST /mcp tools/call t3_thread_read threadId mcp:07c6533a-b337-42ca-9a16-65522af29437 -> mcp:00000000-0000-4000-8000-00000000dead (lag injected) -> 200 isError [{"type":"text","text":"{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"Thread mcp:00000000-0000-4000-8000-00000000dead is no l
+2026-10-23T02:28:06.874Z POST /mcp tools/call t3_thread_organize threadId mcp:07c6533a-b337-42ca-9a16-65522af29437 -> mcp:00000000-0000-4000-8000-00000000dead (lag injected) -> 200 isError [{"type":"text","text":"{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"The thread was not found.\"}"}]
+2026-10-23T02:28:06.876Z DELETE /mcp DELETE -> 204
+
+===== old helper
+$ node <lab>/old-code/bin/fm-t3-mcp.mjs launch --project mcp:933c0bac-ed2a-451c-8d24-de9fb5bda785 --title archive-proof-old --model-selection '{"instanceId":"codex","model":"gpt-6-luna","options":[{"id":"reasoningEffort","value":"low"}]}' --token-file <lab>/proxy/old-token
+exit=1
+--- stdout
+{"ok":false,"error":{"code":"binding_unconfirmed","message":"T3 launched thread mcp:a2f5cb72-21c0-46f6-ad74-0b2629c9148c but reading back its binding failed (T3 t3_thread_read failed: Thread mcp:00000000-0000-4000-8000-00000000dead is no longer available.); it then read back archived with no active run","threadId":"mcp:a2f5cb72-21c0-46f6-ad74-0b2629c9148c"}}
+--- stderr
+fm-t3-mcp: T3 launched thread mcp:a2f5cb72-21c0-46f6-ad74-0b2629c9148c but reading back its binding failed (T3 t3_thread_read failed: Thread mcp:00000000-0000-4000-8000-00000000dead is no longer available.); it then read back archived with no active run
+--- proxy log
+2026-10-23T02:27:58.899Z listening 59002 -> http://127.0.0.1:57543
+2026-10-23T02:28:06.941Z POST /mcp initialize -> 200
+2026-10-23T02:28:06.949Z POST /mcp notifications/initialized -> 202
+2026-10-23T02:28:06.973Z POST /mcp tools/list -> 200
+2026-10-23T02:28:06.979Z POST /mcp tools/call t3_environment_read -> 200
+2026-10-23T02:28:06.986Z POST /mcp tools/call t3_thread_launch -> 200 -> threadId mcp:a2f5cb72-21c0-46f6-ad74-0b2629c9148c
+2026-10-23T02:28:06.989Z POST /mcp tools/call t3_thread_read threadId mcp:a2f5cb72-21c0-46f6-ad74-0b2629c9148c -> mcp:00000000-0000-4000-8000-00000000dead (lag injected) -> 200 isError [{"type":"text","text":"{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"Thread mcp:00000000-0000-4000-8000-00000000dead is no l
+2026-10-23T02:28:06.992Z POST /mcp tools/call t3_thread_organize threadId mcp:a2f5cb72-21c0-46f6-ad74-0b2629c9148c -> mcp:00000000-0000-4000-8000-00000000dead (lag injected) -> 200 isError [{"type":"text","text":"{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"The thread was not found.\"}"}]
+2026-10-23T02:28:06.994Z DELETE /mcp DELETE -> 204
+
+===== ground truth, read DIRECTLY from the lab T3 (no proxy) before any manual archive:
+{"ok":true,"threadId":"mcp:07c6533a-b337-42ca-9a16-65522af29437","exists":true,"archived":false,"status":"idle","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":null}   <- new-helper thread
+{"ok":true,"threadId":"mcp:a2f5cb72-21c0-46f6-ad74-0b2629c9148c","exists":true,"archived":false,"status":"idle","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":null}   <- old-helper thread
+=> The old helper's 'it then read back archived with no active run' was false (the thread exists and is not archived); the new helper's 'its archive is unproven, so archive it in T3 Code' is true. Both exit 1 (lease kept by spawn).
+
+===== operator follows the new guidance (node bin/fm-t3-mcp.mjs archive --thread <id>), then re-read:
+{"ok":true,"threadId":"mcp:07c6533a-b337-42ca-9a16-65522af29437","exists":true,"archived":true,"status":"idle","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":null}
+{"ok":true,"threadId":"mcp:a2f5cb72-21c0-46f6-ad74-0b2629c9148c","exists":true,"archived":true,"status":"idle","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":null}

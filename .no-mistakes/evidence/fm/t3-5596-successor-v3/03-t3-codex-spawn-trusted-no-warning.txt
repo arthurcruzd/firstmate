@@ -1,0 +1,19 @@
+== S2 trusted: Codex config trusts the project's main checkout by its PHYSICAL path (/private<lab>/...), while the spawn is given the /var symlink path
+--- CODEX_HOME=<lab>/codex-cfg/trusted/config.toml:
+[projects."/private<lab>/home/projects/labproj"]
+trust_level = "trusted"
+$ FM_HOME=/private<lab>/home CODEX_HOME=<lab>/codex-cfg/trusted bin/fm-spawn.sh c2 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+   (<lab> is under /var/folders, a symlink to /private/var/folders; the project path is given through the symlink)
+exit=0 elapsed=4s
+--- stdout
+spawned c2 harness=codex kind=scout window=fm-c2 worktree=<lab>/pool/.treehouse/.treehouse/labproj-3cff71/2/labproj
+--- stderr (watcher-down banner lines elided)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private<lab>/home
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/.treehouse/labproj-3cff71/2/labproj. Run 'treehouse return <lab>/pool/.treehouse/.treehouse/labproj-3cff71/2/labproj' to release it.
+--- trust-warning line count: 0
+--- T3 thread bound by the spawn (from its teardown record): mcp:659dfa58-1683-427f-91da-009cc0529bec
+
