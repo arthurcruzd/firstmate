@@ -440,7 +440,8 @@
 #   file. Both files apply to ships, scouts, secondmates, and relaunches.
 #   bin/fm-approval-failover.sh owns captain-approved durable failover after
 #   firstmate observes a bypass approval prompt or policy refusal; no polling.
-#   T3 Code always uses full-access and refuses Claude `auto` before mutation.
+#   T3 Code always uses full-access, so it refuses Claude `auto` and Codex
+#   `approve-for-me` before mutation.
 # Worker tool exclusions:
 #   docs/configuration.md "Worker tool exclusions" owns config/crew-exclude-tools
 #   and its operator contract. Resolve it with bin/fm-exclude-tools-lib.sh
@@ -3084,6 +3085,10 @@ if [ "$BACKEND" = t3code ]; then
   fi
   if [ "$HARNESS" = claude ] && [ "$CLAUDE_PERMISSION_MODE" != bypass ]; then
     echo "error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=$CLAUDE_PERMISSION_MODE; remove that file or choose another backend" >&2
+    exit 1
+  fi
+  if [ "$HARNESS" = codex ] && [ "$CODEX_APPROVAL_MODE" != bypass ]; then
+    echo "error: backend=t3code runs codex at T3's full-access runtime mode and cannot honor config/codex-approval-mode=$CODEX_APPROVAL_MODE; remove that file or choose another backend" >&2
     exit 1
   fi
   if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then

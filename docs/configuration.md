@@ -1117,6 +1117,7 @@ The CLI reference documents the one file-or-JSON flag, the settings page documen
 Codex crewmate, scout, and secondmate launches default to `--dangerously-bypass-approvals-and-sandbox`.
 The local, gitignored `config/codex-approval-mode` accepts one whitespace-trimmed token: absent or `bypass` retains that default; `approve-for-me` selects `--approve-for-me`.
 Malformed values and unreadable files refuse before spawn mutation, and the setting applies to relaunches and is inherited into secondmate homes.
+`backend=t3code` always runs Codex at T3's `full-access`, so it refuses `approve-for-me` before mutation; [`t3code-backend.md`](t3code-backend.md#active-limits) owns that backend limit.
 The fallback uses a model reviewer in the workspace-write sandbox, which starts with network access disabled and reviews writes outside the working directory.
 It remedies a managed policy that leaves bypass launches with user-reviewed approvals even when its sandbox bypass applies.
 Firstmate targets current CLIs rather than detecting versions or emulating older approval flags.
