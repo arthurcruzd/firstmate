@@ -200,7 +200,7 @@ CHANGED_DEFAULT_TIMEOUT_SECS=1500
 
 # How many separate-runner shards the portable serial remainder splits into.
 # One owner: CI lane names carry this count and are refused when they disagree.
-PORTABLE_SERIAL_SHARDS=9
+PORTABLE_SERIAL_SHARDS=10
 
 # Conservative balance hint for a portable-serial script with no measurement.
 # Rounded above the current CI mean, including the capability-skipped scripts.
@@ -716,6 +716,9 @@ tests/fm-backend-cmux.test.sh 3754
 tests/fm-backend-orca.test.sh 27102
 tests/fm-backend-paseo-smoke.test.sh 40
 tests/fm-backend-paseo.test.sh 8000
+tests/fm-backend-t3code-live-e2e.test.sh 51
+tests/fm-backend-t3code-pr-tools-live-e2e.test.sh 52
+tests/fm-backend-t3code.test.sh 239245
 tests/fm-backend-tmux-smoke.test.sh 291
 tests/fm-backend-zellij-smoke.test.sh 23
 tests/fm-backend-zellij.test.sh 10453
@@ -884,6 +887,7 @@ tests/fm-supervision-events.test.sh 673
 tests/fm-supervision-host-attended-live-e2e.test.sh 49
 tests/fm-supervision-host-live-e2e.test.sh 75
 tests/fm-supervision-host.test.sh 1192918
+tests/fm-t3-mcp.test.sh 57613
 tests/fm-tangle-guard.test.sh 8501
 tests/fm-task-delivery.test.sh 32789
 tests/fm-task-inbox.test.sh 31965
@@ -911,6 +915,7 @@ tests/fm-wake-drain-unread-status.test.sh 24251
 tests/fm-wake-queue.test.sh 165906
 tests/fm-watch-arm.test.sh 113076
 tests/fm-watch-checkpoint.test.sh 11234
+tests/fm-watch-inbox-meta.test.sh 283
 tests/fm-watch-recovery-loop.test.sh 59092
 tests/fm-watch-triage.test.sh 1074843
 tests/fm-watch-wedge-cap.test.sh 374225
