@@ -24,6 +24,7 @@ The target window's harness is recorded as `harness=` in `state/<id>.meta`.
 After observing a Codex command-approval prompt under bypass or a Claude policy refusal of a bypass session, ask the captain for explicit approval to change the owning home's worker permission posture and relaunch the worker.
 Only after that explicit word, load `harness-adapters` and use `FM_HOME=<owning-home> bin/fm-approval-failover.sh apply <id>`; its header owns persistent configuration and guarded recovery, with no automatic detection.
 Report the saved model-reviewed remedy and actual recovery result, preserving explicit settings and work rather than changing vendor policy or answering approval or hook-trust prompts.
+A `backend=t3code` worker already runs at T3's `full-access` runtime mode, so the command refuses it before changing anything; approve its pending request in T3 Code itself ([T3 pending-request procedure](../../../docs/t3code-backend.md#push-events-and-polling-fallback)) or move the work to another backend.
 
 ## Session-start reconciliation for a dead ordinary direct report
 
