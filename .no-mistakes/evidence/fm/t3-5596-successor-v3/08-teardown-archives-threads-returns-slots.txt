@@ -1,0 +1,60 @@
+## Teardown of every lab task through bin/fm-teardown.sh (FM_HOME=<lab>/home). First attempt refused c1, x1, x2 at the captain-call completion gate (normal, not T3-specific; x3's worker had run the gate itself); after 'bin/fm-captain-hold.sh complete <id> --none' each teardown exits 0.
+
+== c1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+
+🌳 Worktree returned to pool.
+teardown c1 complete (window mcp:59962ec9-f5c8-4776-ae41-f4b8fa7f160f, worktree <lab>/pool/.treehouse/labproj-a1d04b/1/labproj)
+--- thread read back from the lab T3 after teardown:
+{"ok":true,"threadId":"mcp:59962ec9-f5c8-4776-ae41-f4b8fa7f160f","exists":true,"archived":true,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-a1d04b/1/labproj","turnAt":"2026-10-23T08:17:54.994Z"}
+--- state/c1.* files left: 0
+
+== x1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+teardown: reaping leaked worktree process(es) for x1: 45562
+
+🌳 Worktree returned to pool.
+teardown x1 complete (window mcp:9f6ca885-6786-40a8-ab6c-2000eab0c86b, worktree <lab>/pool/.treehouse/mainrepo-33e8b4/1/mainrepo)
+--- thread read back from the lab T3 after teardown:
+{"ok":true,"threadId":"mcp:9f6ca885-6786-40a8-ab6c-2000eab0c86b","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/mainrepo-33e8b4/1/mainrepo","turnAt":"2026-10-23T08:18:45.973Z"}
+--- state/x1.* files left: 0
+
+== x2
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+teardown: reaping leaked worktree process(es) for x2: 61059
+
+🌳 Worktree returned to pool.
+teardown x2 complete (window mcp:5b932814-2ab3-4e1d-8976-94851b1e33fa, worktree <lab>/pool/.treehouse/mainrepo-33e8b4/2/mainrepo)
+--- thread read back from the lab T3 after teardown:
+{"ok":true,"threadId":"mcp:5b932814-2ab3-4e1d-8976-94851b1e33fa","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/mainrepo-33e8b4/2/mainrepo","turnAt":"2026-10-23T08:19:32.247Z"}
+--- state/x2.* files left: 0
+
+== x3
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+teardown: reaping leaked worktree process(es) for x3: 66495
+
+🌳 Worktree returned to pool.
+teardown x3 complete (window mcp:aedcda71-4507-45f3-8415-dcd00ff4c830, worktree <lab>/pool/.treehouse/mainrepo-33e8b4/3/mainrepo)
+--- thread read back from the lab T3 after teardown:
+{"ok":true,"threadId":"mcp:aedcda71-4507-45f3-8415-dcd00ff4c830","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/mainrepo-33e8b4/3/mainrepo","turnAt":"2026-10-23T08:19:29.061Z"}
+--- state/x3.* files left: 0
+
+== smwt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+teardown: reaping leaked secondmate home process(es) for smwt: 21977 41137 54320 58117
+teardown smwt complete (window mcp:ecfd2861-de42-4bf6-b0e2-facaa81f5f66, worktree <lab>/smwt)
+--- thread read back from the lab T3 after teardown:
+{"ok":true,"threadId":"mcp:ecfd2861-de42-4bf6-b0e2-facaa81f5f66","exists":true,"archived":true,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":"2026-10-23T08:23:44.201Z"}
+--- state/smwt.* files left: 0
+
+== smwt home after teardown: teardown removed the secondmate home directory <lab>/smwt itself (so its config/t3code-token link and Firstmate-written env files are gone with it):
+$ ls <lab>/smwt -> No such file or directory
+provider processes still rooted in <lab>/smwt: 0
+
+== pool status after teardown
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/labproj-a1d04b/1/labproj  (detached)
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/mainrepo-33e8b4/1/mainrepo  (detached)
+2     available    <lab>/pool/.treehouse/mainrepo-33e8b4/2/mainrepo  (detached)
+3     available    <lab>/pool/.treehouse/mainrepo-33e8b4/3/mainrepo  (detached)

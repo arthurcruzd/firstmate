@@ -1,0 +1,44 @@
+## c1: claude scout (claude-haiku-5-5, effort low) on lab T3 v0.1.0, config/backend=t3code
+$ bin/fm-spawn.sh c1 <lab>/home/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-a1d04b/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-a1d04b/1/labproj' to release it.
+spawned c1 harness=claude kind=scout window=fm-c1 worktree=<lab>/pool/.treehouse/labproj-a1d04b/1/labproj
+exit=0 elapsed=7s
+--- state/c1.meta
+window=fm-c1
+endpoint_task_id=c1
+worktree=<lab>/pool/.treehouse/labproj-a1d04b/1/labproj
+project=<lab>/home/projects/labproj
+harness=claude
+kind=scout
+tasktmp=/tmp/fm-c1
+model=claude-haiku-5-5
+effort=low
+busy_gen=g1792742947.74482.5222
+spawn_gen=s1792742948.72396.19420
+backend=t3code
+t3_thread_id=mcp:59962ec9-f5c8-4776-ae41-f4b8fa7f160f
+t3_project_id=mcp:a7713af1-fe5b-4829-9a56-bd8d62285972
+$ node bin/fm-t3-mcp.mjs wait --thread <c1 thread> --timeout-ms 180000
+{"ok":true,"threadId":"mcp:59962ec9-f5c8-4776-ae41-f4b8fa7f160f","runId":"run:thread:mcp%3A59962ec9-f5c8-4776-ae41-f4b8fa7f160f:ordinal:1","status":"completed","timedOut":false}
+--- state/c1.status (written by the T3 worker itself)
+done [at=1792742958]: README first line is '# labproj'; report at home/data/c1/report.md
+--- data/c1/report.md (first 14 lines)
+# Scout report: first line of labproj README
+
+## What I did
+Ran the command from the task spec in the worktree:
+
+    head -n 1 <lab>/pool/.treehouse/labproj-a1d04b/1/labproj/README.md
+
+No project files were edited. No remote was touched, no PR was opened.
+
+## Finding
+The first line of `README.md` is:
+
+    # labproj
+

@@ -1,0 +1,40 @@
+## Away-mode digest on T3: an unconfirmed digest freezes, and the items queued behind it keep the FIRST one's arrival as their since-stamp (.subsuper-escalations.next-since, added this round)
+# Real bin/fm-supervise-daemon.sh functions (afk_enter, escalate_add, escalate_flush) sourced in a t3code lab home (<lab>/away, config/backend=t3code), FM_SUPERVISOR_BACKEND=t3code, FM_SUPERVISOR_TARGET=<supervisor thread> (a real idle claude-haiku-5-5 thread on the lab T3 v0.1.0), wedge alarm off.
+# The away home's credential points at a lab-only proxy (scripts/lossy-proxy.mjs) in front of the same T3: every call is forwarded; a t3_thread_send marked 'drop' is answered 502 only AFTER T3 replied 200, i.e. T3 committed it and the reply was lost.
+# Driver: <lab>/scripts/away-next-since.sh (plan: flush1 send dropped; event-two at t0+20s; event-three at t0+40s; flush2: frozen retry passes, next generation's send dropped; flush3: all pass).
+
+t0=1792744173 afk_enter
+flush1 rc=1 verdict=unconfirmed failure=Enter confirmation: submit unconfirmed after 3 retries (verdict=unconfirmed, bytes=189, text may be in composer): fm-t3-mcp: the outcome of t3_thread_send on thread <supervisor thread> is unproven (T3 /mcp answered HTTP 502); T3 may have committed it, so retry only with client request id fm-digest-1792744173-78803-185081303
+after flush1: .subsuper-escalations .subsuper-escalations.frozen .subsuper-escalations.frozen-msg .subsuper-escalations.since 
+frozen header: since=1792744173 id=fm-digest-1792744173-78803-185081303 
+since=1792744173
+t2=1792744194 event-two added; .next-since=1792744194
+t3=1792744214 event-three added; .next-since=1792744194 (unchanged by a later add)
+supervisor before retry: {"ok":true,"threadId":"<supervisor thread>","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":"2026-10-23T08:29:52.370Z"}
+supervisor idle (the committed-but-unconfirmed event-one digest ran its turn)
+flush2 at t4=1792744214 rc=1 verdict=unconfirmed failure=Enter confirmation: submit unconfirmed after 3 retries (verdict=unconfirmed, bytes=189, text may be in composer): fm-t3-mcp: the outcome of t3_thread_send on thread <supervisor thread> is unproven (T3 /mcp answered HTTP 502); T3 may have committed it, so retry only with client request id fm-digest-1792744215-78803-292764759
+after flush2: .subsuper-escalations .subsuper-escalations.frozen .subsuper-escalations.frozen-msg .subsuper-escalations.since 
+buffer now: lab event-two: crew lab8 blocked, waiting on a captain answer|lab event-three: crew lab9 blocked, waiting on a captain answer|
+since=1792744194
+frozen header: since=1792744194 id=fm-digest-1792744215-78803-292764759 
+oldest-line age at t4: 20s  (t4 - t2 = 20s; t4 - t0 >= 40s)
+supervisor idle again
+flush3 rc=0 verdict=empty
+after flush3: .subsuper-escalations 
+buffer bytes: 0
+
+--- every t3_thread_send the proxy saw (clientRequestId, T3's real HTTP status, verdict applied):
+{"at":"2026-10-23T08:29:34.026Z","clientRequestId":"fm-digest-1792744173-78803-185081303","threadId":"<supervisor thread>","upstreamStatus":200,"verdict":"drop"}
+{"at":"2026-10-23T08:30:15.311Z","clientRequestId":"fm-digest-1792744173-78803-185081303","threadId":"<supervisor thread>","upstreamStatus":200,"verdict":"pass"}
+{"at":"2026-10-23T08:30:16.010Z","clientRequestId":"fm-digest-1792744215-78803-292764759","threadId":"<supervisor thread>","upstreamStatus":200,"verdict":"drop"}
+{"at":"2026-10-23T08:30:30.144Z","clientRequestId":"fm-digest-1792744215-78803-292764759","threadId":"<supervisor thread>","upstreamStatus":200,"verdict":"pass"}
+
+--- read back from T3: the supervisor thread's user messages (each digest is an operational-inbox doorbell):
+user_message items: 2; latestRunId ordinal: 2
+  - : Firstmate operational input waiting: read '<lab>/away/state/operational-inbox/1792744173-fa77ecf65ed3399d.msg' and ha
+  - : Firstmate operational input waiting: read '<lab>/away/state/operational-inbox/1792744215-fdd6c2a8c2161eb7.msg' and ha
+--- the two digest records those doorbells name:
+1792744173-fa77ecf65ed3399d.msg: ⁣FIRSTMATE_OP: v1 away-supervisor: Supervisor escalate (1 event(s)): lab event-one: crew lab7 blocked, waiting on a captain answer (pre-read; re-arm not needed — watcher daemon-managed)
+1792744215-fdd6c2a8c2161eb7.msg: ⁣FIRSTMATE_OP: v1 away-supervisor: Supervisor escalate (2 event(s)): lab event-two: crew lab8 blocked, waiting on a captain answer | lab event-three: crew lab9 blocked, waiting on a captain answer (pre-read; re-arm not needed — watcher daemon-managed)
+
+Result: four sends for two digests, two with lost replies, yet T3 holds exactly two messages and each event appears in exactly one digest. Each retry reused its frozen request id, and T3 returned the message it had already committed. The first add after the freeze wrote .next-since=t2, and the later add left it unchanged. When the frozen digest was confirmed, the buffer behind it took since=t2. That is neither the outage start t0 nor a fresh flush-time stamp, so its age read 20s = t4 - t2, and the next generation's own frozen header carries since=t2.

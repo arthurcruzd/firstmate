@@ -1,0 +1,47 @@
+## fm-control interrupt cancels the running T3 turn (c1 was steered into a foreground `sleep 240`)
+--- before:
+{"ok":true,"threadId":"<c1 thread>","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3A59962ec9-f5c8-4776-ae41-f4b8fa7f160f:ordinal:3","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-a1d04b/1/labproj","turnAt":"2026-10-23T08:10:17.922Z"}
+t3code: status=running run=run:thread:mcp%3A59962ec9-f5c8-4776-ae41-f4b8fa7f160f:ordinal:3
+$ bin/fm-control.sh c1 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+interrupt-delivered c1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+exit=(not captured through this pipe; captured on the third live interrupt at the end of this file: exit=0 with cancel=confirmed) elapsed=1s
+--- after:
+{"ok":true,"threadId":"<c1 thread>","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-a1d04b/1/labproj","turnAt":"2026-10-23T08:10:48.489Z"}
+[checkpoint/completed] []
+t3code: status=interrupted run=none
+
+## native exit and relaunch stay a separate follow-up: both are refused on t3code before any mutation
+$ bin/fm-control.sh c1 exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task c1 runs on the t3code backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread
+exit=(see the re-run below)
+$ bin/fm-control.sh c1 relaunch --note "lab relaunch probe"
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task c1 runs on the t3code backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch
+exit=(see the re-run below)
+--- thread after both refusals (unchanged, not archived):
+{"ok":true,"threadId":"<c1 thread>","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-a1d04b/1/labproj","turnAt":"2026-10-23T08:10:48.489Z"}
+--- state/c1.meta t3_thread_id unchanged:
+t3_thread_id=<c1 thread>
+--- exit codes (re-run of the refused verbs, captured without a pipe):
+fm-control.sh c1 exit -> exit=1
+fm-control.sh c1 relaunch -> exit=1
+--- the interrupted turn's sleep 240 process is gone:
+no 'sleep 240' process remains
+
+## second live interrupt of c1, exit code captured (c1 steered into a foreground python3 time.sleep(171))
+{"ok":true,"threadId":"<c1 thread>","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-a1d04b/1/labproj","turnAt":"2026-10-23T08:13:47.797Z"}
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+interrupt-delivered c1 harness=claude backend=t3code verified=agent-alive cancel=not-running
+fm-control.sh c1 interrupt -> exit=0
+{"ok":true,"threadId":"<c1 thread>","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-a1d04b/1/labproj","turnAt":"2026-10-23T08:13:47.797Z"}
+the interrupted turn's python sleep process is gone
+
+## third live interrupt of c1 (after a confirming steer), exit code captured while the turn runs a foreground python3 time.sleep(171)
+t3code: status=running run=run:thread:mcp%3A59962ec9-f5c8-4776-ae41-f4b8fa7f160f:ordinal:5
+{"ok":true,"threadId":"<c1 thread>","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3A59962ec9-f5c8-4776-ae41-f4b8fa7f160f:ordinal:5","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-a1d04b/1/labproj","turnAt":"2026-10-23T08:15:30.168Z"}
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+interrupt-delivered c1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+fm-control.sh c1 interrupt -> exit=0
+{"ok":true,"threadId":"<c1 thread>","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-a1d04b/1/labproj","turnAt":"2026-10-23T08:17:54.994Z"}

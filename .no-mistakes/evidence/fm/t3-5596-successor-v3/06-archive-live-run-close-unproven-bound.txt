@@ -1,0 +1,20 @@
+## archive of a thread with a live run, bound by FM_T3CODE_ARCHIVE_TIMEOUT_MS (thread B launched with a message that runs a foreground 'sleep 150')
+--- before:
+{"ok":true,"threadId":"<B>","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":"2026-10-23T08:12:32.765Z"}
+$ FM_T3CODE_ARCHIVE_TIMEOUT_MS=300 fm-t3-mcp.mjs archive --thread <B>
+{"ok":true,"threadId":"<B>","closed":true,"archived":true,"activeRunId":null,"status":"completed"}
+exit=0 elapsed_ms=148
+--- right after:
+{"ok":true,"threadId":"<B>","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":"2026-10-23T08:12:32.765Z"}
+the sleep 150 process is still running
+
+## second try with a genuinely running turn: thread C runs a foreground python3 time.sleep(170) (thread B's agent had backgrounded its sleep, so B's run had already ended; B's close above is the idle-thread case)
+--- before:
+{"ok":true,"threadId":"<C>","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Ab2a7423f-18a5-4c2b-9447-4ce5d41463d3:ordinal:1","pendingRequestCount":0,"worktreePath":null,"turnAt":"2026-10-23T08:12:58.585Z"}
+$ FM_T3CODE_ARCHIVE_TIMEOUT_MS=300 fm-t3-mcp.mjs archive --thread <C>
+{"ok":true,"threadId":"<C>","closed":true,"archived":true,"activeRunId":null,"status":"failed"}
+exit=0 elapsed_ms=123
+--- right after:
+{"ok":true,"threadId":"<C>","exists":true,"archived":true,"status":"failed","activeRunId":null,"pendingRequestCount":0,"worktreePath":null,"turnAt":"2026-10-23T08:13:15.914Z"}
+the python3 time.sleep(170) process is gone after the archive
+# T3 v0.1.0 ends the active run as part of archive (status failed, activeRunId null within ~120 ms), so a live close_unproven (exit 1) cannot be provoked on this server; that branch stays covered by tests/fm-t3-mcp.test.sh against the fake server.

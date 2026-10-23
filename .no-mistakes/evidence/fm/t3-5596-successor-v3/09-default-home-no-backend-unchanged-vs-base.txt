@@ -1,0 +1,53 @@
+# Default path: two fresh lab homes with NO config/backend, each holding a valid credential for the live lab T3 v0.1.0 server (config/t3code-token), same fixture project; branch code (879b833d) vs base code (8818a804, git archive). This host has no tmux on PATH and no running default Herdr session (bin/fm-herdr-lab.sh prepare refuses: 'fleet-state tripwire requires exactly one running default session'), so the default backend stops at tmux on both trees.
+
+## A. crew spawn
+== branch code, FM_HOME=<lab>/nobb (config: t3code-token )
+$ bin/fm-spawn.sh d1 <home>/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+exit=1
+--- stdout:
+--- stderr:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/nobb
+<code>/bin/backends/tmux.sh: line 97: tmux: command not found
+<code>/bin/backends/tmux.sh: line 119: tmux: command not found
+<code>/bin/backends/tmux.sh: line 123: tmux: command not found
+--- state files for d1: 0 ; t3_thread_id lines anywhere in state: 0
+
+== base code, FM_HOME=<lab>/nobm (config: t3code-token )
+$ bin/fm-spawn.sh d1 <home>/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+exit=1
+--- stdout:
+--- stderr:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/nobm
+<code>/bin/backends/tmux.sh: line 97: tmux: command not found
+<code>/bin/backends/tmux.sh: line 119: tmux: command not found
+<code>/bin/backends/tmux.sh: line 123: tmux: command not found
+--- state files for d1: 0 ; t3_thread_id lines anywhere in state: 0
+
+# every project on the lab T3 server (t3_project_list) after both default-home spawns:
+{"projectId":"mcp:a7713af1-fe5b-4829-9a56-bd8d62285972","title":"fm-labproj","workspaceRoot":"<lab>/home/projects/labproj"}
+{"projectId":"mcp:61f5d488-322d-4052-a9a2-b54a465ee8bc","title":"fm-wtproj","workspaceRoot":"<lab>/home/projects/wtproj"}
+{"projectId":"mcp:009f2a51-7050-4838-9482-20d188fb908b","title":"fm-smwt","workspaceRoot":"<lab>/smwt"}
+projects=3; projects rooted in the no-backend homes (nobb, nobm): 0
+
+## B. away-mode entry with a prior away session's leftover escalation buffer (bin/fm-afk-start.sh; this round gated the T3 stale-warning re-arm so a home with no .subsuper-reported-stale-* marker skips it)
+== branch code, FM_HOME=<lab>/nobb (no config/backend)
+--- before: .subsuper-escalations .subsuper-escalations.since 
+$ bin/fm-afk-start.sh   (run for 6s in its own process group, then stopped)
+exit=1 (124 = still running as the away daemon when stopped)
+afk: starting supervise daemon in foreground; keep this command as a tracked background session
+warn: could not auto-discover supervisor pane (no FM_SUPERVISOR_TARGET, TMUX_PANE, HERDR_ENV/HERDR_PANE_ID, Rex block, or single live T3 thread in this home); falling back to 'firstmate:0' - verify this is firstmate's pane
+error: supervisor target 'firstmate:0' does not resolve to a tmux pane; set FM_SUPERVISOR_TARGET
+--- after: .afk 
+--- prior-session buffer: cleared
+
+== base code, FM_HOME=<lab>/nobm (no config/backend)
+--- before: .subsuper-escalations .subsuper-escalations.since 
+$ bin/fm-afk-start.sh   (run for 6s in its own process group, then stopped)
+exit=1 (124 = still running as the away daemon when stopped)
+afk: starting supervise daemon in foreground; keep this command as a tracked background session
+warn: could not auto-discover supervisor pane (no FM_SUPERVISOR_TARGET, TMUX_PANE, HERDR_ENV/HERDR_PANE_ID, or Rex block); falling back to 'firstmate:0' - verify this is firstmate's pane
+error: supervisor target 'firstmate:0' does not resolve to a tmux pane; set FM_SUPERVISOR_TARGET
+--- after: .afk 
+--- prior-session buffer: cleared
+
+Result: spawn output, exit status, and state are identical on both trees, and no T3 project or thread exists for either no-backend home. Away-mode entry clears the prior buffer and fails the same way on both trees for want of a tmux supervisor pane. The one visible difference is the branch's discovery warning text, which now also lists 'single live T3 thread in this home' among the sources it tried, although discover_supervisor_t3code_thread returns before any T3 call when t3code is not explicitly selected.

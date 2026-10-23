@@ -1,0 +1,38 @@
+## fm-send steer on the idle c1 thread starts its next T3 turn
+$ bin/fm-send.sh c1 "Steer from the T3 lab: append the line 'steer received' to data/c1/report.md, then record done again."
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+exit=0 elapsed=2s (watcher-down banner lines elided; no watcher runs in this lab)
+--- thread right after the send (fm-t3-mcp.mjs state): a second run ordinal is active
+{"status":"running","activeRunId":"run:thread:<c1 thread>:ordinal:2"}
+--- wait for that run
+{"ok":true,"threadId":"<c1 thread>","runId":"run:thread:mcp%3A59962ec9-f5c8-4776-ae41-f4b8fa7f160f:ordinal:2","status":"completed","timedOut":false}
+--- data/c1/report.md tail
+steer received
+--- state/c1.status
+done [at=1792742958]: README first line is '# labproj'; report at home/data/c1/report.md
+done [at=1792742998]: README first line is '# labproj'; steer received and report updated
+--- state/t3code-sends (accepted outcomes kept for reconciliation)
+fm-1792742951-72396-22205.accepted
+fm-1792742988-96463-20358.accepted
+--- state/c1.inbox
+handled
+
+<lab>/home/state/c1.inbox/handled:
+001.msg
+
+## fm-peek renders the thread activity tail
+$ bin/fm-peek.sh c1 12
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+[command_execution/completed] $ FM_HOME=<lab>/home /Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M5KW0VXZ3Q47NYZZG6CN3PAV/bin/fm-captain-hold.sh --help 2>&1 | head -n 60 fm-captain-hold.sh - deterministic mechanics for tasks held for the captain. The semantic policy is owned once by .agents/skills/captain-hold-lifecycle/SKILL.md. This script never reads report, visual-review, chat, or terminal prose to guess whether the captain owes an answer. The invoking agent decides what is genuinely waiting on the captain; this script supplies guarded creation, a durable record o
+[reasoning/completed] Since there's no origin id provided for the completion gate, running `complete` blindly risks mutating the backlog incorrectly. I'll skip that step and instead report honestly that the origin id wasn't supplied, then write up the status.
+[command_execution/completed] $ mkdir -p <lab>/home/data/c1 && cat > <lab>/home/data/c1/report.md <<'EOF' # Scout report: first line of labproj README ## What I did Ran the command from the task spec in the worktree: head -n 1 <lab>/pool/.treehouse/labproj-a1d04b/1/labproj/README.md No project files were edited. No remote was touched, no PR was opened. ## Finding The first line of `README.md` is: # labproj ## Captain-hold inventory This scout surfaced no unresolved questions for the captain, so there is nothing to hold. I did not r
+[assistant_message/completed] The first line of the lab project's README is `# labproj`. The scout turn ran end to end. - **Command:** `head -n 1` on `README.md` in the worktree. No project files were edited, and nothing was pushed or opened as a PR. - **Report:** written to `<lab>/home/data/c1/report.md`. - **Status:** `done` appended to `c1.status`. - **Inbox:** empty, so nothing to acknowledge. - **Captain holds:** this scout raised no questions for the captain, so there was nothing to hold. I did not run `bin/fm-captain-hold.sh complete --none` because it needs an orig
+[checkpoint/completed] []
+[user_message/completed] : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'c1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+[command_execution/completed] $ find '<lab>/home/state/c1.inbox' -maxdepth 1 -name '*.msg' 2>/dev/null | sort -V; ls -la '<lab>/home/state/c1.inbox' 2>&1; echo "FM_TASK_INBOX=${FM_TASK_INBOX:-unset}" <lab>/home/state/c1.inbox/001.msg total 8 drwxr-xr-x@ 4 disco wheel 128 Oct 23 05:09 . drwxr-xr-x@ 13 disco wheel 416 Oct 23 05:09 .. -rw-------@ 1 disco wheel 152 Oct 23 05:09 001.msg drwxr-xr-x@ 2 disco wheel 64 Oct 23 05:09 handled FM_TASK_INBOX=<lab>/home/state/c1.inbox
+[command_execution/completed] $ cat '<lab>/home/state/c1.inbox/001.msg' schema=fm-task-inbox.v1 at=2026-10-23T08:09:47Z -- Steer from the T3 lab: append the line 'steer received' to data/c1/report.md, then record done again.
+[command_execution/completed] $ echo "steer received" >> <lab>/home/data/c1/report.md && echo "done [at=$(date +%s)]: README first line is '# labproj'; steer received and report updated" >> '<lab>/home/state/c1.status' && { [ ! -e '<lab>/home/config/fleet-ledger' ] || '/Users/disco/.no-mistakes/worktrees/5717c0e0ae7f/01M5KW0VXZ3Q47NYZZG6CN3PAV/bin/fm-fleet-ledger.sh' appended '<lab>/home/config' '<lab>/home/state/c1.status' >/dev/null 2>&1 || true; } && mv '<lab>/home/s
+[assistant_message/completed] I handled the one inbox message (`001.msg`). It asked me to append `steer received` to the report and record done again. - **Report:** `steer received` is now the last line of `<lab>/home/data/c1/report.md`. - **Status:** a new `done` line was appended to `c1.status`, with the same conclusion as before plus the steer. - **Inbox:** `001.msg` was moved to `handled/`.
+[checkpoint/completed] []
+t3code: status=completed run=none
+exit=0

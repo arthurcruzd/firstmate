@@ -1,0 +1,44 @@
+## Spawn-side Codex trust warning is kind-aware (changed this round): a ship/scout runs in a leased Treehouse worktree, which only the MAIN CHECKOUT's trust entry covers; a secondmate runs in its home, whose own entry counts.
+# CODEX_HOME points at lab-only config.toml files (the operator's ~/.codex is never read or edited); live lab T3 v0.1.0 threads are launched by each spawn.
+# project wtproj = <lab>/home/projects/wtproj, a LINKED git worktree whose main checkout is <lab>/repos/mainrepo:
+$ git -C <lab>/home/projects/wtproj rev-parse --path-format=absolute --git-common-dir
+<lab>/repos/mainrepo/.git
+
+== x1 scout, CODEX_HOME=<lab>/codex-cfg/wt-only
+[projects."<lab>/home/projects/wtproj"]
+trust_level = "trusted"
+$ CODEX_HOME=<lab>/codex-cfg/wt-only bin/fm-spawn.sh x1 <lab>/home/projects/wtproj --scout --harness codex --model gpt-6-luna --effort low
+spawned x1 harness=codex kind=scout window=fm-x1 worktree=<lab>/pool/.treehouse/mainrepo-33e8b4/1/mainrepo
+warning: could not confirm that <lab>/codex-cfg/wt-only/config.toml trusts <lab>/home/projects/wtproj; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects."<main checkout>"] trust_level = "trusted", see docs/t3code-backend.md#setup)
+--- trust-warning lines: 1; spawn exit=0; leased worktree is a slot of mainrepo, not of wtproj; T3 thread mcp:9f6ca885-6786-40a8-ab6c-2000eab0c86b
+
+== x2 scout, CODEX_HOME=<lab>/codex-cfg/main-trusted
+[projects."<lab>/repos/mainrepo"]
+trust_level = "trusted"
+$ CODEX_HOME=<lab>/codex-cfg/main-trusted bin/fm-spawn.sh x2 <lab>/home/projects/wtproj --scout --harness codex --model gpt-6-luna --effort low
+spawned x2 harness=codex kind=scout window=fm-x2 worktree=<lab>/pool/.treehouse/mainrepo-33e8b4/2/mainrepo
+--- trust-warning lines: 0; spawn exit=0; leased worktree is a slot of mainrepo, not of wtproj; T3 thread mcp:5b932814-2ab3-4e1d-8976-94851b1e33fa
+
+== x3 scout, CODEX_HOME=<lab>/codex-cfg/parent-only
+[projects."<lab>/repos"]
+trust_level = "trusted"
+$ CODEX_HOME=<lab>/codex-cfg/parent-only bin/fm-spawn.sh x3 <lab>/home/projects/wtproj --scout --harness codex --model gpt-6-luna --effort low
+spawned x3 harness=codex kind=scout window=fm-x3 worktree=<lab>/pool/.treehouse/mainrepo-33e8b4/3/mainrepo
+warning: could not confirm that <lab>/codex-cfg/parent-only/config.toml trusts <lab>/home/projects/wtproj; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects."<main checkout>"] trust_level = "trusted", see docs/t3code-backend.md#setup)
+--- trust-warning lines: 1; spawn exit=0; leased worktree is a slot of mainrepo, not of wtproj; T3 thread mcp:aedcda71-4507-45f3-8415-dcd00ff4c830
+
+== smwt secondmate (codex), home <lab>/smwt is a LINKED worktree of <lab>/fmbase; CODEX_HOME=<lab>/codex-cfg/smwt-home-only trusts only the home itself
+<lab>/fmbase/.git
+[projects."<lab>/smwt"]
+trust_level = "trusted"
+$ CODEX_HOME=<lab>/codex-cfg/smwt-home-only bin/fm-spawn.sh smwt <lab>/smwt --harness codex --model gpt-6-luna --effort low --backend t3code --secondmate
+spawned smwt harness=codex kind=secondmate mode=secondmate yolo=off window=fm-smwt worktree=<lab>/smwt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+warning: secondmate smwt sync skipped before launch: primary default-branch commit cannot be resolved
+--- trust-warning lines: 0; spawn exit=0
+harness=codex
+kind=secondmate
+backend=t3code
+t3_thread_id=mcp:ecfd2861-de42-4bf6-b0e2-facaa81f5f66
+
+Result: x1 (only the linked worktree trusted) WARNS, x2 (main checkout trusted) is silent, x3 (parent only) WARNS, and the secondmate whose own home is trusted is silent; every spawn still launched.

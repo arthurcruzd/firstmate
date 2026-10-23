@@ -1,0 +1,71 @@
+## Commit 879b833d moved both T3 suites into the portable parallel lanes (the serial lane had overflowed the nine-shard budget); no .github change, no tenth shard
+
+### lane membership (bin/fm-test-run.sh --list)
+$ bin/fm-test-run.sh --list --lane portable-parallel-1 | grep -E 't3|T3'
+tests/fm-backend-t3code.test.sh
+tests/fm-t3-mcp.test.sh
+lane size: 13
+$ bin/fm-test-run.sh --list --lane portable-parallel-2 | grep -E 't3|T3'
+(no T3 suite in portable-parallel-2)
+lane size: 13
+$ bin/fm-test-run.sh --list --lane portable-serial | grep -E 't3|T3'
+tests/fm-backend-t3code-live-e2e.test.sh
+tests/fm-backend-t3code-pr-tools-live-e2e.test.sh
+lane size: 237
+$ bin/fm-test-isolation-proof.sh --list | grep t3
+tests/fm-backend-t3code.test.sh
+tests/fm-t3-mcp.test.sh
+
+### coverage guard against this worktree
+$ bin/fm-test-run.sh --check-coverage
+FM_TEST_COVERAGE ok total=279 parallel=26 parallel_max_ms=814249 parallel_imbalance_ms=552 parallel_unhinted=0 serial=237 serial_shards=9 serial_unhinted=21 serial_max_ms=1192918 serial_budget_ms=1200000 herdr=16
+exit=0
+
+### run 1: both T3 suites concurrently alongside another parallel-lane suite
+$ bin/fm-test-run.sh --jobs 3 tests/fm-backend-t3code.test.sh tests/fm-t3-mcp.test.sh tests/fm-crew-state.test.sh
+FM_TEST_BEGIN 2026-10-23T08:32:15Z tests/fm-backend-t3code.test.sh family=backend-dispatch expected_gate_skip=none
+FM_TEST_BEGIN 2026-10-23T08:32:15Z tests/fm-crew-state.test.sh family=pure-contract-unit expected_gate_skip=none
+FM_TEST_BEGIN 2026-10-23T08:32:15Z tests/fm-t3-mcp.test.sh family=backend-dispatch expected_gate_skip=none
+FM_TEST_END 2026-10-23T08:32:44Z tests/fm-t3-mcp.test.sh exit=0 duration_ms=28783 gate_skip=false
+FM_TEST_END 2026-10-23T08:36:19Z tests/fm-backend-t3code.test.sh exit=0 duration_ms=243653 gate_skip=false
+FM_TEST_END 2026-10-23T08:36:24Z tests/fm-crew-state.test.sh exit=0 duration_ms=249310 gate_skip=false
+FM_TEST_SUMMARY total=3 failed=0 skipped_gate=0 duration_ms=249632
+exit=0
+# wall 249632 ms against 521746 ms of summed script time, so the three ran concurrently
+# /tmp/fm-* entries before vs after: no /tmp/fm-<case-id> directory left behind; the only churn was 3 /tmp/fm-remote-delta.* dirs that another process on the host rotated (3 old ones vanished as 3 new ones appeared)
+
+### run 2: the two T3 suites concurrently
+$ bin/fm-test-run.sh --jobs 2 tests/fm-backend-t3code.test.sh tests/fm-t3-mcp.test.sh
+FM_TEST_BEGIN 2026-10-23T08:36:40Z tests/fm-backend-t3code.test.sh family=backend-dispatch expected_gate_skip=none
+FM_TEST_BEGIN 2026-10-23T08:36:40Z tests/fm-t3-mcp.test.sh family=backend-dispatch expected_gate_skip=none
+FM_TEST_END 2026-10-23T08:37:20Z tests/fm-t3-mcp.test.sh exit=0 duration_ms=40571 gate_skip=false
+FM_TEST_END 2026-10-23T08:40:40Z tests/fm-backend-t3code.test.sh exit=0 duration_ms=240524 gate_skip=false
+FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=240674
+exit=0
+
+### the runner's own suite
+$ bin/fm-test-run.sh tests/fm-test-run.test.sh
+not ok - packing exactly at the budget must be accepted: expected exit 0, got 1
+FM_TEST_END 2026-10-23T08:43:53Z tests/fm-test-run.test.sh exit=1 duration_ms=183966 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=184038
+# 28 cases ok, including:
+ok - exact suite coverage: --all lists every tests/*.test.sh once
+ok - shell line-ending policy selects runner coverage
+ok - portable shard union, disjointness, and coverage guard hold
+ok - coverage guard bounds the unmeasured share and serial packing within twenty minutes
+
+### why the one boundary case fails on this host (macOS /bin/bash 3.2.57): a host artifact that predates this change
+# The case copies the runner into a non-git fixture and runs 'bash <fixture>/bin/fm-test-run.sh --check-coverage'. On this host the in-process guard reports 'portable serial shards share scripts' for 39 scripts even with UNCHANGED hints, while each shard listed by its own process is disjoint (237 lines, 0 duplicates).
+# The same refusal reproduces at the base commit in a plain lab clone:
+879b833d lab clone: bin/fm-test-run.sh --check-coverage rc=1 (shards share scripts); bash bin/fm-test-run.sh --check-coverage rc=1 (shards share scripts)
+8818a804 lab clone: bin/fm-test-run.sh --check-coverage rc=1 (shards share scripts); bash bin/fm-test-run.sh --check-coverage rc=1 (shards share scripts)
+# In this run worktree, 'bin/fm-test-run.sh --check-coverage' passed on all 6 direct runs this session (FM_TEST_COVERAGE ok), and 'bash bin/fm-test-run.sh', '/bin/bash bin/fm-test-run.sh' and '/usr/bin/env bash bin/fm-test-run.sh' refused on all 7 runs.
+
+### packing numbers from the runner's own longest-first rule (scripts/lpt.py: hint desc then path, least-loaded shard, lowest index on ties, 45000 ms default)
+real hints: lane scripts=237 total_ms=10582537 nine-shard capacity=10800000 max_shard_ms=1192918 budget=1200000 -> ok; reimplementation matches the runner's own shard listing for 237/237 scripts
+  shard loads: [1192918, 1173716, 1173688, 1173701, 1173705, 1173700, 1173703, 1173703, 1173703]
+boundary fixture (fm-watch-triage hint 1200000): total_ms=10707694 max_shard_ms=1200000 -> accepted (expected: accepted, serial_max_ms=1200000)
+  shard loads: [1200000, 1192918, 1187840, 1187807, 1187838, 1187809, 1187844, 1187829, 1187809]
+boundary fixture (fm-watch-triage hint 1200001): total_ms=10707695 max_shard_ms=1200001 -> refused (expected: refused, 1200001ms)
+  shard loads: [1200001, 1192918, 1187840, 1187807, 1187838, 1187809, 1187844, 1187829, 1187809]
+# So the boundary case's assertions hold for the moved-suite inventory: packing exactly at 1200000 ms is accepted with serial_max_ms=1200000, and 1200001 ms is refused.

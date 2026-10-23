@@ -1,0 +1,25 @@
+## fm-t3-mcp.mjs archive against real T3 v0.1.0 (this round narrowed the already-archived match to /already archived/i, made close_unproven exit 1, and made a codeless tool error read as orchestration_error)
+# scratch idle thread A launched with fm-t3-mcp.mjs launch (root strategy, no message) in the lab project
+
+$ fm-t3-mcp.mjs archive --thread <A>                  # first archive
+{"ok":true,"threadId":"<A>","closed":true,"archived":true,"activeRunId":null,"status":"idle"}
+exit=0
+
+# what T3 itself answers when an archived thread is archived again (raw tools/call result, via McpSession.rpc):
+{"isError":true,"structuredContent":null,"content":[{"type":"text","text":"{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"orchestration_error\",\"message\":\"Thread <A> is already archived.\"}"}]}
+
+$ fm-t3-mcp.mjs archive --thread <A>                  # adversarial: re-archive an already-archived thread must stay an idempotent close
+{"ok":true,"threadId":"<A>","closed":true,"archived":true,"activeRunId":null,"status":"idle"}
+exit=0
+
+# raw T3 answer for a thread id the server never had:
+{"isError":true,"structuredContent":null,"content":[{"type":"text","text":"{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"The thread was not found.\"}"}]}
+$ fm-t3-mcp.mjs archive --thread mcp:00000000-0000-4000-8000-000000000000   # missing thread is already closed
+{"ok":true,"threadId":"mcp:00000000-0000-4000-8000-000000000000","closed":true,"missing":true}
+exit=0
+
+# a send to the archived thread keeps T3's own typed code (proven non-delivery, exit 3, not the unconfirmed orchestration_error):
+$ fm-t3-mcp.mjs send --thread <A> --message-file msg --client-request-id fm-lab-archived-1
+{"ok":false,"error":{"code":"thread_not_sendable","message":"T3 t3_thread_send failed: Thread <A> is archived and cannot receive messages.","tool":"t3_thread_send"}}
+fm-t3-mcp: T3 t3_thread_send failed: Thread <A> is archived and cannot receive messages.
+exit=3
