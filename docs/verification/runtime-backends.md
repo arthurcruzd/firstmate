@@ -2668,6 +2668,16 @@ Claude and Codex both received per-directory environment through their native pr
 Claude required the task-worker statement in the worktree's git-excluded `CLAUDE.local.md` to accept the encoded launch brief.
 A Codex mid-turn steer joined the running turn.
 
+On 2026-10-22, on T3 0.1.0 with codex-cli 0.163.0, a Codex scout spawned on a loopback lab server into a project its Codex configuration did not trust ran without `FM_TASK_ID`, `FM_TASK_INBOX`, `GOTMPDIR`, or the hook entry, although its leased worktree's `.codex/config.toml` held them.
+The same spawn, from the same code, into a project whose main checkout that configuration trusts printed all four from its leased worktree:
+
+```text
+FM_TASK_ID=[lab10] FM_TASK_INBOX=[<lab>/home/state/lab10.inbox] GIT_CONFIG_VALUE_0=[<lab>/home/state/lab10.git-hooks] GOTMPDIR=[/tmp/fm-lab10/gotmp]
+```
+
+Codex's own `config/read` on a leased worktree, through `codex app-server` with an isolated `CODEX_HOME`, gives the same split: the project layer is listed either way, but its values apply only when the worktree, or the main checkout it belongs to, is trusted; a trusted parent directory does not count.
+Write order is not the cause: T3 starts a thread's Codex session with `thread/start` at the thread's first turn (`apps/server/src/orchestration-v2/ProviderTurnStartService.ts:656` calling `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts:6571` at tag v0.1.0), after spawn has written the file.
+
 ## Codex App host tools
 
 A reusable Desktop host-tool smoke ran on 2026-07-06 against Codex Desktop bundle version 26.623.101652, build 4674, bundle id `com.openai.codex`.

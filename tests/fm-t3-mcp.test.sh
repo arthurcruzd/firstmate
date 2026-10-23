@@ -743,7 +743,10 @@ test_long_wait_rearms_in_slices() {
   fresh_case wait-slices
   t3_fake_set 'w.waitCapMs = 200; w.threads = { "thread-s": { threadId: "thread-s", projectId: "p", status: "running", activeRunId: "run-s", archived: false, worktreePath: null, items: [],
     runs: [{ runId: "run-s", ordinal: 1, status: "running" }] } }'
-  ( sleep 0.8; t3_fake_set 'w.threads["thread-s"].runs[0].status = "completed"; w.threads["thread-s"].activeRunId = null; w.threads["thread-s"].status = "completed"' ) &
+  # The fake logs a wait when it answers, so the run ends only after one slice
+  # timed out; a fixed delay raced the helper's startup on a loaded runner.
+  ( for _ in $(seq 1 250); do [ -z "$(t3_fake_calls t3_thread_wait)" ] || break; sleep 0.02; done
+    t3_fake_set 'w.threads["thread-s"].runs[0].status = "completed"; w.threads["thread-s"].activeRunId = null; w.threads["thread-s"].status = "completed"' ) &
   ender=$!
   mcp wait --thread thread-s --run run-s --timeout-ms 600000
   wait "$ender"
