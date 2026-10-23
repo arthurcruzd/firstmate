@@ -114,7 +114,8 @@ A decision-owned event surfaced by `bin/fm-watch.sh`'s signal path gets the same
 - A `captain-held` declaration surfaced through the no-verb fallback.
 - A pending-reply second-mate escalation.
 
-`scopeForUnreadWake` excludes every marked row from what the branch may claim, as well as second-mate signals classified by the span rule below.
+`scopeForUnreadWake` excludes a marked row from what the branch may claim, except a second-mate row the span rule below explains as an unchanged re-record.
+It also excludes second-mate signals that span classifies as decision-owned.
 
 A second mate's status log is one shared channel carrying many independently keyed decisions, so its signal row is judged by the lines presented since the last drain rather than by the whole log.
 The row is excluded when one of those lines is a decision, blocked, or captain-held line, resolves a decision open just before it, or declares, in the status parser's key positions, the key of a decision still open in that log.
@@ -187,10 +188,11 @@ A settled provider error, or a settled prompt with no report, releases the grant
 
 #### Report scoping
 
-While a signal or stale prompt is open, `fm_branch_report` accepts only the tasks that prompt's claimed rows resolve to:
+While a prompt is open, `fm_branch_report` accepts only the tasks that prompt's claimed rows resolve to:
 
 - A signal row resolves by its status-log key.
 - A stale row resolves through the task record naming that endpoint.
+- An attended host's eligible inactive-outcome row resolves to the child it names.
 
 A report for any other task id, `fleet` included, is refused before the store is touched.
 That way, a task remembered from an earlier wake cannot become a delivered outcome.
@@ -483,9 +485,8 @@ The branch accepts it without a project only when every branch-ownable row obser
 ### Co-present main-owned rows
 
 A heartbeat is never vetoed or ridden into main by a co-present check row or decision-owned signal/stale row.
-Those rows are main-owned while attended.
-They are excluded from what the branch may claim and left queued for main.
-Main is woken for each on its own watcher cycle, so nothing starves by being left behind.
+[Wake dispatch](#wake-dispatch) owns which of those rows stay main's while attended.
+Main is woken for each main-owned row on its own watcher cycle, so nothing starves by being left behind.
 Under the away-posture record the branch claims them too ("Postures" below).
 
 Deferring the fleet review to main merely because some unrelated merge poll or Relay mention happened to be sitting unread put a routine review in the captain's chat for a reason that had nothing to do with the fleet.
