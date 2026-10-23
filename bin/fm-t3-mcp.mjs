@@ -860,7 +860,7 @@ async function launch(flags) {
     throw err;
   }
   if (!out?.threadId) throw new Refusal("launch_unconfirmed", "t3_thread_launch returned no threadId; inspect t3_thread_list before retrying", 1);
-  const archiveLaunched = () => archiveThread(session, out.threadId, ARCHIVE_TIMEOUT_MS).then(() => true, () => false);
+  const archiveLaunched = () => archiveThread(session, out.threadId, ARCHIVE_TIMEOUT_MS).then((r) => r.archived === true, () => false);
   // Prove the binding T3 recorded before anyone relies on it.
   let t;
   let config;

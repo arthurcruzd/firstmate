@@ -18,6 +18,7 @@ Prerequisites:
 - For `codex` tasks, Codex trust for each project (the home, for a secondmate) in the Codex configuration T3's Codex provider instance runs with, by default the server user's `~/.codex/config.toml`: a `[projects."<main checkout>"]` table with `trust_level = "trusted"`.
   Codex applies a project's `.codex/config.toml`, which carries a Codex thread's [per-directory environment](#per-directory-harness-environment), only in a trusted project.
   Trusting a project's main checkout covers its Treehouse worktrees; trusting a parent directory does not.
+  A `codex` spawn warns, and still launches, when `${CODEX_HOME:-~/.codex}/config.toml` on the spawning host does not show that trust or cannot be read (reading it needs Python 3.11+ with `tomllib`); it cannot see a Codex configuration T3 keeps elsewhere.
 - The universal harness and toolchain requirements in [`configuration.md`](configuration.md#toolchain).
 
 Run the server that hosts Firstmate workers with T3's product telemetry off, so worker turns are not counted:
@@ -96,7 +97,7 @@ The normal isolation and unlanded-work refusal rules still apply.
 T3 sets environment variables per provider instance, never per thread, so nothing can be typed into a pane before launch.
 Each harness reads its own configuration from the thread's working directory instead, and Firstmate writes the facts a pane would have exported into that directory before the launch turn.
 For `claude` that is an `env` block in the directory's `.claude/settings.local.json`, merged alongside the busy hooks a worker already carries there; for `codex` it is a `.codex/config.toml` holding a `[shell_environment_policy]` `set` table.
-Codex applies that file only in a project it [trusts](#setup); in an untrusted project a Codex thread runs without any of these values, so its Git hook entry, and with it the AI-trailer strip and a `forge=external` ship's push guard, does not apply, and Firstmate neither checks nor grants that trust.
+Codex applies that file only in a project it [trusts](#setup); in an untrusted project a Codex thread runs without any of these values, so its Git hook entry, and with it the AI-trailer strip and a `forge=external` ship's push guard, does not apply; Firstmate warns at spawn when it cannot confirm that trust, but never grants it.
 The Claude `env` block keeps entries Firstmate did not write, such as a secondmate home's own, and lists the keys Firstmate wrote in `FM_T3CODE_ENV_KEYS` so a respawn replaces exactly those; a symlinked `.claude/settings.local.json` is refused.
 The thread's `GIT_CONFIG_*` entries are Firstmate's own `core.hooksPath` hook entry only: inherited `GIT_CONFIG_*` values, or any other inherited environment value, are never written to these files, because they can carry credentials.
 That entry sets `GIT_CONFIG_COUNT=1` and index 0, so numbered `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>` entries in the T3 server's environment do not apply in the thread; with `config/keep-ai-trailers` no hook entry is written and they apply unchanged, except on a [`forge=external`](external-review-forge.md) ship, whose push guard always installs the hook entry.

@@ -582,6 +582,31 @@ fm_backend_t3code_validate_harness() {  # <harness>
   esac
 }
 
+# fm_backend_t3code_codex_trusted: whether ${CODEX_HOME:-~/.codex}/config.toml
+# trusts <project> the way Codex resolves trust (the directory itself or the
+# main checkout of its repository, by physical path), the only case in which
+# Codex applies the project's .codex/config.toml. Fails when that file, or a
+# Python with tomllib to read it, is missing or the file does not parse.
+fm_backend_t3code_codex_trusted() {  # <project-path>
+  local python
+  for python in python3 python3.14 python3.13 python3.12 python3.11; do
+    command -v "$python" >/dev/null 2>&1 && "$python" -c 'import tomllib' >/dev/null 2>&1 && break
+    python=
+  done
+  [ -n "$python" ] || return 1
+  "$python" - "${CODEX_HOME:-$HOME/.codex}/config.toml" "$1" 2>/dev/null <<'PY'
+import os, subprocess, sys, tomllib
+config, project = sys.argv[1:]
+with open(config, "rb") as stream:
+    projects = tomllib.load(stream).get("projects", {})
+paths = [os.path.realpath(project)]
+common = subprocess.run(["git", "-C", project, "rev-parse", "--path-format=absolute", "--git-common-dir"], capture_output=True, text=True)
+if common.returncode == 0:
+    paths.append(os.path.dirname(os.path.realpath(common.stdout.strip())))
+sys.exit(0 if any(isinstance(projects.get(p), dict) and projects[p].get("trust_level") == "trusted" for p in paths) else 1)
+PY
+}
+
 # There is no pane: bin/fm-spawn.sh's launch-time typing helpers land here.
 fm_backend_t3code_send_literal() {
   echo "error: backend=t3code has no pane to type into" >&2

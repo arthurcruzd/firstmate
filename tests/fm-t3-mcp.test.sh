@@ -266,6 +266,10 @@ test_launch_refusals() {
   expect_code 1 "$RC" "a launched thread whose binding read-back failed is an uncertain outcome"
   assert_equals binding_unconfirmed "$(field "$OUT" error.code)" "read-back failure refusal code"
   assert_contains "$(t3_fake_calls t3_thread_organize)" '"action":"archive"' "a thread with an unproven binding is archived before refusing"
+  t3_fake_set 'w.failTools = { t3_thread_read: { code: "thread_not_found", message: "not yet projected" }, t3_thread_organize: { code: "thread_not_found", message: "not yet projected" } }'
+  mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
+  expect_code 1 "$RC" "a launched thread T3 does not yet find is an uncertain outcome"
+  assert_contains "$ERR" "its archive is unproven" "a not-found archive of the thread this launch created is not a proven close"
   t3_fake_set 'w.failTools = {}; w.dropTools = { t3_thread_launch: 1 }'
   mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
   expect_code 1 "$RC" "a launch whose reply was lost is an uncertain transport failure"
@@ -574,7 +578,9 @@ test_requests_and_respond() {
   mcp respond --thread thread-q --request req-approval --answers-file "$TMP_ROOT/answers"
   expect_code 3 "$RC" "a permission approval cannot be answered through the question tools"
   mcp requests --thread thread-q
+  expect_code 0 "$RC" "requests after the answer: $ERR"
   assert_equals "" "$(field "$OUT" questions.0.requestId)" "the answered question is no longer pending"
+  assert_equals 1 "$(field "$OUT" approvals)" "the unanswerable approval stays pending"
   pass "fm-t3-mcp requests/respond: questions are read and answered by id; approvals are counted, never answered"
 }
 
@@ -763,9 +769,12 @@ test_capture_clamps_lines_and_closes_session() {
   local thread
   fresh_case capture-clamp
   thread=$(new_thread)
+  FM_T3_THREAD="$thread" t3_fake_set 'w.threads[process.env.FM_T3_THREAD].items = Array.from({ length: 600 }, (_, i) => ({ type: "assistant_message", status: "completed", text: "item " + i }));'
   : > "$T3_FAKE_LOG"
   mcp capture --thread "$thread" --lines 1000
   expect_code 0 "$RC" "a capture above 500 lines reads the last 500: $ERR"
+  assert_equals 500 "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" "a capture above 500 lines prints exactly 500"
+  assert_equals "[assistant_message/completed] item 101" "$(printf '%s\n' "$OUT" | head -1)" "the clamped capture shows the newest items up to the status line"
   case "$(printf '%s\n' "$OUT" | tail -1)" in 't3code: status='*) ;; *) fail "the clamped capture still ends with the status line, got '$OUT'" ;; esac
   assert_grep '"method":"DELETE","session":"sess-fake"' "$T3_FAKE_LOG" "the verb ends the MCP session it opened"
   pass "fm-t3-mcp capture: --lines above 500 reads the last 500, and the verb ends its MCP session"
