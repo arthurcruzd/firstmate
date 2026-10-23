@@ -811,7 +811,7 @@ This confirms unattended progress through the reviewer, not unrestricted network
 
 `tests/fm-spawn-dispatch-profile.test.sh` pins unchanged bypass defaults and explicit `approve-for-me` launches for ships and scouts, plus hook and secondmate launch wiring.
 `tests/fm-approval-failover.test.sh` exercises the firstmate-invoked command through real filesystem publication and the existing lease owner, substituting lifecycle control to avoid touching real workers.
-It covers writing once, preserving explicit and concurrent settings, invoking guarded relaunch, retaining the remedy on recovery failure, and local/remote inheritance precedence.
+It covers writing once, preserving explicit and concurrent settings, invoking guarded relaunch, retaining the remedy on recovery failure, refusing a `backend=t3code` task before any change, and local/remote inheritance precedence.
 These behavior tests do not verify an actual vendor-refusal recovery or live relaunch; the prior live automatic-review probe verifies the fallback's capabilities, not that complete recovery path.
 There is no automatic detector or harness-output classifier to verify, and a generic login error does not establish a defeated bypass.
 
