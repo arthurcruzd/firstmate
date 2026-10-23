@@ -634,11 +634,12 @@ if (count("event-one") !== 1 || count("event-two") !== 1 || count("event-three")
   pass "away daemon on T3: an unconfirmed digest is frozen and retried verbatim; a later event goes in the next digest, each event once"
 }
 
-# Delivering a frozen digest after a long outage proves the supervisor is
-# reachable again, so items still buffered behind it start a fresh undelivered
-# window instead of inheriting the outage's age and raising a wedge at once.
-test_frozen_flush_restamps_the_next_generation() {
-  local state got
+# Items buffered behind a frozen digest keep their own undelivered age once
+# the frozen digest is delivered after a long outage: the age of the first of
+# them, not the outage's age, and not a fresh window that would hide how long
+# they have already waited.
+test_frozen_flush_keeps_the_next_generation_arrival() {
+  local state got age
   t3_case daemon-digest-restamp completed
   state="$CASE_DIR/state"
   mkdir -p "$state"
@@ -654,15 +655,20 @@ test_frozen_flush_restamps_the_next_generation() {
     { printf "since=%s\n" "$old"; tail -n +2 "$1/.subsuper-escalations.frozen"; } > "$1/frozen.tmp"
     mv "$1/frozen.tmp" "$1/.subsuper-escalations.frozen"
     escalate_add "$1" "event-two"
+    printf "%s\n" "$(( $(_now) - 1740 ))" > "$1/.subsuper-escalations.next-since"
+    escalate_add "$1" "event-three"
     escalate_flush "$1"; printf "second=%s\n" "$?"
     printf "age=%s\n" "$(_oldest_line_age "$1/.subsuper-escalations")"
   ' "$state" 2>&1)
   assert_contains "$got" "first=1" "the lost digest is frozen, not delivered: $got"
   assert_contains "$got" "second=1" "the next generation defers on the supervisor turn the frozen digest started: $got"
-  [ "$(cat "$state/.subsuper-escalations")" = event-two ] || fail "only the next generation stays buffered, got '$(cat "$state/.subsuper-escalations")'"
-  [ "$(printf '%s\n' "$got" | sed -n 's/^age=//p')" -lt 60 ] \
-    || fail "items left behind a delivered frozen digest must start a fresh undelivered window: $got"
-  pass "away daemon on T3: a delivered frozen digest restarts the undelivered clock for the items behind it"
+  [ "$(cat "$state/.subsuper-escalations")" = "event-two
+event-three" ] || fail "only the next generation stays buffered, got '$(cat "$state/.subsuper-escalations")'"
+  age=$(printf '%s\n' "$got" | sed -n 's/^age=//p')
+  [ "$age" -ge 1740 ] && [ "$age" -lt 1800 ] \
+    || fail "items left behind a delivered frozen digest must keep the first one's arrival, not the outage's or a fresh window: $got"
+  assert_absent "$state/.subsuper-escalations.next-since" "the next generation's arrival moves into its since-stamp"
+  pass "away daemon on T3: a delivered frozen digest leaves the items behind it with the first one's undelivered age"
 }
 
 # A supervisor thread waiting on a pending request is not free to take a
@@ -772,7 +778,7 @@ test_kill_interrupts_then_archives_and_tolerates_gone() {
   [ -z "$(t3_dispatch_types)" ] || fail "an archived thread must call nothing"
   t3_world "$(t3_thread_json thread-live running false)"
   t3_world_set 'w.archiveKeepsRun = true; w.waitTimesOut = true'
-  t3_run 'fm_backend_t3code_kill thread-live' >/dev/null 2>&1 && fail "an archive that leaves a run active must fail the kill"
+  FM_T3CODE_ARCHIVE_TIMEOUT_MS=300 t3_run 'fm_backend_t3code_kill thread-live' >/dev/null 2>&1 && fail "an archive that leaves a run active must fail the kill"
   t3_world "$(t3_thread_json thread-live completed false)"
   t3_world_set 'w.failTools = { t3_thread_organize: { code: "boom", message: "archive failed" } }'
   t3_run 'fm_backend_t3code_kill thread-live' 2>/dev/null && fail "a failed archive must fail the kill"
@@ -1592,11 +1598,14 @@ test_spawn_codex_scout_writes_toml_env_with_traceparent() {
 
 # Codex applies the worktree's .codex/config.toml only when its main checkout
 # is trusted, so spawn warns once, and still launches, unless the Codex
-# configuration shows that trust: absent, or trusting only a parent directory.
+# configuration shows that trust. Trust resolves from the thread's launch
+# directory: a worker's leased worktree is covered only by its main checkout's
+# entry, never a parent directory's or a linked checkout's own, while a
+# secondmate's home is also covered by its own.
 test_spawn_codex_warns_unless_codex_trusts_the_project() {
-  local proj wt data state id out rc fb codex_home trust warning='could not confirm that'
+  local proj wt data state id out rc fb codex_home trust linked warning='could not confirm that'
   t3_require_tomllib test_spawn_codex_warns_unless_codex_trusts_the_project || return 0
-  for trust in absent parent project; do
+  for trust in absent project; do
     id="t3trust$trust"
     t3_task_id "$id"
     t3_case "spawn-codex-trust-$trust"
@@ -1604,10 +1613,7 @@ test_spawn_codex_warns_unless_codex_trusts_the_project() {
     codex_home="$CASE_DIR/codex-home"
     fm_git_worktree "$proj" "$wt" "fm/$id"
     mkdir -p "$data/$id" "$state" "$CASE_DIR/home/state" "$codex_home"
-    case "$trust" in
-      parent) printf '[projects."%s"]\ntrust_level = "trusted"\n' "$(cd -P "$CASE_DIR" && pwd)" > "$codex_home/config.toml" ;;
-      project) printf '[projects."%s"]\ntrust_level = "trusted"\n' "$(cd -P "$proj" && pwd)" > "$codex_home/config.toml" ;;
-    esac
+    [ "$trust" = absent ] || printf '[projects."%s"]\ntrust_level = "trusted"\n' "$(cd -P "$proj" && pwd)" > "$codex_home/config.toml"
     write_spawn_brief "$data" "$id"
     touch "$state/.last-watcher-beat"
     FM_T3_PROJ="$proj" t3_world_set 'w.projects[0].workspaceRoot = process.env.FM_T3_PROJ'
@@ -1627,7 +1633,17 @@ test_spawn_codex_warns_unless_codex_trusts_the_project() {
       assert_contains "$out" "trust the project in the Codex configuration T3 uses" "the warning must name the fix"
     fi
   done
-  pass "fm-spawn.sh --backend t3code codex: warns once, and still launches, unless the Codex configuration trusts the project's main checkout"
+  linked="$CASE_DIR/linked-checkout"
+  git -C "$proj" worktree add --quiet -b fm/linked "$linked"
+  codex_trusts() {  # <trusted-path> <project> <kind>
+    printf '[projects."%s"]\ntrust_level = "trusted"\n' "$(cd -P "$1" && pwd)" > "$codex_home/config.toml"
+    CODEX_HOME="$codex_home" t3_run 'fm_backend_t3code_codex_trusted "$1" "$2"' "$2" "$3"
+  }
+  codex_trusts "$CASE_DIR" "$proj" scout && fail "a trusted parent directory must not confirm a worker's trust"
+  codex_trusts "$linked" "$linked" scout && fail "a linked checkout trusted only by its own path must not confirm a worker's trust"
+  codex_trusts "$proj" "$linked" ship || fail "the main checkout's trust must confirm a worker spawned from its linked checkout"
+  codex_trusts "$linked" "$linked" secondmate || fail "a secondmate home trusted by its own path must confirm its trust"
+  pass "fm-spawn.sh --backend t3code codex: warns once, and still launches, unless the Codex configuration trusts the launch directory's main checkout"
 }
 
 # A seeded secondmate home on its own git branch, with the charter the launch
@@ -2699,7 +2715,7 @@ test_answer_script_reads_and_answers_questions
 test_failed_t3_secondmate_is_resumed_in_place
 test_t3_secondmate_missing_thread_reproves_close_before_replacement
 test_daemon_unconfirmed_digest_is_frozen_and_retried_verbatim
-test_frozen_flush_restamps_the_next_generation
+test_frozen_flush_keeps_the_next_generation_arrival
 test_daemon_defers_digest_while_supervisor_waits_on_request
 test_helper_through_symlinked_root_reaches_t3_and_kill_fails_closed
 test_draining_archived_t3_secondmate_is_not_relaunched

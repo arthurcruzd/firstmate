@@ -63,7 +63,7 @@ fm_afk_clear_stale_artifacts() {  # <state-dir>
   local state=$1 line win key
   # Unknown-state warnings suppress repeats even after delivery. Re-arm only
   # warnings still in the buffer being discarded, preserving delivered ones.
-  if [ -s "$state/.subsuper-escalations" ]; then
+  if [ -s "$state/.subsuper-escalations" ] && compgen -G "$state/.subsuper-reported-stale-*" >/dev/null; then
     _fm_wake_require_classify || return 1
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in

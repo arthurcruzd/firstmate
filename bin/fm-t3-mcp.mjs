@@ -113,7 +113,8 @@
 //   fm-t3-mcp.mjs archive --thread <id> [--timeout-ms <n>]
 //     t3_thread_organize archive, then read back until the thread reports
 //     archived:true and activeRunId:null (closed=true). A thread the verified
-//     server no longer has is already closed (missing=true).
+//     server no longer has is already closed (missing=true). A close the
+//     read-back does not prove within the timeout exits 1 (close_unproven).
 //   fm-t3-mcp.mjs thread-for-root --root <abs-path>
 //     The one unarchived, worktree-less thread with an active run on the live
 //     project rooted at <root>, across every t3_thread_list page; a fork
@@ -131,11 +132,17 @@
 // recorded at sign-in, so a different T3 on the same origin is never driven
 // with this credential.
 //
+// FM_T3CODE_ARCHIVE_TIMEOUT_MS, a positive integer, replaces the 15000 ms bound
+// on the read-back that proves an archive (launch's cleanup archive, and
+// archive's default --timeout-ms).
+//
 // Exit: 0 success; 1 transport or unexpected failure, including a JSON-RPC
-// server error, which does not prove the request was not applied; 2 invalid
-// use; 3 a typed T3 failure (a tool error, or a JSON-RPC error refusing the
-// request itself: parse error, invalid request, unknown method, or invalid
-// params; error.code carries T3's code when it has one); 4 a local refusal
+// server error or any non-2xx HTTP answer, neither of which proves the request
+// was not applied; 2 invalid use; 3 a typed T3 failure (a tool error, or a
+// JSON-RPC error in a 2xx reply refusing the request itself: parse error,
+// invalid request, unknown method, or invalid params; error.code carries T3's
+// code, and a tool error without one reads as T3's catch-all
+// orchestration_error); 4 a local refusal
 // (no credential, expired credential, revoked credential, environment
 // mismatch, capability gate, or a launch binding mismatch whose thread read
 // back archived); 5 and 6 as thread-for-root says; 7 a
@@ -172,7 +179,7 @@ const ENVIRONMENT_TOOL = "t3_environment_read";
 const EXPIRY_WARN_DAYS = 5;
 const DAY_MS = 86_400_000;
 const REQUEST_TIMEOUT_MS = 30_000;
-const ARCHIVE_TIMEOUT_MS = 15_000;
+const ARCHIVE_TIMEOUT_MS = /^[1-9][0-9]*$/.test(process.env.FM_T3CODE_ARCHIVE_TIMEOUT_MS ?? "") ? Number(process.env.FM_T3CODE_ARCHIVE_TIMEOUT_MS) : 15_000;
 const SESSION_CLOSE_TIMEOUT_MS = 2_000;
 // Node's fetch drops a reply that takes longer than 300 s, so one
 // t3_thread_wait, plus its 15 s grace, stays under that and a longer wait
@@ -182,7 +189,8 @@ const WAIT_SLICE_MS = 240_000;
 // request, unknown method, invalid params.
 const REFUSED_REQUEST_CODES = new Set([-32700, -32600, -32601, -32602]);
 // T3's catch-all tool failure, which can follow a committed mutation, so it
-// never proves a send or launch was not applied.
+// never proves a send or launch was not applied. A tool error without a code
+// of its own is read as this one.
 const UNPROVEN_TOOL_ERROR = "orchestration_error";
 const CAPTURE_LINES_MAX = 500;
 // The activity item T3 keeps for each permission approval, and the status it
@@ -473,7 +481,7 @@ function toolError(data, content) {
   const e = data?.error ?? data ?? {};
   const text = Array.isArray(content) ? content.filter((c) => c?.type === "text").map((c) => c.text).join(" ") : "";
   return {
-    code: String(e.code ?? e._tag ?? e.type ?? "tool_error"),
+    code: typeof e.code === "string" && e.code ? e.code : UNPROVEN_TOOL_ERROR,
     message: String(e.message ?? e.detail ?? (text || "unknown error")),
   };
 }
@@ -782,7 +790,7 @@ async function resolveSelection(flags) {
   if (wantModel === "default") {
     const projectId = need(flags, "project");
     const project = (await liveProjects(session)).find((p) => p.id === projectId);
-    if (!project) throw new Refusal("project_not_found", `T3 lists no live project ${projectId}`, 3);
+    if (!project) throw new Refusal("project_not_found", `T3 lists no live project ${projectId}`);
     const def = project.defaultModelSelection;
     if (!def) throw new Refusal("no_default_model", `T3 project ${projectId} has no default model; pass --model with a slug from the T3 model catalog`);
     if (def.instanceId !== instanceId) {
@@ -1147,7 +1155,7 @@ async function archiveThread(session, threadId, timeoutMs) {
   } catch (err) {
     if (isNotFound(err)) return { ok: true, threadId, closed: true, missing: true };
     // An already-archived thread is the end state; the read-back decides.
-    if (!(err instanceof Refusal && /archiv/i.test(err.message))) throw err;
+    if (!(err instanceof Refusal && /already archived/i.test(err.message))) throw err;
   }
   const deadline = Date.now() + timeoutMs;
   let t = {};
@@ -1160,7 +1168,7 @@ async function archiveThread(session, threadId, timeoutMs) {
     if (Date.now() >= deadline) break;
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Refusal("close_unproven", `thread ${threadId} did not read back archived with no active run within ${timeoutMs} ms (archived=${t.archived === true || Boolean(t.archivedAt)}, activeRunId=${t.activeRunId ?? null})`, 3, { thread: t });
+  throw new Refusal("close_unproven", `thread ${threadId} did not read back archived with no active run within ${timeoutMs} ms (archived=${t.archived === true || Boolean(t.archivedAt)}, activeRunId=${t.activeRunId ?? null})`, 1, { thread: t });
 }
 
 // Every thread T3 lists for a project with the given statuses, across pages,

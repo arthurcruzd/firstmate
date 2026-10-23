@@ -816,6 +816,7 @@ escalate_add() {  # <state> <distilled-item>
   fi
   buf="$state/.subsuper-escalations"
   [ -s "$buf" ] || _now > "${buf}.since"
+  [ ! -f "$buf.frozen" ] || [ -e "$buf.next-since" ] || _now > "$buf.next-since"
   printf '%s\n' "$item" >> "$buf"
 }
 
@@ -908,9 +909,11 @@ escalate_full_text_save() {  # <state> <buf>
 # the same text under that id, with no expiry, until T3 accepts it or refuses
 # it, which unfreezes it for a rebuild. Items appended later form the next
 # generation and are flushed only after the frozen one, so no event is lost or
-# delivered twice.
+# delivered twice; <buf>.next-since records when the first of them arrived,
+# which becomes the buffer's since-stamp once the frozen generation is gone.
 escalate_freeze() {  # <buf> <submitted-message> <request-id>
   local buf=$1
+  rm -f "$buf.next-since"
   if ! printf '%s' "$2" > "$buf.frozen-msg" \
     || ! { printf 'since=%s\nid=%s\n' "$(cat "$buf.since" 2>/dev/null)" "$3"; cat "$buf"; } > "$buf.frozen.tmp" \
     || ! mv -f "$buf.frozen.tmp" "$buf.frozen"; then
@@ -931,20 +934,20 @@ escalate_flush_frozen() {  # <state> <buf>
   tail -n +3 "$buf.frozen" > "$items"
   if [ "$(head -n 1 "$buf.frozen")" != "since=$(cat "$buf.since" 2>/dev/null)" ] || [ -z "$id" ] \
     || [ ! -f "$buf.frozen-msg" ] || ! head -n "$n" "$buf" | cmp -s - "$items"; then
-    rm -f "$items" "$buf.frozen" "$buf.frozen-msg"
+    rm -f "$items" "$buf.frozen" "$buf.frozen-msg" "$buf.next-since"
     return 0
   fi
   if inject_msg "$(cat "$buf.frozen-msg")" "$state" exact "$id"; then
     unknown_wake_acknowledge_flushed "$state" "$items" \
       || log "unknown-wake acknowledgement write failed; a delivered unknown wake may escalate again"
     tail -n +"$((n + 1))" "$buf" > "$items" && mv -f "$items" "$buf"
-    rm -f "$items" "$buf.frozen" "$buf.frozen-msg" "$state/.subsuper-inject-wedged"
-    if [ -s "$buf" ]; then _now > "$buf.since"; else rm -f "$buf.since"; fi
+    if [ -s "$buf" ]; then mv -f "$buf.next-since" "$buf.since" 2>/dev/null || _now > "$buf.since"; else rm -f "$buf.since"; fi
+    rm -f "$items" "$buf.frozen" "$buf.frozen-msg" "$buf.next-since" "$state/.subsuper-inject-wedged"
     ESCALATE_KEPT_FULL=
     return 0
   fi
   rm -f "$items"
-  [ "$INJECT_LAST_VERDICT" != send-failed ] || rm -f "$buf.frozen" "$buf.frozen-msg"
+  [ "$INJECT_LAST_VERDICT" != send-failed ] || rm -f "$buf.frozen" "$buf.frozen-msg" "$buf.next-since"
   return 1
 }
 

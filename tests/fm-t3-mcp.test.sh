@@ -107,7 +107,10 @@ test_status_gate_and_protocol() {
   expect_code 0 "$RC" "status should pass the gate: $ERR"
   assert_equals env-fake-1 "$(field "$OUT" environmentId)" "status should report the environment id"
   assert_equals 0.0.46-nightly.fake "$(field "$OUT" serverVersion)" "status should report the server version"
-  assert_grep '"protocol":"2025-06-18"' "$T3_FAKE_LOG" "every MCP request must carry protocol version 2025-06-18"
+  node -e '
+const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.path === "/mcp");
+process.exit(lines.length && lines.every((e) => e.protocol === "2025-06-18") ? 0 : 1);
+' "$T3_FAKE_LOG" || fail "every MCP request must carry protocol version 2025-06-18, got $(cat "$T3_FAKE_LOG")"
   t3_fake_set 'w.sse = true'
   mcp status
   expect_code 0 "$RC" "status should parse SSE replies too: $ERR"
@@ -252,7 +255,7 @@ test_launch_refusals() {
   expect_code 4 "$RC" "a thread below full access is refused"
   t3_fake_set 'w.archiveKeepsRun = true'
   printf 'brief' > "$TMP_ROOT/launch-message"
-  mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT" --message-file "$TMP_ROOT/launch-message"
+  FM_T3CODE_ARCHIVE_TIMEOUT_MS=300 mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT" --message-file "$TMP_ROOT/launch-message"
   expect_code 1 "$RC" "a mis-bound thread whose accepted archive never reads back closed is an uncertain outcome"
   assert_contains "$ERR" "its archive is unproven" "the uncertain refusal says the archive is unproven"
   t3_fake_set 'delete w.archiveKeepsRun'
@@ -304,7 +307,9 @@ test_send_state_capture_interrupt_archive() {
   assert_equals started "$(field "$OUT" delivery)" "an idle thread starts a turn"
   assert_contains "$(t3_fake_calls t3_thread_send | tail -1)" '"mode":"auto","clientRequestId":"req-1"' "send uses mode auto with the request id"
   mcp send --thread "$thread" --message-file "$msg" --client-request-id req-1
+  expect_code 0 "$RC" "a retry under the same request id should succeed: $ERR"
   assert_equals 2 "$(t3_fake_calls t3_thread_send | grep -c '"clientRequestId":"req-1"')" "a retry sends the same client request id again"
+  assert_equals 1 "$(t3_fake_items "$thread" "hello worker")" "the retry lands on the one committed message"
   mcp state --thread "$thread"
   assert_equals running "$(field "$OUT" status)" "a started thread runs"
   [ -n "$(field "$OUT" activeRunId)" ] || fail "a running thread has an active run"
@@ -325,7 +330,7 @@ test_send_state_capture_interrupt_archive() {
   assert_equals unconfirmed "$(field "$OUT" cancel)" "a wait that times out leaves the cancel unconfirmed"
   t3_fake_set 'w.archiveKeepsRun = true'
   mcp archive --thread "$thread" --timeout-ms 300
-  expect_code 3 "$RC" "an archive that leaves an active run is not a proven close"
+  expect_code 1 "$RC" "an archive that leaves an active run is not a proven close"
   assert_equals close_unproven "$(field "$OUT" error.code)" "unproven close code"
   t3_fake_set 'w.waitTimesOut = false; w.archiveKeepsRun = false'
   thread=$(new_thread)
@@ -340,9 +345,10 @@ test_send_state_capture_interrupt_archive() {
   mcp archive --thread "$thread"
   expect_code 0 "$RC" "T3 refusing to re-archive an archived thread is the same end state: $ERR"
   assert_equals true "$(field "$OUT" closed)" "the read-back still proves the close"
-  t3_fake_set 'w.failTools = { t3_thread_organize: { code: "boom", message: "organize failed" } }'
+  t3_fake_set 'w.failTools = { t3_thread_organize: { code: "boom", message: "archive failed" } }'
   mcp archive --thread "$thread"
   expect_code 3 "$RC" "any other organize failure is not an archive"
+  assert_equals boom "$(field "$OUT" error.code)" "an organize failure is reported as T3's own error, not waited out"
   t3_fake_set 'w.failTools = {}'
   mcp state --thread "$thread"
   assert_equals true "$(field "$OUT" archived)" "state reports archived"
@@ -531,6 +537,9 @@ test_resolve_selection_uses_t3_catalog() {
   assert_contains "$ERR" "low, medium, high, xhigh" "the refusal lists the catalog's values"
   mcp resolve-selection --harness codex --instance codex --model no-such-model --effort default --project "$project"
   expect_code 4 "$RC" "a model the instance does not list is refused"
+  mcp resolve-selection --harness codex --instance codex --model default --effort default --project no-such-project
+  expect_code 4 "$RC" "a default model on a project T3 does not list is refused"
+  assert_equals project_not_found "$(field "$OUT" error.code)" "the refusal names the missing project"
   t3_fake_set 'w.providers = [{ providerInstanceId: "codex", driverKind: "codex", constraints: ["Provider instance is disabled."], models: [] }]'
   mcp resolve-selection --harness codex --instance codex --model gpt-5.6-sol --effort default --project "$project"
   expect_code 4 "$RC" "a disabled instance is refused"
@@ -714,8 +723,9 @@ test_jsonrpc_server_error_is_not_proven_refusal() {
   pass "fm-t3-mcp: a JSON-RPC server error after a send or launch is unconfirmed, never a proven refusal"
 }
 
-# T3's catch-all orchestration_error can follow a committed send or launch, so
-# it is unconfirmed, while a specific typed refusal still proves non-delivery.
+# T3's catch-all orchestration_error, or a tool error without a code, can
+# follow a committed send or launch, so it is unconfirmed, while a specific
+# typed refusal still proves non-delivery.
 test_orchestration_error_is_not_proven_refusal() {
   local thread project
   fresh_case orchestration-error
@@ -733,13 +743,22 @@ test_orchestration_error_is_not_proven_refusal() {
   mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-orch" --client-request-id req-refused
   expect_code 3 "$RC" "a specific typed refusal of the send is still proven non-delivery"
   t3_fake_set 'w.failTools = {}'
+  printf 'committed before a codeless error' > "$TMP_ROOT/msg-codeless"
+  t3_fake_set 'w.committedErrorTools = { t3_thread_send: null }'
+  mcp send --thread "$thread" --message-file "$TMP_ROOT/msg-codeless" --client-request-id req-codeless
+  expect_code 7 "$RC" "a tool error without a code after the send went out is unconfirmed, got '$OUT'"
+  assert_equals 1 "$(t3_fake_items "$thread" "committed before a codeless error")" "the fake committed the send before its codeless error"
   mcp project-ensure --root "$TMP_ROOT/proj"
   project=$(field "$OUT" projectId)
   t3_fake_set 'w.committedErrorTools = { t3_thread_launch: "orchestration_error" }'
   mcp launch --project "$project" --title fm-orch --model-selection "$SEL" --worktree "$WT"
   expect_code 1 "$RC" "a launch answered with orchestration_error is uncertain, not refused, got '$OUT'"
   assert_equals launch_unconfirmed "$(field "$OUT" error.code)" "the launch verdict is launch_unconfirmed"
-  pass "fm-t3-mcp: T3's orchestration_error after a send or launch is unconfirmed; a specific typed refusal stays proven"
+  t3_fake_set 'w.committedErrorTools = { t3_thread_launch: null }'
+  mcp launch --project "$project" --title fm-codeless --model-selection "$SEL" --worktree "$WT"
+  expect_code 1 "$RC" "a launch answered with a tool error without a code is uncertain, not refused, got '$OUT'"
+  assert_equals launch_unconfirmed "$(field "$OUT" error.code)" "the codeless launch verdict is launch_unconfirmed"
+  pass "fm-t3-mcp: T3's orchestration_error, or a tool error without a code, after a send or launch is unconfirmed; a specific typed refusal stays proven"
 }
 
 # One wait is re-armed in slices under the 300 s Node's fetch allows a reply,

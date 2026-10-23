@@ -583,23 +583,26 @@ fm_backend_t3code_validate_harness() {  # <harness>
 }
 
 # fm_backend_t3code_codex_trusted: whether ${CODEX_HOME:-~/.codex}/config.toml
-# trusts <project> the way Codex resolves trust (the directory itself or the
-# main checkout of its repository, by physical path), the only case in which
-# Codex applies the project's .codex/config.toml. Fails when that file, or a
-# Python with tomllib to read it, is missing or the file does not parse.
-fm_backend_t3code_codex_trusted() {  # <project-path>
+# trusts the directory a <kind> thread spawned from <project> runs in, the way
+# Codex resolves trust by physical path: the directory itself or the main
+# checkout of its repository. A secondmate runs in <project>, its home; a ship
+# or scout runs in a leased worktree, which only the main checkout's entry
+# covers. That trust is the only case in which Codex applies the launch
+# directory's .codex/config.toml. Fails when that file, or a Python with
+# tomllib to read it, is missing or the file does not parse.
+fm_backend_t3code_codex_trusted() {  # <project-path> <kind>
   local python
   for python in python3 python3.14 python3.13 python3.12 python3.11; do
     command -v "$python" >/dev/null 2>&1 && "$python" -c 'import tomllib' >/dev/null 2>&1 && break
     python=
   done
   [ -n "$python" ] || return 1
-  "$python" - "${CODEX_HOME:-$HOME/.codex}/config.toml" "$1" 2>/dev/null <<'PY'
+  "$python" - "${CODEX_HOME:-$HOME/.codex}/config.toml" "$1" "$2" 2>/dev/null <<'PY'
 import os, subprocess, sys, tomllib
-config, project = sys.argv[1:]
+config, project, kind = sys.argv[1:]
 with open(config, "rb") as stream:
     projects = tomllib.load(stream).get("projects", {})
-paths = [os.path.realpath(project)]
+paths = [os.path.realpath(project)] if kind == "secondmate" else []
 common = subprocess.run(["git", "-C", project, "rev-parse", "--path-format=absolute", "--git-common-dir"], capture_output=True, text=True)
 if common.returncode == 0:
     paths.append(os.path.dirname(os.path.realpath(common.stdout.strip())))

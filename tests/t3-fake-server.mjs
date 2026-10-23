@@ -40,7 +40,8 @@
 //   code}: apply the call once, then answer with a JSON-RPC error of that
 //   code, as a server that failed after committing), committedErrorTools
 //   ({name: code}: apply the call once, then answer with a tool error of that
-//   code, as T3's catch-all orchestration_error after a commit), waitCapMs (one
+//   code, as T3's catch-all orchestration_error after a commit; a null code
+//   answers with text content only, as a tool handler that throws), waitCapMs (one
 //   t3_thread_wait times out after at most this long), probePath (each log
 //   line records whether it exists), providers (the orchestrator_capabilities
 //   catalog; default FAKE_PROVIDERS), projects ([{id, title, workspaceRoot,
@@ -391,7 +392,8 @@ async function mcp(req, res) {
       delete fresh.committedErrorTools[msg.params.name];
       saveWorld(fresh);
       log(fresh, { ...entry, committedError: code });
-      return json(res, 200, { jsonrpc: "2.0", id: msg.id, result: err(code, "The operation could not be completed.") }, { "mcp-session-id": "sess-fake" });
+      const result = code === null ? { isError: true, content: [{ type: "text", text: "The operation could not be completed." }] } : err(code, "The operation could not be completed.");
+      return json(res, 200, { jsonrpc: "2.0", id: msg.id, result }, { "mcp-session-id": "sess-fake" });
     }
   } else {
     return json(res, 200, { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
@@ -411,7 +413,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "POST" && url.pathname === "/mcp") return await mcp(req, res);
     if (req.method === "DELETE" && url.pathname === "/mcp") {
-      log(loadWorld(), { path: url.pathname, method: "DELETE", session: req.headers["mcp-session-id"] ?? null });
+      log(loadWorld(), { path: url.pathname, method: "DELETE", session: req.headers["mcp-session-id"] ?? null, protocol: req.headers["mcp-protocol-version"] });
       res.writeHead(200);
       return res.end();
     }

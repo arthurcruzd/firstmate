@@ -4815,7 +4815,7 @@ EOF
     if [ "$HARNESS" = codex ] && { [ "$KIND" = secondmate ] || git -C "$PROJ_ABS" ls-files --error-unmatch .codex/config.toml >/dev/null 2>&1; }; then
       "$SCRIPT_DIR/fm-t3code-codex-env.sh" check "$PROJ_ABS" || exit 1
     fi
-    if [ "$HARNESS" = codex ] && ! fm_backend_t3code_codex_trusted "$PROJ_ABS"; then
+    if [ "$HARNESS" = codex ] && ! fm_backend_t3code_codex_trusted "$PROJ_ABS" "$KIND"; then
       echo "warning: could not confirm that ${CODEX_HOME:-$HOME/.codex}/config.toml trusts $PROJ_ABS; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects.\"<main checkout>\"] trust_level = \"trusted\", see docs/t3code-backend.md#setup)" >&2
     fi
     if [ "$HARNESS" = claude ] && [ "$KIND" != secondmate ] && git -C "$PROJ_ABS" ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1; then
