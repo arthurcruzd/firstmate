@@ -508,6 +508,7 @@ list_proven_isolated() {
   cat <<'EOF'
 tests/fm-arm-pretool-check.test.sh
 tests/fm-backend-herdr.test.sh
+tests/fm-backend-t3code.test.sh
 tests/fm-brief.test.sh
 tests/fm-captain-hold-lifecycle.test.sh
 tests/fm-cd-pretool-check.test.sh
@@ -526,6 +527,7 @@ tests/fm-send-settle.test.sh
 tests/fm-send-strict.test.sh
 tests/fm-spawn-batch.test.sh
 tests/fm-supervision-instructions.test.sh
+tests/fm-t3-mcp.test.sh
 tests/fm-test-run.test.sh
 tests/fm-tmux-submit-busy.test.sh
 tests/fm-transition-lib.test.sh
@@ -540,6 +542,7 @@ portable_parallel_weight_hints() {
   cat <<'EOF'
 tests/fm-arm-pretool-check.test.sh 33778
 tests/fm-backend-herdr.test.sh 36331
+tests/fm-backend-t3code.test.sh 239245
 tests/fm-brief.test.sh 10594
 tests/fm-captain-hold-lifecycle.test.sh 343658
 tests/fm-cd-pretool-check.test.sh 16801
@@ -558,6 +561,7 @@ tests/fm-send-settle.test.sh 2310
 tests/fm-send-strict.test.sh 4804
 tests/fm-spawn-batch.test.sh 2987
 tests/fm-supervision-instructions.test.sh 809
+tests/fm-t3-mcp.test.sh 57613
 tests/fm-test-run.test.sh 156781
 tests/fm-tmux-submit-busy.test.sh 2600
 tests/fm-transition-lib.test.sh 101
@@ -583,18 +587,18 @@ portable_parallel_lane_weight() {
 # its own header owns temporary dependency provisioning.
 list_portable_parallel_1() {
   cat <<'EOF'
-tests/fm-pr-merge.test.sh
-tests/fm-lint.test.sh
-tests/fm-backend-herdr.test.sh
-tests/fm-x-mode.test.sh
+tests/fm-captain-hold-lifecycle.test.sh
+tests/fm-backend-t3code.test.sh
+tests/fm-crew-state.test.sh
+tests/fm-t3-mcp.test.sh
+tests/fm-arm-pretool-check.test.sh
+tests/fm-herdr-lab.test.sh
 tests/fm-cd-pretool-check.test.sh
-tests/fm-composer-lib.test.sh
-tests/fm-send-popup-settle.test.sh
+tests/fm-grok-harness.test.sh
 tests/fm-pi-primary-types.test.sh
 tests/fm-review-diff.test.sh
-tests/fm-send-settle.test.sh
-tests/fm-ensure-agents-md.test.sh
-tests/fm-supervision-instructions.test.sh
+tests/fm-tmux-submit-busy.test.sh
+tests/fm-composer-ghost.test.sh
 tests/fm-transition-lib.test.sh
 EOF
 }
@@ -602,17 +606,19 @@ EOF
 # Portable parallel shard 2: the complementary LPT half of the proven set.
 list_portable_parallel_2() {
   cat <<'EOF'
-tests/fm-captain-hold-lifecycle.test.sh
+tests/fm-pr-merge.test.sh
+tests/fm-lint.test.sh
 tests/fm-test-run.test.sh
-tests/fm-crew-state.test.sh
-tests/fm-arm-pretool-check.test.sh
-tests/fm-herdr-lab.test.sh
+tests/fm-backend-herdr.test.sh
+tests/fm-x-mode.test.sh
 tests/fm-brief.test.sh
-tests/fm-grok-harness.test.sh
+tests/fm-composer-lib.test.sh
+tests/fm-send-popup-settle.test.sh
 tests/fm-send-strict.test.sh
 tests/fm-spawn-batch.test.sh
-tests/fm-tmux-submit-busy.test.sh
-tests/fm-composer-ghost.test.sh
+tests/fm-send-settle.test.sh
+tests/fm-ensure-agents-md.test.sh
+tests/fm-supervision-instructions.test.sh
 EOF
 }
 
@@ -718,7 +724,6 @@ tests/fm-backend-paseo-smoke.test.sh 40
 tests/fm-backend-paseo.test.sh 8000
 tests/fm-backend-t3code-live-e2e.test.sh 51
 tests/fm-backend-t3code-pr-tools-live-e2e.test.sh 52
-tests/fm-backend-t3code.test.sh 239245
 tests/fm-backend-tmux-smoke.test.sh 291
 tests/fm-backend-zellij-smoke.test.sh 23
 tests/fm-backend-zellij.test.sh 10453
@@ -887,7 +892,6 @@ tests/fm-supervision-events.test.sh 673
 tests/fm-supervision-host-attended-live-e2e.test.sh 49
 tests/fm-supervision-host-live-e2e.test.sh 75
 tests/fm-supervision-host.test.sh 1192918
-tests/fm-t3-mcp.test.sh 57613
 tests/fm-tangle-guard.test.sh 8501
 tests/fm-task-delivery.test.sh 32789
 tests/fm-task-inbox.test.sh 31965

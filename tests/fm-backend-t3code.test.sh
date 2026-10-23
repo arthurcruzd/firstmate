@@ -45,6 +45,13 @@ trap cleanup EXIT
 t3_task_id() {  # <id>
   printf '%s\n' "$1" >> "$T3_TASK_IDS"
 }
+# Concurrent runs of this suite share /tmp, so every case id carries this
+# run's tag; the EXIT cleanup then removes only directories this run created.
+T3_RUN=$(printf '%05x%04x' "$(( $$ % 1048576 ))" "$RANDOM")
+t3_uid() {  # <base> -> <base><run-tag>, recorded for cleanup
+  t3_task_id "$1$T3_RUN"
+  printf '%s' "$1$T3_RUN"
+}
 # A claude spawn writes workspace trust into the launching user's own store
 # (${CLAUDE_CONFIG_DIR:-$HOME}), so both are pinned to a throwaway home.
 SPAWN_HOME="$TMP_ROOT/user-home"
@@ -794,7 +801,7 @@ test_dispatcher_routes_and_validates_t3code_meta() {
   local state id out thread=mcp:1b6d0a1e-1e5a-4c2a-9c3b-0123456789ab
   t3_case dispatcher
   t3_world "$(t3_thread_json "$thread" completed false)"
-  id=t3taskz1
+  id=$(t3_uid t3taskz1)
   state="$CASE_DIR/state"; mkdir -p "$state"
   fm_write_meta "$state/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "worktree=$REPO" "project=$REPO" "harness=claude" "kind=scout" \
@@ -844,7 +851,7 @@ test_harness_admission_and_typing_refusals() {
 test_busy_classify_trusts_native_idle_and_busy() {
   local state id out
   t3_case busy-classify running
-  id=t3busyz1
+  id=$(t3_uid t3busyz1)
   state="$CASE_DIR/state"; mkdir -p "$state"
   out=$(t3_run '. "$0/bin/fm-busy-lib.sh"; fm_busy_classify t3code thread-live claude "$1" "$2"' "$id" "$state")
   [ "$out" = "busy t3code-native" ] || fail "a running t3code thread with no record must classify busy t3code-native, got '$out'"
@@ -1202,7 +1209,7 @@ run_t3_control() {  # <id> <verb> [args...]
 
 test_control_exit_refused_before_any_call() {
   local id out rc thread=mcp:7a1b2c3d-4e5f-4a6b-8c7d-0123456789ab
-  id="t3exitz1"
+  id=$(t3_uid t3exitz1)
   make_t3_control_task control-exit "$id" "$thread" running
   out=$(run_t3_control "$id" exit); rc=$?
   expect_code 1 "$rc" "exit on a t3code task must refuse"$'\n'"$out"
@@ -1222,7 +1229,7 @@ test_control_exit_refused_before_any_call() {
 
 test_control_relaunch_refused_before_any_dispatch() {
   local id out rc thread=mcp:8b2c3d4e-5f6a-4b7c-9d8e-123456789abc fb
-  id="t3relaunchz1"
+  id=$(t3_uid t3relaunchz1)
   make_t3_control_task control-relaunch "$id" "$thread" running
   out=$(run_t3_control "$id" relaunch --note "why"); rc=$?
   expect_code 1 "$rc" "relaunch on a t3code task must refuse"$'\n'"$out"
@@ -1244,7 +1251,7 @@ test_control_relaunch_refused_before_any_dispatch() {
 
 test_spawn_codex_refuses_tracked_codex_config() {
   local proj wt data state id out rc fb
-  id="t3codextrk1"
+  id=$(t3_uid t3codextrk1)
   t3_case spawn-codex-tracked
   proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
   fm_git_worktree "$proj" "$wt" "fm/$id"
@@ -1272,7 +1279,7 @@ test_spawn_codex_refuses_tracked_codex_config() {
 test_spawn_codex_preserves_tracked_codex_config() {
   local proj wt data state id out rc fb neutral original
   t3_require_tomllib test_spawn_codex_preserves_tracked_codex_config || return 0
-  id="t3codextrk2"
+  id=$(t3_uid t3codextrk2)
   t3_task_id "$id"
   t3_case spawn-codex-tracked-compatible
   proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
@@ -1365,7 +1372,7 @@ test_tracked_codex_overlay_recovery() {
 
 test_spawn_claude_refuses_tracked_claude_local_md() {
   local proj wt data state id out rc fb
-  id="t3claudetrk1"
+  id=$(t3_uid t3claudetrk1)
   t3_case spawn-claude-tracked
   proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
   fm_git_worktree "$proj" "$wt" "fm/$id"
@@ -1391,7 +1398,7 @@ test_spawn_claude_refuses_tracked_claude_local_md() {
 
 test_spawn_claude_refuses_worktree_symlink() {
   local proj wt data state id out rc fb target exclude
-  id=t3claudelink
+  id=$(t3_uid t3claudelink)
   t3_task_id "$id"
   t3_case spawn-claude-symlink
   proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
@@ -1439,7 +1446,8 @@ test_untracked_codex_config_is_preserved() {
 # A worker's leased worktree never shares the main checkout's untracked files,
 # so a personal Codex config there does not refuse the worker's spawn.
 test_codex_worker_ignores_untracked_config_in_main_checkout() {
-  local id=t3codexmainz out rc
+  local id out rc
+  id=$(t3_uid t3codexmainz)
   t3_case codex-main-untracked
   t3_worker_setup "$id"
   # The project tracks other .codex content, but not the config itself.
@@ -1491,7 +1499,7 @@ test_codex_cleanup_without_journal_needs_no_python() {
 
 test_spawn_leases_slot_creates_thread_and_starts_launch_turn() {
   local proj wt data state id out fb thread
-  id="t3spawnz1"
+  id=$(t3_uid t3spawnz1)
   t3_task_id "$id"
   t3_case spawn
   proj="$CASE_DIR/spawn-project"
@@ -1562,7 +1570,7 @@ test_spawn_leases_slot_creates_thread_and_starts_launch_turn() {
 test_spawn_codex_scout_writes_toml_env_with_traceparent() {
   local proj wt data state id out fb toml tp
   t3_require_tomllib test_spawn_codex_scout_writes_toml_env_with_traceparent || return 0
-  id="t3codexz1"
+  id=$(t3_uid t3codexz1)
   t3_task_id "$id"
   t3_case spawn-codex
   proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
@@ -1608,7 +1616,7 @@ test_spawn_codex_warns_unless_codex_trusts_the_project() {
   local proj wt data state id out rc fb codex_home trust linked warning='could not confirm that'
   t3_require_tomllib test_spawn_codex_warns_unless_codex_trusts_the_project || return 0
   for trust in absent project; do
-    id="t3trust$trust"
+    id=$(t3_uid "t3trust$trust")
     t3_task_id "$id"
     t3_case "spawn-codex-trust-$trust"
     proj="$CASE_DIR/spawn-project"; wt="$CASE_DIR/spawn-wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
@@ -1705,7 +1713,7 @@ EOF
 
 test_spawn_secondmate_runs_thread_in_home_with_env() {
   local id home out thread project create turn settings
-  id="t3smz1"
+  id=$(t3_uid t3smz1)
   t3_case spawn-secondmate
   home="$CASE_DIR/sm-home"
   make_t3_secondmate_home "$home" "$id"
@@ -1760,7 +1768,7 @@ test_spawn_secondmate_runs_thread_in_home_with_env() {
 test_spawn_codex_secondmate_writes_toml_env() {
   local id home out thread toml
   t3_require_tomllib test_spawn_codex_secondmate_writes_toml_env || return 0
-  id="t3smz2"
+  id=$(t3_uid t3smz2)
   t3_case spawn-secondmate-codex
   home="$CASE_DIR/sm-home-codex"
   make_t3_secondmate_home "$home" "$id"
@@ -1780,7 +1788,7 @@ test_spawn_codex_secondmate_writes_toml_env() {
 
 test_spawn_refuses_t3code_when_token_rejected() {
   local proj data state id out status fb
-  id="t3authz1"
+  id=$(t3_uid t3authz1)
   t3_case spawn-bad-token
   t3_world_set 'w.revoked = true'
   proj="$CASE_DIR/project"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
@@ -1828,7 +1836,7 @@ t3_worker_spawn() {
 
 test_spawn_refuses_launch_settings_t3_cannot_honor() {  # <config-file> <content> <expected-error>
   local file=$1 content=$2 expect=$3 id out rc
-  id="t3cfgz-$file"
+  id=$(t3_uid "t3cfgz-$file")
   t3_case "spawn-refuse-$file"
   printf '%s\n' "$content" > "$CONFIG/$file"
   t3_worker_setup "$id"
@@ -1842,7 +1850,8 @@ test_spawn_refuses_launch_settings_t3_cannot_honor() {  # <config-file> <content
 }
 
 test_spawn_refuses_raw_launch_command() {
-  local id=t3rawz out rc
+  local id out rc
+  id=$(t3_uid t3rawz)
   t3_case spawn-refuse-raw-launch
   t3_worker_setup "$id"
   out=$(t3_worker_spawn "$id" 'claude --dangerously-skip-permissions --verbose'); rc=$?
@@ -1856,7 +1865,7 @@ test_spawn_refuses_raw_launch_command() {
 
 test_spawn_abort_returns_lease_only_after_archive() {  # <ok|fail>
   local archive=$1 id out rc return_line
-  id="t3abortz$archive"
+  id=$(t3_uid "t3abortz$archive")
   t3_case "spawn-abort-$archive"
   [ "$archive" = ok ] || t3_world_set 'w.failTools = { t3_thread_organize: { code: "boom", message: "archive failed" } }'
   # A regular file where the Claude hooks go aborts the spawn after the
@@ -1881,7 +1890,7 @@ test_spawn_abort_returns_lease_only_after_archive() {  # <ok|fail>
 
 test_uncertain_thread_launch_keeps_lease() {
   local id out rc
-  id=t3uncertain
+  id=$(t3_uid t3uncertain)
   t3_case spawn-uncertain
   t3_world_set 'w.dropTools = { t3_thread_launch: 1 }'
   t3_worker_setup "$id"
@@ -1902,7 +1911,7 @@ test_spawn_never_writes_inherited_git_config() {
   local harness model id out rc settings secret=fm-inherited-secret-7f3a
   for harness in claude codex; do
     case "$harness" in claude) model=claude-sonnet-5 ;; codex) model=gpt-5.6-sol ;; esac
-    id="t3gitcfgz$harness"
+    id=$(t3_uid "t3gitcfgz$harness")
     t3_case "spawn-git-config-$harness"
     t3_worker_setup "$id"
     out=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://example.invalid/.extraheader \
@@ -1914,22 +1923,24 @@ test_spawn_never_writes_inherited_git_config() {
     fi
   done
   t3_case spawn-git-config-entries
-  t3_worker_setup t3gitcfgzentries
+  id=$(t3_uid t3gitcfgzentries)
+  t3_worker_setup "$id"
   out=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=fm-inherited-helper \
-    t3_worker_spawn t3gitcfgzentries claude --model claude-sonnet-5); rc=$?
+    t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
   expect_code 0 "$rc" "a claude spawn with an inherited credential helper should succeed"$'\n'"$out"
   settings="$WORKER_WT/.claude/settings.local.json"
   [ "$(t3_json_field "$settings" 'Object.keys(d.env).filter((k) => k.startsWith("GIT_CONFIG_")).sort().join(" ")')" = \
     "GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0" ] || fail "the env file carries exactly one Git config entry, got $(t3_json_field "$settings" 'd.env')"
   [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_COUNT')" = 1 ] || fail "the env file's Git config count is Firstmate's one hook entry"
   [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_KEY_0')" = core.hooksPath ] || fail "the env file's one Git config entry is core.hooksPath"
-  [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_VALUE_0')" = "$CASE_DIR/state/t3gitcfgzentries.git-hooks" ] \
+  [ "$(t3_json_field "$settings" 'd.env.GIT_CONFIG_VALUE_0')" = "$CASE_DIR/state/$id.git-hooks" ] \
     || fail "the env file's hook entry selects the installed hook"
   pass "fm-spawn.sh --backend t3code: inherited Git config values never reach the env file, which carries only Firstmate's hook entry"
 }
 
 test_spawn_secondmate_refuses_symlinked_claude_settings() {
-  local id=t3smlinkz home out rc target
+  local id home out rc target
+  id=$(t3_uid t3smlinkz)
   t3_case spawn-secondmate-settings-link
   home="$CASE_DIR/sm-home"
   make_t3_secondmate_home "$home" "$id"
@@ -1945,7 +1956,8 @@ test_spawn_secondmate_refuses_symlinked_claude_settings() {
 }
 
 test_launch_gate_failure_returns_lease() {
-  local id=t3gatez out rc
+  local id out rc
+  id=$(t3_uid t3gatez)
   t3_case spawn-launch-gate-down
   t3_worker_setup "$id"
   out=$(T3_FAKE_WORLD="$T3_FAKE_WORLD" FM_T3_TREEHOUSE_GET_WORLD='w.dropTools = { t3_environment_read: 1 }' \
@@ -1963,7 +1975,7 @@ test_refused_launch_turn_archives_thread_and_returns_lease() {
   local harness model id out rc
   for harness in claude codex; do
     case "$harness" in claude) model=claude-sonnet-5 ;; codex) model=gpt-5.6-sol ;; esac
-    id="t3turnz$harness"
+    id=$(t3_uid "t3turnz$harness")
     t3_case "spawn-launch-turn-refused-$harness"
     t3_world_set 'w.failTools = { t3_thread_send: { code: "turn_refused", message: "launch turn refused" } }'
     t3_worker_setup "$id"
@@ -1983,7 +1995,8 @@ test_refused_launch_turn_archives_thread_and_returns_lease() {
 }
 
 test_misbound_thread_launch_returns_lease() {
-  local id=t3misbound out rc
+  local id out rc
+  id=$(t3_uid t3misbound)
   t3_case spawn-misbound
   t3_world_set 'w.bindWorktree = "/somewhere/else"'
   t3_worker_setup "$id"
@@ -1999,7 +2012,8 @@ test_misbound_thread_launch_returns_lease() {
 # The lease is returned with --force, which discards what the slot holds, so a
 # slot holding uncommitted work gets no thread and is never returned.
 test_dirty_leased_slot_is_kept_without_a_thread() {
-  local id=t3dirtyz out rc
+  local id out rc
+  id=$(t3_uid t3dirtyz)
   t3_case spawn-dirty-slot
   t3_worker_setup "$id"
   printf 'uncommitted\n' > "$WORKER_WT/work-in-progress.txt"
@@ -2017,7 +2031,8 @@ test_dirty_leased_slot_is_kept_without_a_thread() {
 # A clean slot whose refresh fails holds nothing to lose, so it gets no thread
 # and goes back to the pool.
 test_clean_slot_refresh_failure_returns_lease() {
-  local id=t3fetchz out rc
+  local id out rc
+  id=$(t3_uid t3fetchz)
   t3_case spawn-fetch-failure
   t3_worker_setup "$id"
   git -C "$WORKER_PROJ" remote set-url origin "$CASE_DIR/missing-origin.git"
@@ -2039,7 +2054,7 @@ test_aborted_t3_secondmate_spawn_removes_home_env() {
   local harness model id home out rc settings
   for harness in claude codex; do
     case "$harness" in claude) model=claude-sonnet-5 ;; codex) model=gpt-5.6-sol ;; esac
-    id="t3smabortz$harness"
+    id=$(t3_uid "t3smabortz$harness")
     t3_case "spawn-secondmate-abort-$harness"
     t3_world_set 'w.failTools = { t3_thread_send: { code: "turn_refused", message: "launch turn refused" } }'
     home="$CASE_DIR/sm-home"
@@ -2062,7 +2077,8 @@ test_aborted_t3_secondmate_spawn_removes_home_env() {
 }
 
 test_uncertain_launch_message_keeps_task_record() {
-  local id=t3uncertainturn out rc thread
+  local id out rc thread
+  id=$(t3_uid t3uncertainturn)
   t3_case spawn-uncertain-turn
   t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
   t3_worker_setup "$id"
@@ -2083,7 +2099,7 @@ test_uncertain_launch_message_keeps_task_record() {
 
 test_scout_teardown_stops_and_archives_before_slot_return() {
   local proj wt data state id out rc neutral fb thread=mcp:2c8f0d4e-7b1a-4f3c-9e2d-abcdef012345
-  id="t3teardownz1"
+  id=$(t3_uid t3teardownz1)
   t3_case teardown running
   t3_world "$(t3_thread_json "$thread" running false)"
   proj="$CASE_DIR/project"; wt="$CASE_DIR/wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
@@ -2122,7 +2138,7 @@ test_secondmate_teardown_archives_thread_before_home_removal_without_project_del
   local home data state config id out rc thread=mcp:4e0f2a6b-9d3c-4b5e-af4f-0123456789cd archive_line harness=${1:-claude} journal='' nolsof
   t3_require_tomllib test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete || return 0
   command -v lsof >/dev/null 2>&1 || { printf 'note: %s skipped: lsof is required to prove a process left the home\n' "${FUNCNAME[0]}"; return 0; }
-  id="t3smtdz1-$harness"
+  id=$(t3_uid "t3smtdz1-$harness")
   t3_case "teardown-secondmate-$harness" running
   t3_world "$(t3_thread_json "$thread" running false)"
   home="$CASE_DIR/sm-home"; data="$CASE_DIR/data"; state="$CASE_DIR/state"; config="$CONFIG"
@@ -2191,7 +2207,7 @@ test_secondmate_teardown_archives_thread_before_home_removal_without_project_del
 
 test_teardown_refuses_when_t3_is_unreachable() {
   local proj wt data state id out rc neutral fb down thread=mcp:3d9e1f5a-8c2b-4a4d-8f3e-fedcba543210
-  id="t3teardownz2"
+  id=$(t3_uid t3teardownz2)
   t3_case teardown-unreachable running
   proj="$CASE_DIR/project"; wt="$CASE_DIR/wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
   fm_git_worktree "$proj" "$wt" "fm/$id"
@@ -2295,7 +2311,7 @@ if (o.clientRequestId !== id || !/^msg:/.test(o.messageId || "") || !o.runId || 
   t3_run 'fm_backend_t3code_send_text_submit "$1" "another" 3 0.01 0.01' "$thread" >/dev/null 2>&1
   [ ! -e "$accepted" ] || fail "an accepted outcome older than a day is pruned"
 
-  id=t3sendlost1
+  id=$(t3_uid t3sendlost1)
   make_t3_control_task send-lost-fm-send "$id" "$thread" completed
   t3_world_set 'w.dropReplyTools = { t3_thread_send: 1 }'
   out=$(FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$CTRL_STATE" FM_DATA_OVERRIDE="$CTRL_DATA" FM_CONFIG_OVERRIDE="$CONFIG" \
@@ -2314,7 +2330,8 @@ if (o.clientRequestId !== id || !/^msg:/.test(o.messageId || "") || !o.runId || 
 # fresh correlation on every plain rerun, so a lost reply must never be
 # answered with advice to resend the same text.
 test_lost_send_reply_to_secondmate_names_armed_correlation() {
-  local id=t3smlost1 out rc thread=mcp:1c2d3e4f-6a7b-4c8d-9e0f-89abcdef0123
+  local id out rc thread=mcp:1c2d3e4f-6a7b-4c8d-9e0f-89abcdef0123
+  id=$(t3_uid t3smlost1)
   make_t3_control_task send-lost-secondmate "$id" "$thread" completed
   fm_write_meta "$CTRL_STATE/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "home=$CASE_DIR/sm-home" "project=$CTRL_PROJ" \
@@ -2366,7 +2383,8 @@ test_push_wait_escalates_pending_question_once() {
 }
 
 test_answer_script_reads_and_answers_questions() {
-  local id=t3answer1 thread=mcp:7e8f9a0b-2c3d-4e4f-9a5b-456789abcdef out rc
+  local id thread=mcp:7e8f9a0b-2c3d-4e4f-9a5b-456789abcdef out rc
+  id=$(t3_uid t3answer1)
   make_t3_control_task answer "$id" "$thread" running
   FM_T3_T="$thread" t3_world_set 'w.threads[process.env.FM_T3_T].runtimeRequests = [{ id: "req-q1", kind: "user_input", status: "pending", questions: [{ id: "q1", header: "h", question: "Ship it?", options: [{ label: "yes", description: "y" }] }] }]'
   run_answer() { FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$CTRL_STATE" FM_CONFIG_OVERRIDE="$CONFIG" "$ROOT/bin/fm-t3-answer.sh" "$@" 2>&1; }
@@ -2435,7 +2453,8 @@ printf "probe=%s state=%s\n" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE"
 # returned only after the provider process T3 detaches asynchronously has
 # ended, so the next holder never shares the slot with it.
 test_pooled_t3_secondmate_home_returned_only_after_provider_exits() {
-  local id=t3smpool1 thread=mcp:9a0b1c2d-4e5f-4a6b-9c7d-6789abcdef01 root home state data fb out rc provider
+  local id thread=mcp:9a0b1c2d-4e5f-4a6b-9c7d-6789abcdef01 root home state data fb out rc provider
+  id=$(t3_uid t3smpool1)
   command -v lsof >/dev/null 2>&1 || { printf 'note: %s skipped: lsof is required to prove a process left the home\n' "${FUNCNAME[0]}"; return 0; }
   t3_case teardown-secondmate-pooled running
   t3_world "$(t3_thread_json "$thread" running false)"
@@ -2486,7 +2505,8 @@ TH
 # A T3 secondmate torn down as the child of another secondmate goes through
 # the same shutdown barrier before its own home is removed.
 test_nested_t3_secondmate_home_reaped_before_removal() {
-  local id=t3smnestz child=t3smnestzchild thread=mcp:1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b child_thread=mcp:6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d
+  local id child=t3smnestzchild thread=mcp:1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b child_thread=mcp:6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d
+  id=$(t3_uid t3smnestz)
   local home child_home data state out rc h
   command -v lsof >/dev/null 2>&1 || { printf 'note: %s skipped: lsof is required to prove a process left the home\n' "${FUNCNAME[0]}"; return 0; }
   t3_case teardown-secondmate-nested running
@@ -2582,7 +2602,8 @@ fm_secondmate_liveness_relaunch "$1" smgone && echo relaunched=yes || echo "rela
 # Treehouse handing back the spawning project itself is refused by the
 # isolation guard; the abort then leaves that checkout and its lease alone.
 test_spawn_rejected_lease_is_neither_cleaned_nor_returned() {
-  local id=t3rejectz out rc
+  local id out rc
+  id=$(t3_uid t3rejectz)
   t3_case spawn-rejected-lease
   t3_worker_setup "$id"
   mkdir -p "$WORKER_PROJ/.claude"
@@ -2603,7 +2624,7 @@ test_spawn_rejected_lease_is_neither_cleaned_nor_returned() {
 # project instructions that teardown leaves in the slot.
 test_teardown_keeps_tracked_claude_local_md() {
   local proj wt data state id out rc neutral fb thread=mcp:5a9b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d
-  id="t3teardownz2"
+  id=$(t3_uid t3teardownz2)
   t3_case teardown-tracked-claude-local running
   t3_world "$(t3_thread_json "$thread" running false)"
   proj="$CASE_DIR/project"; wt="$CASE_DIR/wt"; data="$CASE_DIR/data"; state="$CASE_DIR/state"
