@@ -1,0 +1,88 @@
+## S8: teardown of both live T3 tasks archives their threads and returns their Treehouse slots (commit c810305b)
+--- before: treehouse status for labproj
+
+base  main  (repository default)
+1     leased       <lab>/pool/.treehouse/labproj-e3b4dd/1/labproj  (detached)  (held by c1)
+                   2.1.309 (60091), paper (60146)
+2     leased       <lab>/pool/.treehouse/labproj-e3b4dd/2/labproj  (detached)  (held by x1)
+                   paper (50407)
+
+== c1 (thread mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131)
+$ FM_HOME=<lab>/home bin/fm-teardown.sh c1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+fm-captain-hold: origin c1 has no completed captain-call inventory
+REFUSED: scout task c1 has not passed the captain-call completion gate.
+Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown.
+exit=1
+(the completion gate asks for the captain-call record, as for any backend; recording none and retrying)
+$ FM_HOME=<lab>/home bin/fm-captain-hold.sh complete c1 --none
+fm-captain-hold: origin c1 still has open captain decisions in its status stream; hold a captain task for what remains, or answer them, before attesting --none
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+fm-captain-hold: origin c1 has no completed captain-call inventory
+REFUSED: scout task c1 has not passed the captain-call completion gate.
+Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown.
+exit=1
+--- thread read back from the lab T3 after teardown:
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:29:53.630Z"}
+--- state/c1.* files left: 7
+
+== x1 (thread mcp:b693756f-9827-40c3-a6da-fe16d835447b)
+$ FM_HOME=<lab>/home bin/fm-teardown.sh x1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+fm-captain-hold: origin x1 has no completed captain-call inventory
+REFUSED: scout task x1 has not passed the captain-call completion gate.
+Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown.
+exit=1
+(the completion gate asks for the captain-call record, as for any backend; recording none and retrying)
+$ FM_HOME=<lab>/home bin/fm-captain-hold.sh complete x1 --none
+complete: x1 captain-call inventory reviewed
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+teardown: reaping leaked worktree process(es) for x1: 50407
+
+🌳 Worktree returned to pool.
+teardown x1 complete (window mcp:b693756f-9827-40c3-a6da-fe16d835447b, worktree <lab>/pool/.treehouse/labproj-e3b4dd/2/labproj)
+Backlog: x1 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+--- thread read back from the lab T3 after teardown:
+{"ok":true,"threadId":"mcp:b693756f-9827-40c3-a6da-fe16d835447b","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/2/labproj","turnAt":"2026-10-23T16:27:29.114Z"}
+--- state/x1.* files left: 0
+
+--- after: treehouse status for labproj
+
+base  main  (repository default)
+1     leased       <lab>/pool/.treehouse/labproj-e3b4dd/1/labproj  (detached)  (held by c1)
+                   2.1.309 (60091), paper (60146)
+2     available    <lab>/pool/.treehouse/labproj-e3b4dd/2/labproj  (detached)
+
+== c1: the worker's last status is 'blocked' (it asked whether to run the lab sleeps), so the generic completion gate holds it. Firstmate answers through fm-send, the worker finishes, and teardown proceeds.
+$ FM_HOME=<lab>/home bin/fm-send.sh c1 "Answer to your blocked status: do not run any of the sleeps. Move inbox 001-003 into handled/, then append one done status line and stop."
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+exit=0
+active run after the steer: run:thread:mcp%3Af74c1f83-448a-43ae-8ccc-b6fccfb96131:ordinal:5
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","runId":"run:thread:mcp%3Af74c1f83-448a-43ae-8ccc-b6fccfb96131:ordinal:5","status":"completed","timedOut":false}
+wait exit=0
+--- state/c1.status tail:
+resolved [at=1792773159]: firstmate answered the blocked line: skip the sleeps; inbox 001-004 moved to handled
+done [at=1792773159]: README first line is '# labproj' (report at data/c1/report.md); sleep checks skipped per firstmate; inbox cleared
+$ FM_HOME=<lab>/home bin/fm-captain-hold.sh complete c1 --none
+complete: c1 captain-call inventory reviewed
+$ FM_HOME=<lab>/home bin/fm-teardown.sh c1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+teardown: reaping leaked worktree process(es) for c1: 60091 60146
+
+🌳 Worktree returned to pool.
+teardown c1 complete (window mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131, worktree <lab>/pool/.treehouse/labproj-e3b4dd/1/labproj)
+Backlog: c1 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move c1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+--- thread read back from the lab T3 after teardown:
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":true,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:32:41.082Z"}
+--- state/c1.* files left: 0
+
+--- after both teardowns: treehouse status for labproj
+
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/labproj-e3b4dd/1/labproj  (detached)
+2     available    <lab>/pool/.treehouse/labproj-e3b4dd/2/labproj  (detached)
+--- every T3 thread on the lab server:
+projects=1 unarchived-listed threads=0
+(T3's t3_thread_list returns no thread for the project after teardown: both archived threads drop out of the live list, and each per-thread state read above reports archived:true with no active run.)

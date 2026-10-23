@@ -1,0 +1,69 @@
+## S4: fm-approval-failover.sh apply on a LIVE t3code Claude task while its T3 turn is running refuses before any change (commit c810305b)
+--- steer c1 into a long foreground command so a T3 run is active
+$ FM_HOME=<lab>/home bin/fm-send.sh c1 "Lab check: run exactly `python3 -c 'import time; time.sleep(150)'` in the foreground with your shell tool (timeout 200000 ms), then append a working status line saying it finished. Nothing else."
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+--- before failover:
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Af74c1f83-448a-43ae-8ccc-b6fccfb96131:ordinal:2","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:25:45.378Z"}
+config entries: backend codex-approval-mode t3code-token 
+state/c1.meta sha: 6b2bfd09e926
+worker's python sleep(150) processes: 2
+$ FM_HOME=<lab>/home bin/fm-approval-failover.sh apply c1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code already runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=auto; approve the pending request in T3 Code itself or choose another backend; nothing changed
+exit=1
+--- after failover (3s later):
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Af74c1f83-448a-43ae-8ccc-b6fccfb96131:ordinal:2","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:25:45.378Z"}
+config entries: backend codex-approval-mode t3code-token 
+config/claude-permission-mode exists: no
+stray .approval-failover temp files: 0
+state/c1.meta sha: 6b2bfd09e926
+worker's python sleep(150) processes: 2
+
+## Contrast: the same call with the PRE-FIX script (git archive of parent commit 2b496c90) against the same live task, while its run is still active
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Af74c1f83-448a-43ae-8ccc-b6fccfb96131:ordinal:2","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:25:45.378Z"}
+$ FM_HOME=<lab>/home <pre-fix-code>/bin/fm-approval-failover.sh apply c1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+saved config/claude-permission-mode=auto; approvals use a model reviewer
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+interrupt-delivered c1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task c1 runs on the t3code backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch
+error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control
+exit=1
+--- after the pre-fix call:
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:26:28.388Z"}
+config/claude-permission-mode: auto
+worker's python sleep(150) processes: 0
+--- consequence: a fresh t3code Claude spawn in this home is now refused by the saved file
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=auto; remove that file or choose another backend
+fm-spawn.sh c9 ... exit=1
+(lab cleanup: removed the pre-fix call's config/claude-permission-mode)
+
+## S4 (codex): fm-approval-failover.sh apply on the live t3code Codex task x1 refuses before any change
+--- before:
+{"ok":true,"threadId":"mcp:b693756f-9827-40c3-a6da-fe16d835447b","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Ab693756f-9827-40c3-a6da-fe16d835447b:ordinal:1","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/2/labproj","turnAt":"2026-10-23T16:27:02.467Z"}
+config: backend codex-approval-mode t3code-token ; codex-approval-mode=bypass
+(config/codex-approval-mode parked outside the home so failover's own 'already exists' check cannot be what refuses)
+$ FM_HOME=<lab>/home bin/fm-approval-failover.sh apply x1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code already runs codex at T3's full-access runtime mode and cannot honor config/codex-approval-mode=approve-for-me; approve the pending request in T3 Code itself or choose another backend; nothing changed
+exit=1
+--- after:
+{"ok":true,"threadId":"mcp:b693756f-9827-40c3-a6da-fe16d835447b","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Ab693756f-9827-40c3-a6da-fe16d835447b:ordinal:1","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/2/labproj","turnAt":"2026-10-23T16:27:02.467Z"}
+config/codex-approval-mode exists: no
+config entries: backend t3code-token 
+--- wait for x1's own turn to end on its own:
+{"ok":true,"threadId":"mcp:b693756f-9827-40c3-a6da-fe16d835447b","runId":"run:thread:mcp%3Ab693756f-9827-40c3-a6da-fe16d835447b:ordinal:1","status":"completed","timedOut":false}
+exit=0
+--- state/x1.status (written by the T3 Codex worker)
+done [at=1792772843]: README first line is # labproj; report saved, completion gate could not resolve data directory

@@ -1,0 +1,44 @@
+# Default path: two fresh lab homes with NO config/backend, each holding a valid credential for the live lab T3 v0.1.0 server (config/t3code-token) and config/codex-approval-mode=approve-for-me, same fixture project.
+# Branch code (c810305b) runs against <lab>/nobb; base code (af1c6817, git archive) runs against <lab>/nobm. The same driver script (<lab>/tools/default-path.sh) runs both; outputs are normalized for code root and home path, then diffed.
+# This host has no tmux on PATH, and bin/fm-herdr-lab.sh prepare refuses ('fleet-state tripwire requires exactly one running default session'), so the default backend stops at tmux on both trees.
+$ diff <base output> <branch output>
+(no differences: IDENTICAL)
+
+## branch output (normalized):
+config: codex-approval-mode t3code-token  (no config/backend; codex-approval-mode=approve-for-me; a valid t3code-token credential is present but must not select T3)
+== A. codex scout spawn
+exit=1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <home>
+<code>/bin/backends/tmux.sh: line 97: tmux: command not found
+<code>/bin/backends/tmux.sh: line 119: tmux: command not found
+<code>/bin/backends/tmux.sh: line 123: tmux: command not found
+state files for d1: 0
+== B. claude scout spawn
+exit=1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <home>
+<code>/bin/backends/tmux.sh: line 97: tmux: command not found
+<code>/bin/backends/tmux.sh: line 119: tmux: command not found
+<code>/bin/backends/tmux.sh: line 123: tmux: command not found
+state files for d2: 0
+== C. managed approval failover on a recorded local tmux Claude task (hand-written record: harness=claude approval_mode=bypass, no backend line)
+exit=1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <home>
+saved config/claude-permission-mode=auto; approvals use a model reviewer
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <home>
+REFUSED: task f1 has a missing, empty, or ambiguous worktree identity; preserving task state.
+error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control
+config/claude-permission-mode=auto
+== D. same with a Codex record
+exit=1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <home>
+saved config/codex-approval-mode=approve-for-me; approvals use a model reviewer
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <home>
+REFUSED: task f2 has a missing, empty, or ambiguous worktree identity; preserving task state.
+error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control
+config/codex-approval-mode=approve-for-me
+
+## every project on the lab T3 server after both default-home runs (read-only t3_project_list/t3_thread_list probe, <lab>/tools/t3probe.mjs):
+{"projectId": "mcp:2da55f72-9894-4873-982c-5ef88fff394a", "workspaceRoot": "<lab>/home/projects/labproj", "threads": 2}
+projects=1; projects rooted in the no-backend homes (nobb, nobm): 0
+
+Result: spawn and failover output, exit status, and state are identical on branch and base for homes without config/backend, including with codex-approval-mode=approve-for-me present: the new t3code-only spawn refusal and failover refusal never fire there, and main's failover still saves the fallback and proceeds to fm-control. No T3 project or thread exists for either no-backend home.

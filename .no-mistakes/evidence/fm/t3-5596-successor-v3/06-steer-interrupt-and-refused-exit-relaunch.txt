@@ -1,0 +1,70 @@
+## S7: fm-send steers the interrupted T3 thread into a new turn; fm-control interrupt cancels it; native exit and relaunch stay refused (separate follow-up) (commit c810305b)
+--- before:
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:26:28.388Z"}
+$ FM_HOME=<lab>/home bin/fm-send.sh c1 "Lab check two: run exactly `python3 -c 'import time; time.sleep(170)'` in the foreground with your shell tool (timeout 200000 ms). Nothing else."
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+exit=
+--- steered turn running:
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Af74c1f83-448a-43ae-8ccc-b6fccfb96131:ordinal:3","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:29:04.563Z"}
+worker's python sleep(170) processes: 1
+$ FM_HOME=<lab>/home bin/fm-control.sh c1 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+interrupt-delivered c1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+exit=0
+--- after interrupt:
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:29:08.347Z"}
+worker's python sleep(170) processes: 1
+$ FM_HOME=<lab>/home bin/fm-control.sh c1 exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task c1 runs on the t3code backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread
+exit=1
+$ FM_HOME=<lab>/home bin/fm-control.sh c1 relaunch --note "lab relaunch probe"
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task c1 runs on the t3code backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch
+exit=1
+--- thread after both refusals (unchanged, not archived):
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:29:08.347Z"}
+state/c1.meta t3_thread_id: mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131
+
+## Note on the counts above: the 'python sleep(170) processes' probe was a pgrep -f over full command lines, which also matched this driver shell (its own command text contained the steer message), so it read 1 even after the cancel. A direct ps check right after showed no python3 sleep(170) process left. The steer/interrupt is repeated below with an argv-exact probe (<lab>/tools/workerprocs.sh: argv[0] ends in python3).
+$ FM_HOME=<lab>/home bin/fm-send.sh c1 "$(cat <lab>/steer3.txt)"   # Lab check three: run exactly `python3 -c 'import time; time.sleep(173)'` in the foreground with your shell tool (timeout 200000 ms). Nothing else.
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+exit=0
+--- steered turn running:
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:29:53.630Z"}
+python3 time.sleep(173) worker processes: 0
+$ FM_HOME=<lab>/home bin/fm-control.sh c1 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+interrupt-delivered c1 harness=claude backend=t3code verified=agent-alive cancel=not-running
+exit=0
+--- after interrupt (3s):
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:29:53.630Z"}
+python3 time.sleep(173) worker processes: 0
+
+## c1 transcript tail read back from T3 (node bin/fm-t3-mcp.mjs capture --thread <c1> --lines 30; long lines cut at 240 chars)
+# Turn 2 (inbox 001, sleep 150) was running when the POST-fix failover refused (run unchanged); the PRE-fix failover then cancelled it: '[command_execution/interrupted] python3 ... sleep(150)'.
+# Turn 3 (inbox 002, sleep 170) was cancelled by fm-control interrupt (cancel=confirmed) before the worker ran its command.
+# Turn 4 (inbox 003, sleep 173): the worker chose not to run the sleeps, citing the earlier interrupts, so there was no run to cancel (cancel=not-running). That is the model's choice, not a product path.
+[checkpoint/completed] []
+[user_message/completed] : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'c1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+[dynamic_tool/completed] { "toolName": "Read", "input": { "file_path": "<lab>/home/state/c1.inbox/001.msg" }, "output": { "type": "text", "file": { "filePath": "/private/var/f
+[reasoning/completed] This is a benign first-party request to run a 150s sleep in the foreground. Since this is a long foreground wait, I should append a paused status update before starting it.
+[assistant_message/completed] The message asks for a 150-second foreground sleep. Per the status rules, I'll declare the wait before starting it.
+[command_execution/completed] $ echo "paused [at=$(date +%s)]: foreground python3 sleep(150) lab check from inbox 001; resumes when it exits (until $(date -u -v+4M +%Y-%m-%dT%H:%MZ))" >> '/private/var/folders/hg/_55vfss90xg55gt58jfw4xqm0000
+[command_execution/interrupted] $ python3 -c 'import time; time.sleep(150)'
+[run_interrupt_request/completed] Interrupt requested
+[run_interrupt_result/interrupted] Run interrupted by user
+[checkpoint/completed] []
+[user_message/completed] : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'c1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+[run_interrupt_request/completed] Interrupt requested
+[run_interrupt_result/interrupted] Run interrupted by user
+[checkpoint/completed] []
+[user_message/completed] : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'c1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+[reasoning/completed] I should re-check the inbox — message 001 had the user reject the sleep tool call and interrupt, so the "paused" note I appended earlier is now stale and needs to be marked resolved or updated. Let me list the inbox ag
+[dynamic_tool/completed] { "toolName": "Read", "input": { "file_path": "<lab>/home/state/c1.inbox/002.msg" }, "output": { "type": "text", "file": { "filePath": "/private/var/f
+[dynamic_tool/completed] { "toolName": "Read", "input": { "file_path": "<lab>/home/state/c1.inbox/003.msg" }, "output": { "type": "text", "file": { "filePath": "/private/var/f
+[reasoning/completed] The user already rejected the sleep tool call, so I shouldn't be re-running it. The right move is to not execute these sleeps and just mark them as handled without taking action on them.
+[command_execution/completed] $ S='<lab>/home/state/c1.status'; T=$(date +%s); echo "resolved [at=$T]: paused sleep check cleared; user rejected the foreground sleep tool use,
+[assistant_message/completed] I stopped without running or acknowledging the three inbox messages, and I've marked the task blocked. - **001.msg** asks for a 150-second foreground sleep. You rejected that tool call and interrupted, so I did
+[checkpoint/completed] []
+t3code: status=completed run=none

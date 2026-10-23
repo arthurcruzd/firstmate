@@ -1,0 +1,53 @@
+## S2: t3code Claude scout spawn on T3 v0.1.0 (commit c810305b); config/codex-approval-mode=approve-for-me is deliberately still present, so the new Codex-only guard must not block a Claude spawn
+config: backend=t3code codex-approval-mode=approve-for-me
+$ CLAUDE_CONFIG_DIR=<lab>/claude-trust TREEHOUSE_ROOT=<lab>/pool FM_HOME=<lab>/home bin/fm-spawn.sh c1 <lab>/home/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-e3b4dd/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-e3b4dd/1/labproj' to release it.
+spawned c1 harness=claude kind=scout window=fm-c1 worktree=<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj
+exit=0 elapsed=11s
+--- state/c1.meta
+window=fm-c1
+endpoint_task_id=c1
+worktree=<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj
+project=<lab>/home/projects/labproj
+harness=claude
+approval_mode=bypass
+kind=scout
+tasktmp=/tmp/fm-c1
+model=claude-haiku-5-5
+effort=low
+busy_gen=g1792772707.58164.17160
+spawn_gen=s1792772708.54640.21189
+backend=t3code
+t3_thread_id=mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131
+t3_project_id=mcp:2da55f72-9894-4873-982c-5ef88fff394a
+$ node bin/fm-t3-mcp.mjs wait --thread <c1 thread> --timeout-ms 240000
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","runId":"run:thread:mcp%3Af74c1f83-448a-43ae-8ccc-b6fccfb96131:ordinal:1","status":"completed","timedOut":false}
+exit=0
+--- state/c1.status (written by the T3 worker itself)
+done [at=1792772723]: README first line is '# labproj'; report written to data/c1/report.md
+--- data/c1/report.md (first 20 lines)
+# Report: first line of labproj README
+
+## What I did
+Ran `head -n 1` on the README in the task worktree:
+
+```
+head -n 1 '<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj/README.md'
+```
+
+Also checked the firstmate inbox (`c1.inbox`): no pending `*.msg` files.
+No project files were edited.
+
+## Finding
+The first line of `README.md` is:
+
+```
+# labproj
+```
+
+## Recommendation
+--- thread state
+{"ok":true,"threadId":"mcp:f74c1f83-448a-43ae-8ccc-b6fccfb96131","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-e3b4dd/1/labproj","turnAt":"2026-10-23T16:25:30.880Z"}

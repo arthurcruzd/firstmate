@@ -1,0 +1,48 @@
+## S3: t3code Codex spawn with config/codex-approval-mode=approve-for-me refuses before any mutation (commit c810305b)
+config: backend=t3code codex-approval-mode=approve-for-me
+--- before:
+state files: 
+data entries: 
+config entries: backend codex-approval-mode t3code-token 
+pool entries (depth<=3): 0
+/tmp/fm-xr1 dirs: 0
+labproj git worktrees: 1
+T3 projects=0 threads=0
+$ CODEX_HOME=<lab>/codex-cfg CLAUDE_CONFIG_DIR=<lab>/claude-trust TREEHOUSE_ROOT=<lab>/pool FM_HOME=<lab>/home bin/fm-spawn.sh xr1 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code runs codex at T3's full-access runtime mode and cannot honor config/codex-approval-mode=approve-for-me; remove that file or choose another backend
+exit=1
+--- after:
+state files: 
+data entries: 
+config entries: backend codex-approval-mode t3code-token 
+pool entries (depth<=3): 0
+/tmp/fm-xr1 dirs: 0
+labproj git worktrees: 1
+T3 projects=0 threads=0
+--- claude-trust store written by the refused codex spawn: 0 files
+## S3 control: the same t3code home with config/codex-approval-mode=bypass (explicit) launches the Codex scout (commit c810305b)
+config: backend=t3code codex-approval-mode=bypass
+$ CODEX_HOME=<lab>/codex-cfg TREEHOUSE_ROOT=<lab>/pool FM_HOME=<lab>/home bin/fm-spawn.sh x1 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-e3b4dd/2/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-e3b4dd/2/labproj' to release it.
+spawned x1 harness=codex kind=scout window=fm-x1 worktree=<lab>/pool/.treehouse/labproj-e3b4dd/2/labproj
+exit=0 elapsed=11s
+--- state/x1.meta
+window=fm-x1
+endpoint_task_id=x1
+worktree=<lab>/pool/.treehouse/labproj-e3b4dd/2/labproj
+project=<lab>/home/projects/labproj
+harness=codex
+approval_mode=bypass
+kind=scout
+tasktmp=/tmp/fm-x1
+model=gpt-6-luna
+effort=low
+spawn_gen=s1792772816.42355.30184
+backend=t3code
+t3_thread_id=mcp:b693756f-9827-40c3-a6da-fe16d835447b
+t3_project_id=mcp:2da55f72-9894-4873-982c-5ef88fff394a
