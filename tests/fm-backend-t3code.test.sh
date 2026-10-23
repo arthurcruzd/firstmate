@@ -654,8 +654,10 @@ test_frozen_flush_keeps_the_next_generation_arrival() {
     printf "%s\n" "$old" > "$1/.subsuper-escalations.since"
     { printf "since=%s\n" "$old"; tail -n +2 "$1/.subsuper-escalations.frozen"; } > "$1/frozen.tmp"
     mv "$1/frozen.tmp" "$1/.subsuper-escalations.frozen"
+    real_now=$(declare -f _now)
+    _now() { echo $(( $(date +%s) - 1740 )); }
     escalate_add "$1" "event-two"
-    printf "%s\n" "$(( $(_now) - 1740 ))" > "$1/.subsuper-escalations.next-since"
+    eval "$real_now"
     escalate_add "$1" "event-three"
     escalate_flush "$1"; printf "second=%s\n" "$?"
     printf "age=%s\n" "$(_oldest_line_age "$1/.subsuper-escalations")"
