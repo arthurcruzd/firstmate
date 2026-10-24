@@ -61,14 +61,16 @@ fs.writeFileSync(file, JSON.stringify(w));
 }
 
 # t3_fake_t3_cli <dir>: a fake `t3` CLI whose pairing create prints the code
-# the fake server accepts and logs its arguments to <dir>/t3-cli.log.
+# the fake server accepts (PAIR-OK when scoped, PAIR-OK-STD for T3's standard
+# scope set) and logs its arguments to <dir>/t3-cli.log.
 t3_fake_t3_cli() {
   local dir=$1
   mkdir -p "$dir"
   cat > "$dir/t3" <<SH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> '$dir/t3-cli.log'
-printf '{"credential":"PAIR-OK","expiresAt":"later"}\n'
+case " \$* " in *" --scope "*) code=PAIR-OK ;; *) code=PAIR-OK-STD ;; esac
+printf '{"credential":"%s","expiresAt":"later"}\n' "\$code"
 SH
   chmod +x "$dir/t3"
   printf '%s\n' "$dir/t3"

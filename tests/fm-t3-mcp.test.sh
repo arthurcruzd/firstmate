@@ -52,9 +52,52 @@ test_login_writes_private_credential_and_never_prints_token() {
   assert_grep '"origin":"'"$T3_FAKE_URL"'"' "$CRED" "credential must record the origin"
   assert_grep "auth pairing create --base-dir $TMP_ROOT/t3home --scope orchestration:read --scope orchestration:operate --ttl 2m" "$TMP_ROOT/cli/t3-cli.log" \
     "sign-in must mint a two-minute pairing code scoped to orchestration read and operate"
+  assert_grep '"scope":"orchestration:read orchestration:operate"' "$CRED" "a server that accepts the narrow scopes gets a narrow credential"
   assert_grep '"access":"full-access"' "$T3_FAKE_LOG" "the OAuth decision must carry the full-access ceiling"
   assert_grep '"pkce":true' "$T3_FAKE_LOG" "the token exchange must prove the PKCE verifier"
   pass "fm-t3-mcp login: PKCE sign-in writes a 0600 credential with the environment id and prints no secret"
+}
+
+test_login_standard_scopes_on_0_1_2() {
+  local cli home
+  t3_fake_case "$TMP_ROOT/cases/login-standard" '{"standardScopesOnly":true}'
+  home="$TMP_ROOT/std-home"
+  mkdir -p "$home/.t3/userdata"
+  rm -rf "$TMP_ROOT/cli-std"; cli=$(t3_fake_t3_cli "$TMP_ROOT/cli-std")
+  rm -f "$CRED"
+  OUT=$(HOME="$home" node "$HELPER" login --url "$T3_FAKE_URL" --access full-access --t3 "$cli" --token-file "$CRED" 2>"$TMP_ROOT/stderr"); RC=$?
+  ERR=$(cat "$TMP_ROOT/stderr")
+  expect_code 0 "$RC" "an unknown-version server's scope refusal should retry with T3's standard scopes: $ERR"
+  assert_equals 2 "$(grep -c 'auth pairing create' "$TMP_ROOT/cli-std/t3-cli.log")" "the refusal costs exactly one retry"
+  assert_equals 1 "$(grep 'auth pairing create' "$TMP_ROOT/cli-std/t3-cli.log" | grep -vc -- '--scope')" "the retry mints without --scope"
+  assert_grep '"scope":"orchestration:read orchestration:operate standard:fake"' "$CRED" "the credential records the scope T3 granted"
+  assert_equals "orchestration:read orchestration:operate standard:fake" "$(field "$OUT" scope)" "login reports the granted scope"
+  assert_not_contains "$OUT$ERR" "PAIR-OK" "login must never print either pairing code"
+  assert_not_contains "$OUT$ERR" "tok-" "login must never print the access token"
+
+  printf '{"origin":"%s/","serverVersion":"0.1.2"}\n' "$T3_FAKE_URL" > "$home/.t3/userdata/server-runtime.json"
+  rm -rf "$TMP_ROOT/cli-std"; cli=$(t3_fake_t3_cli "$TMP_ROOT/cli-std")
+  rm -f "$CRED"
+  OUT=$(HOME="$home" node "$HELPER" login --url "$T3_FAKE_URL" --access full-access --t3 "$cli" --token-file "$CRED" 2>"$TMP_ROOT/stderr"); RC=$?
+  expect_code 0 "$RC" "a known 0.1.2 server should sign in with T3's standard scopes: $(cat "$TMP_ROOT/stderr")"
+  assert_equals 1 "$(grep -c 'auth pairing create' "$TMP_ROOT/cli-std/t3-cli.log")" "a known 0.1.2 server wastes no pairing code"
+  assert_no_grep "--scope" "$TMP_ROOT/cli-std/t3-cli.log" "a known 0.1.2 server gets a code without --scope"
+  assert_grep '"scope":"orchestration:read orchestration:operate standard:fake"' "$CRED" "the credential records the standard scope set"
+
+  # shellcheck disable=SC2016
+  assert_equals "false true true false false" "$(HOME="$home" FM_T3_HELPER="$HELPER" FM_T3_ORIGIN="$T3_FAKE_URL" node --input-type=module -e '
+    import { writeFileSync } from "node:fs";
+    const { standardScopesKnown } = await import(process.env.FM_T3_HELPER);
+    const origin = process.env.FM_T3_ORIGIN;
+    const file = `${process.env.HOME}/.t3/userdata/server-runtime.json`;
+    const out = [];
+    for (const [v, o] of [["0.1.1", origin], ["0.1.2", origin], ["0.2.0", origin], ["0.1.2-nightly.1", origin], ["0.1.2", "http://127.0.0.1:1"]]) {
+      writeFileSync(file, JSON.stringify({ origin: o, serverVersion: v }));
+      out.push(standardScopesKnown(origin));
+    }
+    console.log(out.join(" "));')" "only a matching runtime file at 0.1.2 or later skips the narrow attempt"
+  t3_fake_credential "$CRED"
+  pass "fm-t3-mcp login: T3 0.1.2's full-access approval gets T3's standard scopes, by version or by one retry on its refusal"
 }
 
 test_login_origin_defaults() {
@@ -509,6 +552,7 @@ test_runs_through_a_symlinked_path() {
 
 t3_fake_start "$TMP_ROOT/server"
 test_login_writes_private_credential_and_never_prints_token
+test_login_standard_scopes_on_0_1_2
 test_login_origin_defaults
 test_login_refuses_other_ceilings
 test_status_gate_and_protocol

@@ -15,8 +15,12 @@
 //     operator's own `t3 auth pairing create --scope orchestration:read
 //     --scope orchestration:operate`, spends it on T3's OAuth decision API at
 //     the chosen ceiling, exchanges the code with a PKCE verifier, and writes
-//     the credential, the server's origin, its environment id, and its version
-//     to the token file (mode 0600). The token and pairing code are never
+//     the credential, the scope T3 granted, the server's origin, its
+//     environment id, and its version to the token file (mode 0600). T3 0.1.2+
+//     approves full access only from a code carrying its standard scope set, so
+//     against such a server (known from the matching runtime file's
+//     serverVersion, or from that exact decision refusal, retried once) the
+//     code is minted without --scope. The token and pairing code are never
 //     printed. Only the full-access ceiling is accepted. The origin defaults to
 //     $FM_T3CODE_ORIGIN, else the `origin` in
 //     ~/.t3/userdata/server-runtime.json.
@@ -186,12 +190,16 @@ export function tokenFile(flags, env = process.env) {
   return path.join(config, "t3code-token");
 }
 
+function runtimeFile(env) {
+  return path.join(env.HOME || os.homedir(), ".t3", "userdata", "server-runtime.json");
+}
+
 // The sign-in origin: --url, else $FM_T3CODE_ORIGIN, else the origin the
 // local T3 server writes to its runtime file.
 export function loginOrigin(flags, env = process.env) {
   if (flags.url) return normalizeOrigin(flags.url);
   if (env.FM_T3CODE_ORIGIN) return normalizeOrigin(env.FM_T3CODE_ORIGIN);
-  const runtime = path.join(env.HOME || os.homedir(), ".t3", "userdata", "server-runtime.json");
+  const runtime = runtimeFile(env);
   let origin = "";
   try {
     origin = JSON.parse(readFileSync(runtime, "utf8")).origin || "";
@@ -200,6 +208,26 @@ export function loginOrigin(flags, env = process.env) {
   }
   if (!origin) usage(`no T3 origin: pass --url, set FM_T3CODE_ORIGIN, or start T3 Code so it writes ${runtime}`);
   return normalizeOrigin(origin);
+}
+
+// True when the local runtime file describes the server at <origin> and its
+// serverVersion is at least 0.1.2, the release whose full-access approval
+// needs a pairing code with T3's standard scope set. A prerelease of 0.1.2
+// counts as older; the decision-refusal retry covers it.
+export function standardScopesKnown(origin, env = process.env) {
+  const runtime = runtimeFile(env);
+  let info;
+  try {
+    info = JSON.parse(readFileSync(runtime, "utf8"));
+    if (new URL(info.origin).origin !== origin) return false;
+  } catch {
+    return false;
+  }
+  const m = /^(\d+)\.(\d+)\.(\d+)(-)?/.exec(String(info.serverVersion ?? ""));
+  if (!m) return false;
+  const [major, minor, patch] = m.slice(1, 4).map(Number);
+  const cmp = major - 0 || minor - 1 || patch - 2;
+  return cmp > 0 || (cmp === 0 && !m[4]);
 }
 
 function normalizeOrigin(raw) {
@@ -496,21 +524,35 @@ async function login(flags) {
     state,
     resource,
   };
-  const pairingArgs = ["auth", "pairing", "create"];
-  if (flags["base-dir"]) pairingArgs.push("--base-dir", flags["base-dir"]);
-  for (const scope of SCOPES) pairingArgs.push("--scope", scope);
-  pairingArgs.push("--ttl", "2m", "--label", `${label}-mcp-approval`, "--json");
-  let pairing;
-  try {
-    pairing = JSON.parse(execFileSync(t3, pairingArgs, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-  } catch (err) {
-    throw new Refusal("pairing_failed", `could not mint a pairing code with '${t3} auth pairing create': ${err.status !== undefined ? `exit ${err.status}` : err.message}`, 1);
+  // Narrow scopes where T3 allows them; T3's standard set where it requires it.
+  const approve = async (scoped) => {
+    const pairingArgs = ["auth", "pairing", "create"];
+    if (flags["base-dir"]) pairingArgs.push("--base-dir", flags["base-dir"]);
+    if (scoped) for (const scope of SCOPES) pairingArgs.push("--scope", scope);
+    pairingArgs.push("--ttl", "2m", "--label", `${label}-mcp-approval`, "--json");
+    let pairing;
+    try {
+      pairing = JSON.parse(execFileSync(t3, pairingArgs, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    } catch (err) {
+      throw new Refusal("pairing_failed", `could not mint a pairing code with '${t3} auth pairing create': ${err.status !== undefined ? `exit ${err.status}` : err.message}`, 1);
+    }
+    if (!pairing?.credential) throw new Refusal("pairing_failed", "t3 auth pairing create returned no credential", 1);
+    return postJson(`${origin}/oauth/mcp/decision`, {
+      authorization,
+      decision: { _tag: "pairing-code", access, code: pairing.credential },
+    });
+  };
+  let decision;
+  if (standardScopesKnown(origin)) {
+    decision = await approve(false);
+  } else {
+    try {
+      decision = await approve(true);
+    } catch (err) {
+      if (!(err instanceof Refusal && /cannot grant this access/i.test(err.message))) throw err;
+      decision = await approve(false);
+    }
   }
-  if (!pairing?.credential) throw new Refusal("pairing_failed", "t3 auth pairing create returned no credential", 1);
-  const decision = await postJson(`${origin}/oauth/mcp/decision`, {
-    authorization,
-    decision: { _tag: "pairing-code", access, code: pairing.credential },
-  });
   const back = new URL(decision.redirectTo);
   if (back.searchParams.get("state") !== state) throw new Refusal("oauth_failed", "OAuth state mismatch on the decision redirect", 3);
   const code = back.searchParams.get("code");

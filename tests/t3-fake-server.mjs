@@ -13,6 +13,9 @@
 // one JSON line to <case-dir>/requests.jsonl, so a test can switch cases and
 // edit the world between calls. World keys (all optional):
 //   tokens (accepted bearers; sign-in appends), environmentId, serverVersion,
+//   standardScopesOnly (as T3 0.1.2 does, a full-access decision refuses a
+//   pairing code without T3's standard scope set, PAIR-OK-STD from the fake
+//   CLI),
 //   tools (array of names; default all), revoked (every /mcp call is 401),
 //   sse (SSE replies), expiresIn (seconds), bindWorktree, bindInstance,
 //   bindRuntimeMode (override what a launch binds), archiveKeepsRun,
@@ -272,10 +275,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/oauth/mcp/decision") {
       const b = JSON.parse(await body(req));
-      log(loadWorld(), { path: url.pathname, tag: b.decision?._tag, access: b.decision?.access });
-      if (b.decision?.code !== "PAIR-OK") return json(res, 400, { error: "invalid_pairing" });
+      const w = loadWorld();
+      const standard = b.decision?.code === "PAIR-OK-STD";
+      log(w, { path: url.pathname, tag: b.decision?._tag, access: b.decision?.access, standard });
+      if (b.decision?.code !== "PAIR-OK" && !standard) return json(res, 400, { error: "invalid_pairing" });
+      if (w.standardScopesOnly && b.decision.access === "full-access" && !standard) {
+        return json(res, 400, { error: "invalid_request", error_description: "That pairing code cannot grant this access, and it is now used up. Create one with the standard scopes, or choose Read only with a new code." });
+      }
       const code = randomBytes(8).toString("hex");
-      codes.set(code, { challenge: b.authorization.code_challenge, access: b.decision.access });
+      codes.set(code, { challenge: b.authorization.code_challenge, access: b.decision.access, standard });
       const to = new URL(b.authorization.redirect_uri);
       to.searchParams.set("code", code);
       to.searchParams.set("state", b.authorization.state);
@@ -291,7 +299,7 @@ const server = http.createServer(async (req, res) => {
       const token = `tok-${randomBytes(12).toString("hex")}`;
       w.tokens = [...(w.tokens ?? []), token];
       saveWorld(w);
-      return json(res, 200, { access_token: token, token_type: "Bearer", expires_in: w.expiresIn ?? 2592000, scope: "orchestration:read orchestration:operate" });
+      return json(res, 200, { access_token: token, token_type: "Bearer", expires_in: w.expiresIn ?? 2592000, scope: entry.standard ? "orchestration:read orchestration:operate standard:fake" : "orchestration:read orchestration:operate" });
     }
     json(res, 404, { error: "not_found" });
   } catch (e) {

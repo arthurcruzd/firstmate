@@ -41,14 +41,17 @@ bin/fm-t3-mcp.mjs login --access full-access
 
 The server origin defaults to `FM_T3CODE_ORIGIN`, else the `origin` in `~/.t3/userdata/server-runtime.json`; `--url <origin>` names it explicitly.
 Add `--t3 <path>` when `t3` is not on `PATH`, and `--base-dir <dir>` when the server runs with a non-default T3 base directory.
-The sign-in mints a two-minute one-time pairing code with the operator's own `t3 auth pairing create`, scoped to `orchestration:read` and `orchestration:operate`, and spends it to approve Firstmate as an OAuth `mcp-client` at the full-access ceiling.
+The sign-in mints a two-minute one-time pairing code with the operator's own `t3 auth pairing create` and spends it to approve Firstmate as an OAuth `mcp-client` at the full-access ceiling.
+The code is scoped to `orchestration:read` and `orchestration:operate` where T3 allows it.
+T3 0.1.2 and later approve full access only from a code carrying T3's standard scope set, so against such a server the code is minted without `--scope` and the credential carries that standard set.
+The sign-in knows such a server from a matching `server-runtime.json` `serverVersion`; otherwise it retries once with the standard set when T3 refuses the scoped code for that reason.
 No browser is involved, and the token and pairing code are never printed.
 
 Full access is required because a worker writes its status lines outside its worktree.
 Under T3's narrower modes Codex's sandbox blocks that write and Claude parks on an approval that an MCP client cannot grant.
-The credential is much narrower than T3's administrative bearer from `t3 auth session issue`, which this backend no longer uses; T3 accepts an `mcp-client` session only on `/mcp`.
+Either way the credential is narrower than T3's administrative bearer from `t3 auth session issue`, which this backend no longer uses; T3 accepts an `mcp-client` session only on `/mcp`.
 
-The credential, the server's origin, its environment id, and its version are written to the local, gitignored `config/t3code-token`, mode 0600.
+The credential, the scope T3 granted, the server's origin, its environment id, and its version are written to the local, gitignored `config/t3code-token`, mode 0600.
 A missing, expired, revoked, or over-readable credential refuses with one error that names the sign-in command.
 A secondmate spawned on this backend gets `config/t3code-token` as a symlink to the primary's credential file, so its own daemon and crew use the same credential without a copy of the secret, and a fresh sign-in reaches them.
 
