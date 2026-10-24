@@ -1,0 +1,34 @@
+CASE test_dispatch_entry_scopes_rows_and_renders_the_away_tail
+ok - dispatch entry: the host reads branch eligibility, the offer rule, and the wake prompt from the Pi branch's own owner
+CASE test_dispatch_offer_takes_an_inactive_outcome_main_already_has
+ok - dispatch entry: the host takes an inactive-outcome check only when it repeats a done result main already has
+CASE test_branch_outcomes_only_on_a_host_home_off_pi
+ok - drain: BRANCH OUTCOMES runs on a Claude home by default and on another primary with the file, never with off, and never on Pi
+CASE test_branch_outcomes_put_captain_first_and_collapse_routine_overflow
+ok - drain: captain outcomes come first, and routine overflow collapses into a count one drain clears
+CASE test_branch_outcomes_collapse_repeated_captain_outcomes_per_task
+ok - drain: repeated captain outcomes collapse per task, and the byte cap presents only the run its acknowledgement covers
+CASE test_branch_outcomes_present_a_long_away_window_once
+ok - drain: a long away window costs one short drain, captain outcomes collapsed per task and routine overflow counted, and nothing from it is shown again
+CASE test_branch_outcomes_budgets_count_bytes
+ok - drain: the BRANCH OUTCOMES budgets count bytes, cutting multibyte summaries by whole characters in any locale
+CASE test_branch_outcomes_stay_unread_when_a_projection_fails
+ok - drain: branch outcomes stay unread when a projection of the store fails
+CASE test_branch_outcomes_stay_unread_without_jq
+ok - drain: branch outcomes stay unread and the drain fails when jq is missing
+CASE test_branch_outcomes_stay_unread_when_the_drain_cannot_print
+ok - drain: branch outcomes stay unread when the drain cannot print them
+CASE test_branch_outcomes_date_a_legacy_backlog_without_adopting_it
+ok - drain: a legacy backlog is presented with each outcome's age and a check-first instruction, never adopted
+CASE test_branch_ack_keeps_older_keyed_decision_open
+ok - drain: a keyed decision survives acknowledgement through a newer outcome for its task
+CASE test_branch_outcomes_date_an_outcome_carried_across_a_switch_off_pi
+ok - drain: an outcome carried across a switch off Pi comes back with its age, never adopted
+CASE test_branch_outcomes_keep_an_unshown_outcome_until_acknowledged
+ok - drain: an outcome nothing has shown is presented until acknowledged, and a repeated acknowledgement changes nothing
+CASE test_branch_outcomes_keep_a_drain_presented_outcome_across_a_switch_to_pi
+ok - drain: an outcome the host drain presented but main never acknowledged stays unprocessed across a switch to Pi
+CASE test_branch_outcomes_keep_a_drain_presented_outcome_across_an_index_repair
+ok - drain: an outcome the host drain presented but main never acknowledged survives an outcome index repair
+CASE test_attended_captain_outcome_reaches_main_through_branch_outcomes
+not ok - captain: the captain outcome did not wake main: 1792847771	start	gen=host-2759786-1792847768	primary=claude

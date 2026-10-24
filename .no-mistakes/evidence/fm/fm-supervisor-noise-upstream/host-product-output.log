@@ -1,0 +1,103 @@
+Expectation: a done child with no done line must keep the close on main
+Product output:
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+
+Expectation: a done child main never had a captain outcome for must stay main's
+Product output:
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+
+Expectation: a routine outcome never reached main, so it covers nothing
+Product output:
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+
+Expectation: a done result main already has must be the host's
+Product output:
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+
+Expectation: the host must claim the inactive-outcome row
+Product output:
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+
+Expectation: the claim must be scoped to the child
+Product output:
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+
+Expectation: the claim must not be unscoped like an away check row
+Product output:
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+
+Expectation: a line after the covered done line must leave the branch to confirm it
+Product output:
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+
+Expectation: the Pi watcher's offer must keep the close on main
+Product output:
+eligible=0
+
+Expectation: a done line after the captain outcome must stay main's
+Product output:
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+
+Expectation: a failed child is news, so the close must stay main's
+Product output:
+eligible=0
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+
+Expectation: a reconcile notice left for main must keep the close on main
+Product output:
+eligible=0
+status=safe
+corrupted=0
+rows=3
+tasks=demo
+unscoped=0
+

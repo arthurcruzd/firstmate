@@ -1,0 +1,11 @@
+CASE test_branch_dispatch_two_stage_filter_and_prefix_contract
+ok - branch owns accepted wakes with a stable prefix and deterministic verdict-driven delivery
+ok - a captain outcome reaches main's model as one typed, sequence-keyed processing request while routine notes stay plain
+CASE test_branch_dispatch_classifies_main_only_rows_and_writes_the_eligible_snapshot
+ok - scopeForUnreadWake excludes every main-only class without vetoing eligible task-local rows, and writes the eligible snapshot
+CASE test_branch_dispatch_resolves_terminal_keyed_orca_stale_row
+ok - scopeForUnreadWake resolves unique Orca terminal owners and refuses conflicting aliases alongside another eligible row
+CASE test_branch_dispatch_keeps_project_with_canonical_owner
+ok - scope and CLI keep projects with canonical owners in both discovery orders
+CASE test_branch_dispatch_routes_secondmate_signal_by_new_span
+ok - second-mate signal rows route by their new span while crewmate and stale routing stay unchanged
