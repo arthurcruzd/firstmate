@@ -3088,7 +3088,9 @@ if [ "$BACKEND" = t3code ]; then
     exit 1
   fi
   if [ "$HARNESS" = codex ] && [ "$CODEX_APPROVAL_MODE" != bypass ]; then
-    echo "error: backend=t3code runs codex at T3's full-access runtime mode and cannot honor config/codex-approval-mode=$CODEX_APPROVAL_MODE; remove that file or choose another backend" >&2
+    codex_posture_setting="config/codex-approval-mode=$CODEX_APPROVAL_MODE"
+    [ "$CODEX_PERMISSION_MODE" != restricted ] || codex_posture_setting="config/codex-permission-mode=restricted"
+    echo "error: backend=t3code runs codex at T3's full-access runtime mode and cannot honor $codex_posture_setting; remove that file or choose another backend" >&2
     exit 1
   fi
   if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then

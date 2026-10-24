@@ -1182,6 +1182,7 @@ Choose restricted mode only when that approval workflow is available.
 Any other content, an unreadable or non-regular file, or a dangling symlink refuses the launch instead of falling back to bypass.
 Changes take effect at the next launch without a restart.
 The file is not inherited into secondmate homes; configure it separately in each home that should also restrict its own Codex workers.
+`backend=t3code` always runs Codex at T3's `full-access`, so it refuses `restricted` before mutation; [`t3code-backend.md`](t3code-backend.md#active-limits) owns that backend limit.
 
 ## Persistent managed-policy failover
 
