@@ -795,11 +795,13 @@ export interface BranchOfferVerdict {
 // The offer rule for one actionable close: whether a branch may take it, in
 // either posture. The Pi watcher (fm-primary-pi-watch.ts) and the supervision
 // host off Pi (bin/fm-branch-dispatch.mjs offer) both route through this one
-// owner, so a close reaches main off Pi exactly when it would on Pi.
+// owner; docs/pi-supervision-branch.md "Wake dispatch" owns the routing
+// contract, including the attended host's inactive-outcome exception below.
 //
 // A check-kind close (merge-confirmation polls, Relay mentions,
 // credential/auth failures, and every other legitimately main-only class -
-// docs/pi-supervision-branch.md) is never routed to the branch while attended,
+// docs/pi-supervision-branch.md) stays main's while attended except for that
+// host-only exception,
 // even when other currently-unread rows are individually eligible: this
 // watcher cycle's own triggering event stays on main, exactly as before
 // scopeForUnreadWake stopped letting a co-present check row veto the whole

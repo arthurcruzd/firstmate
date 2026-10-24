@@ -343,7 +343,7 @@ If a branch offer loses the claim race to main, it rejects its settlement so the
 It filters the queue to the current actor's opaque claim before same-key deduplication, then presents and acknowledges only that actor-local view.
 A missing or empty branch snapshot is refused loudly rather than read as "nothing eligible", because reaching the drain without the non-empty handoff promised by the extension is a wiring bug.
 A branch acknowledgement retires the check-row receipts - inactive-outcome, inactive-reconcile notice, and secondmate stall - of exactly the granted sequences it consumes, so a branch-consumed check is never re-queued by its producer.
-Attended, a grant names a check row only on the supervision host, for an inactive-outcome row repeating a done result main already has ([`pi-supervision-branch.md`](pi-supervision-branch.md#wake-dispatch)), and that receipt retires the same way.
+The [wake-dispatch contract](pi-supervision-branch.md#wake-dispatch) owns which attended check rows may be granted.
 
 ### Per-actor regression tests
 
