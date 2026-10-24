@@ -551,11 +551,13 @@ test_branch_outcomes_only_on_a_host_home_off_pi() {
   assert_absent "$home/state/.branch-outcomes-cursor" "a Pi primary's drain must not advance the store's read cursor"
 
   drained=$(FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
-  assert_contains "$drained" "[seq 1, recorded 0m ago] demo: PR ready for review" "a Claude home without config/supervision-host must present the captain outcome"
+  assert_re '^\[seq 1, recorded [0-9]+m ago\] demo: PR ready for review$' <(printf '%s\n' "$drained") \
+    "a Claude home without config/supervision-host must present the captain outcome"
 
   : > "$home/config/supervision-host"
   drained=$(FM_HOME="$home" "$fakes/codex" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
-  assert_contains "$drained" "[seq 1, recorded 0m ago] demo: PR ready for review" "a Codex home with config/supervision-host must present the captain outcome"
+  assert_re '^\[seq 1, recorded [0-9]+m ago\] demo: PR ready for review$' <(printf '%s\n' "$drained") \
+    "a Codex home with config/supervision-host must present the captain outcome"
   pass "drain: BRANCH OUTCOMES runs on a Claude home by default and on another primary with the file, never with off, and never on Pi"
 }
 
