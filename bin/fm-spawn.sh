@@ -441,7 +441,7 @@
 #   bin/fm-approval-failover.sh owns captain-approved durable failover after
 #   firstmate observes a bypass approval prompt or policy refusal; no polling.
 #   T3 Code always uses full-access, so it refuses Claude `auto` and Codex
-#   `approve-for-me` before mutation.
+#   `approve-for-me` or `restricted` before mutation.
 # Worker tool exclusions:
 #   docs/configuration.md "Worker tool exclusions" owns config/crew-exclude-tools
 #   and its operator contract. Resolve it with bin/fm-exclude-tools-lib.sh
