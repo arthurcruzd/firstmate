@@ -1,0 +1,11 @@
+$ bin/fm-send.sh lab1 "<steer: run a 240 s python3 sleep as one foreground tool call>"
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+exit=0 elapsed=2s
+inbox after steer:
+<lab>/home/state/lab1.inbox:
+001.msg
+handled
+
+<lab>/home/state/lab1.inbox/handled:
+python sleep pids: 83765 83770  (waited 8s)

@@ -1,0 +1,11 @@
+python3 sleep processes before interrupt:
+  PID  PPID COMMAND
+83765 54926 /bin/zsh -c source ~/.claude/shell-snapshots/snapshot-zsh-1792813152697-qvdwke.sh 2>/dev/null || true && setopt NO_EX
+83770 83765 /opt/homebrew/Cellar/python@3.15/3.15.0_1/Frameworks/Python.framework/Versions/3.15/Resources/Python.app/Contents/MacOS/Python -
+$ bin/fm-control.sh lab1 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+interrupt-delivered lab1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+exit=0 elapsed=2s
+python3 sleep processes 3s after interrupt: []
+$ bin/fm-t3-mcp.mjs state --thread <thread>
+{"ok":true,"threadId":"mcp:aa0b336b-79f8-42e4-bd57-3f32b1b43d1e","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-0c42df/1/labproj","turnAt":"2026-10-24T03:40:04.256Z"}

@@ -1,0 +1,29 @@
+# home2: marked lab home, NO config/backend, but a valid T3 credential for the reachable lab server
+$ ls -A <lab>/home2/config
+t3code-token
+$ FM_HOME=<lab>/home2 bin/fm-t3-mcp.mjs status   # the credential works and the server is reachable
+{"ok":true,"origin":"http://127.0.0.1:53643","access":"full-access","expiresAt":"2026-11-23T03:38:07.232Z","daysLeft":30,"environmentId":"4e8e1778-8e50-496c-98fb-8da02ce667db","serverVersion":"0.1.0",
+unarchived T3 threads in fm-labproj before: []
+$ FM_HOME=<lab>/home2 bin/fm-spawn.sh lab5 <lab>/home2/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low   # tmux not installed on this host
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+~/.no-mistakes/worktrees/5717c0e0ae7f/01M5NZ4TGC88G4S487V04GVNHF/bin/backends/tmux.sh: line 97: tmux: command not found
+~/.no-mistakes/worktrees/5717c0e0ae7f/01M5NZ4TGC88G4S487V04GVNHF/bin/backends/tmux.sh: line 119: tmux: command not found
+~/.no-mistakes/worktrees/5717c0e0ae7f/01M5NZ4TGC88G4S487V04GVNHF/bin/backends/tmux.sh: line 123: tmux: command not found
+lab5 state files: []  pool2 exists: no
+unarchived T3 threads in fm-labproj after: []
+
+# Same home, same spawn, run once with the base tree (d22640f4, git archive into the lab) and once with HEAD, capturing exit codes:
+== base(d22640f4): fm-spawn.sh lab5 <lab>/home2/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+<code>/bin/backends/tmux.sh: line 97: tmux: command not found
+<code>/bin/backends/tmux.sh: line 119: tmux: command not found
+<code>/bin/backends/tmux.sh: line 123: tmux: command not found
+exit=1  lab5 state files: []  pool2 exists: no
+== HEAD(cc9579f0): fm-spawn.sh lab5 <lab>/home2/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+<code>/bin/backends/tmux.sh: line 97: tmux: command not found
+<code>/bin/backends/tmux.sh: line 119: tmux: command not found
+<code>/bin/backends/tmux.sh: line 123: tmux: command not found
+exit=1  lab5 state files: []  pool2 exists: no
+
+# Both trees resolve the default tmux backend (tmux is not installed on this host), not t3code, although the home holds a working T3 credential; no T3 thread, lease, or task record is created. 15-non-t3-tmux-lifecycle-base-vs-head.txt repeats the lifecycle with a lab-built tmux.

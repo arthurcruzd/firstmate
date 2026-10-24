@@ -1,0 +1,10 @@
+$ bin/fm-control.sh lab1 exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task lab1 runs on the t3code backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread
+exit=1
+$ bin/fm-control.sh lab1 relaunch
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task lab1 runs on the t3code backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch
+exit=1
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # thread untouched by the refusals
+{"ok":true,"threadId":"mcp:aa0b336b-79f8-42e4-bd57-3f32b1b43d1e","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-0c42df/1/labproj","turnAt

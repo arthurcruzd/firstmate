@@ -1,0 +1,24 @@
+unarchived T3 threads in fm-labproj before: []
+
+$ echo approve-for-me > <lab>/home/config/codex-approval-mode && bin/fm-spawn.sh lab2 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code runs codex at T3's full-access runtime mode and cannot honor config/codex-approval-mode=approve-for-me; remove that file or choose another backend
+exit=1
+lab2 state files: []  /tmp/fm-lab2: absent  config/codex-approval-mode still holds: approve-for-me
+1     available    <lab>/pool/.treehouse/labproj-0c42df/1/labproj  (detached)
+
+$ echo restricted > <lab>/home/config/codex-permission-mode && bin/fm-spawn.sh lab2 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code runs codex at T3's full-access runtime mode and cannot honor config/codex-permission-mode=restricted; remove that file or choose another backend
+exit=1
+lab2 state files: []  /tmp/fm-lab2: absent  config/codex-permission-mode still holds: restricted
+1     available    <lab>/pool/.treehouse/labproj-0c42df/1/labproj  (detached)
+
+$ echo auto > <lab>/home/config/claude-permission-mode && bin/fm-spawn.sh lab2 <lab>/home/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=auto; remove that file or choose another backend
+exit=1
+lab2 state files: []  /tmp/fm-lab2: absent  config/claude-permission-mode still holds: auto
+1     available    <lab>/pool/.treehouse/labproj-0c42df/1/labproj  (detached)
+
+unarchived T3 threads in fm-labproj after: []

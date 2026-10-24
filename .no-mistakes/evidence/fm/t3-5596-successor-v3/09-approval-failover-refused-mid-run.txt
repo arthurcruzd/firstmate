@@ -1,0 +1,18 @@
+$ bin/fm-send.sh lab1 "<clarify: the interrupt was a deliberate supervision test; run 002.msg sleep now, mark 001 handled>"
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+running tool call pid before failover: [92823 92825 ]
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # before
+{"ok":true,"threadId":"mcp:aa0b336b-79f8-42e4-bd57-3f32b1b43d1e","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Aaa0b336b-79f8-42e4-bd57-3f32b1b43d1e:ordinal:4","pend
+$ ls -A <lab>/home/config   # before
+backend
+t3code-token
+$ FM_HOME=<lab>/home bin/fm-approval-failover.sh apply lab1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code already runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=auto; approve the pending request in T3 Code itself or choose another backend; nothing changed
+exit=1
+$ ls -A <lab>/home/config   # after
+backend
+t3code-token
+running tool call pid 3s after failover: [92823 92825 ]
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # after: same active run, not interrupted
+{"ok":true,"threadId":"mcp:aa0b336b-79f8-42e4-bd57-3f32b1b43d1e","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Aaa0b336b-79f8-42e4-bd57-3f32b1b43d1e:ordinal:4","pend

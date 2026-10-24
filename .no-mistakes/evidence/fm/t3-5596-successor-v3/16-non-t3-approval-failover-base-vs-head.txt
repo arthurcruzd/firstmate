@@ -1,0 +1,54 @@
+# Non-T3 home (no config/backend) on lab-built tmux: managed approval failover on a claude-harness task, base d22640f4 vs HEAD cc9579f0.
+# The worker is a stub named claude (exec cat -u) launched as a raw command; CLAUDE_CONFIG_DIR points at a lab store, so the real Claude store is untouched.
+# Both trees save config/claude-permission-mode=auto first, then hand off to fm-control (which refuses to key the stub's unclassified pane): the T3 guard does not change non-T3 failover.
+
+== base(d22640f4)
+$ fm-spawn.sh lab8 <lab>/home2/projects/labproj --scout '<lab>/stub/claude --stub'
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned lab8 harness=claude kind=scout window=firstmate:fm-lab8 worktree=<lab>/pool2/.treehouse/labproj-0c42df/1/labproj
+exit=0
+$ grep -E '^(harness|approval_mode|backend)=' <lab>/home2/state/lab8.meta
+harness=claude
+$ ls -A <lab>/home2/config   # before
+t3code-token
+$ fm-approval-failover.sh apply lab8
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+saved config/claude-permission-mode=auto; approvals use a model reviewer
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+error: task lab8's endpoint reads 'ambiguous' rather than a positively classified state; refusing to send a lifecycle key into an unattributed endpoint
+error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control
+exit=1
+$ ls -A <lab>/home2/config; cat config/claude-permission-mode   # after
+claude-permission-mode
+t3code-token
+auto
+$ fm-teardown.sh lab8 --force
+teardown lab8 complete (window firstmate:fm-lab8, worktree <lab>/pool2/.treehouse/labproj-0c42df/1/labproj)
+state files left: []
+
+== HEAD(cc9579f0)
+$ fm-spawn.sh lab9 <lab>/home2/projects/labproj --scout '<lab>/stub/claude --stub'
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned lab9 harness=claude kind=scout window=firstmate:fm-lab9 worktree=<lab>/pool2/.treehouse/labproj-0c42df/1/labproj
+exit=0
+$ grep -E '^(harness|approval_mode|backend)=' <lab>/home2/state/lab9.meta
+harness=claude
+$ ls -A <lab>/home2/config   # before
+t3code-token
+$ fm-approval-failover.sh apply lab9
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+saved config/claude-permission-mode=auto; approvals use a model reviewer
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+error: task lab9's endpoint reads 'ambiguous' rather than a positively classified state; refusing to send a lifecycle key into an unattributed endpoint
+error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control
+exit=1
+$ ls -A <lab>/home2/config; cat config/claude-permission-mode   # after
+claude-permission-mode
+t3code-token
+auto
+$ fm-teardown.sh lab9 --force
+teardown lab9 complete (window firstmate:fm-lab9, worktree <lab>/pool2/.treehouse/labproj-0c42df/1/labproj)
+state files left: []
+
+$ diff <(normalized base) <(normalized HEAD)   # task ids normalized
+diff exit=0 (0 = identical)

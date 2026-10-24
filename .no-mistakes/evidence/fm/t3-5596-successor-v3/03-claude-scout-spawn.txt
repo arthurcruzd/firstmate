@@ -1,0 +1,25 @@
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh lab1 <lab>/home/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-0c42df/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-0c42df/1/labproj' to release it.
+spawned lab1 harness=claude kind=scout window=fm-lab1 worktree=<lab>/pool/.treehouse/labproj-0c42df/1/labproj
+exit=0 elapsed=8s
+$ cat <lab>/home/state/lab1.meta
+window=fm-lab1
+endpoint_task_id=lab1
+worktree=<lab>/pool/.treehouse/labproj-0c42df/1/labproj
+project=<lab>/home/projects/labproj
+harness=claude
+approval_mode=bypass
+kind=scout
+tasktmp=/tmp/fm-lab1
+model=claude-haiku-5-5
+effort=low
+busy_gen=g1792813142.52111.6785
+spawn_gen=s1792813143.49430.26851
+backend=t3code
+t3_thread_id=mcp:aa0b336b-79f8-42e4-bd57-3f32b1b43d1e
+t3_project_id=mcp:e2a22904-1d3b-4527-a41f-c30679cb5323

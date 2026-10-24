@@ -1,0 +1,93 @@
+# Non-T3 home (no config/backend) on a lab-built tmux 3.5a: the same spawn / steer / interrupt / teardown driven by base d22640f4 and by HEAD cc9579f0.
+# The worker is a raw launch command ('cat -u'), so no agent CLI or Claude trust store is involved.
+
+== base(d22640f4)
+$ fm-spawn.sh lab6 <lab>/home2/projects/labproj --scout 'cat -u'
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned lab6 harness=cat kind=scout window=firstmate:fm-lab6 worktree=<lab>/pool2/.treehouse/labproj-0c42df/1/labproj
+exit=0
+$ cat <lab>/home2/state/lab6.meta
+window=firstmate:fm-lab6
+endpoint_task_id=lab6
+worktree=<lab>/pool2/.treehouse/labproj-0c42df/1/labproj
+project=<lab>/home2/projects/labproj
+harness=cat
+kind=scout
+tasktmp=/tmp/fm-lab6
+model=default
+effort=default
+spawn_gen=s1792814053.51952.32522
+$ tmux list-windows -a
+firstmate:zsh zsh
+firstmate:fm-lab6 cat
+$ fm-send.sh lab6 'hello from firstmate'
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+$ fm-control.sh lab6 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+error: task lab6 records harness 'cat', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command
+exit=1
+$ fm-teardown.sh lab6 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+teardown: reaping leaked worktree process(es) for lab6: 52789 57518
+teardown: force-killing leaked worktree process(es) for lab6: 52789
+
+🌳 Worktree returned to pool.
+teardown lab6 complete (window firstmate:fm-lab6, worktree <lab>/pool2/.treehouse/labproj-0c42df/1/labproj)
+exit=0
+state files left: []
+firstmate:zsh
+
+== HEAD(cc9579f0)
+$ fm-spawn.sh lab7 <lab>/home2/projects/labproj --scout 'cat -u'
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned lab7 harness=cat kind=scout window=firstmate:fm-lab7 worktree=<lab>/pool2/.treehouse/labproj-0c42df/1/labproj
+exit=0
+$ cat <lab>/home2/state/lab7.meta
+window=firstmate:fm-lab7
+endpoint_task_id=lab7
+worktree=<lab>/pool2/.treehouse/labproj-0c42df/1/labproj
+project=<lab>/home2/projects/labproj
+harness=cat
+kind=scout
+tasktmp=/tmp/fm-lab7
+model=default
+effort=default
+spawn_gen=s1792814078.67574.1083
+$ tmux list-windows -a
+firstmate:zsh zsh
+firstmate:fm-lab7 cat
+$ fm-send.sh lab7 'hello from firstmate'
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+$ fm-control.sh lab7 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+error: task lab7 records harness 'cat', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command
+exit=1
+$ fm-teardown.sh lab7 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+teardown: reaping leaked worktree process(es) for lab7: 69407 73095
+teardown: force-killing leaked worktree process(es) for lab7: 69407
+
+🌳 Worktree returned to pool.
+teardown lab7 complete (window firstmate:fm-lab7, worktree <lab>/pool2/.treehouse/labproj-0c42df/1/labproj)
+exit=0
+state files left: []
+firstmate:zsh
+
+$ diff <(normalized base transcript) <(normalized HEAD transcript)   # task ids, spawn_gen stamps and reaped pids normalized
+diff exit=0 (0 = identical)

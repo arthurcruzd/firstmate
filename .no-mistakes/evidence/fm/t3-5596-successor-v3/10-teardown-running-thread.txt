@@ -1,0 +1,28 @@
+$ bin/fm-teardown.sh lab1   # while the thread still runs a tool call
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for lab1: 6165 6361 92823 92825
+A new version of treehouse is available: v3.1.4 → v3.1.5
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+teardown lab1 complete (window mcp:aa0b336b-79f8-42e4-bd57-3f32b1b43d1e, worktree <lab>/pool/.treehouse/labproj-0c42df/1/labproj)
+Backlog: lab1 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move lab1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0 elapsed=7s
+tool call pids after teardown: []
+$ bin/fm-t3-mcp.mjs state --thread <thread>
+{"ok":true,"threadId":"mcp:aa0b336b-79f8-42e4-bd57-3f32b1b43d1e","exists":true,"archived":true,"status":"failed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"/private/var/folders/hg/_55v
+$ ls <lab>/home/state
+.guard-watcher-stale-banner
+home-summary.json
+operational-inbox
+t3code-sends
+terminal-outcomes
+$ ls -A <worktree>   # env files removed
+.git
+calc.py
+README.md
+$ treehouse status
+
+base  main  (repository default)
+1     available    <lab>/pool/.treehouse/labproj-0c42df/1/labproj  (detached)

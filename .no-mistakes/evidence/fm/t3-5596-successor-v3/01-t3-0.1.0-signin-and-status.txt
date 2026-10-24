@@ -1,0 +1,14 @@
+$ FM_HOME=<lab>/home bin/fm-t3-mcp.mjs login --url http://127.0.0.1:<port> --access full-access --t3 <lab>/t3 --base-dir <lab>/t3base
+{"ok":true,"tokenFile":"<lab>/home/config/t3code-token","origin":"http://127.0.0.1:<port>","access":"full-access","scope":"orchestration:read orchestration:operate settings:write source-control:write","expiresAt":"2026-11-23T03:38:07.232Z","environmentId":"4e8e1778-8e50-496c-98fb-8da02ce667db","serverVersion":"0.1.0"}
+exit=0
+$ FM_HOME=<lab>/home bin/fm-t3-mcp.mjs status
+{"ok":true,"origin":"http://127.0.0.1:<port>","access":"full-access","expiresAt":"2026-11-23T03:38:07.232Z","daysLeft":30,"environmentId":"4e8e1778-8e50-496c-98fb-8da02ce667db","serverVersion":"0.1.0","recordedServerVersion":"0.1.0","telemetry":"off"}
+exit=0
+token file mode: -rw-------@
+
+# after the lab run: revoke the lab credential, then the helper refuses it
+$ t3 auth session revoke <id> --base-dir <lab>/t3base
+Revoked session <id>.
+$ FM_HOME=<lab>/home bin/fm-t3-mcp.mjs status
+{"ok":false,"error":{"code":"unauthorized","message":"T3 at http://127.0.0.1:<port> rejected the credential (HTTP 401); it was revoked or belongs to another server, so the captain signs in again"}}
+exit=4
