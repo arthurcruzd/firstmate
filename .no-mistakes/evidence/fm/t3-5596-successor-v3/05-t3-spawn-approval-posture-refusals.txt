@@ -1,0 +1,26 @@
+before: T3 threads (all projects, archived included): 1 -> [["fm-labproj", [["interrupted", false]]]]
+treehouse pool before: [slot 1 leased lab1)] 
+
+$ echo approve-for-me > <lab>/home/config/codex-approval-mode && FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh lab2 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: backend=t3code runs codex at T3's full-access runtime mode and cannot honor config/codex-approval-mode=approve-for-me; remove that file or choose another backend
+exit=1
+lab2 state files: []  /tmp/fm-lab2 dirs: 0  treehouse pool: [slot 1 leased lab1)]   config/codex-approval-mode still holds: approve-for-me
+after: T3 threads (all projects, archived included): 1 -> [["fm-labproj", [["interrupted", false]]]]
+
+$ echo restricted > <lab>/home/config/codex-permission-mode && FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh lab2 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: backend=t3code runs codex at T3's full-access runtime mode and cannot honor config/codex-permission-mode=restricted; remove that file or choose another backend
+exit=1
+lab2 state files: []  /tmp/fm-lab2 dirs: 0  treehouse pool: [slot 1 leased lab1)]   config/codex-permission-mode still holds: restricted
+after: T3 threads (all projects, archived included): 1 -> [["fm-labproj", [["interrupted", false]]]]
+
+$ echo auto > <lab>/home/config/claude-permission-mode && FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh lab2 <lab>/home/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=auto; remove that file or choose another backend
+exit=1
+lab2 state files: []  /tmp/fm-lab2 dirs: 0  treehouse pool: [slot 1 leased lab1)]   config/claude-permission-mode still holds: auto
+after: T3 threads (all projects, archived included): 1 -> [["fm-labproj", [["interrupted", false]]]]

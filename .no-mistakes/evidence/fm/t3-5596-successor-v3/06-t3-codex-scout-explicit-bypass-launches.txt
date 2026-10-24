@@ -1,0 +1,28 @@
+$ echo bypass > <lab>/home/config/codex-approval-mode && FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh lab3 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+warning: could not confirm that ~/.codex/config.toml trusts <lab>/home/projects/labproj; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects."<main checkout>"] trust_level = "trusted", see docs/t3code-backend.md#setup)
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-4d0f63/2/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-4d0f63/2/labproj' to release it.
+spawned lab3 harness=codex kind=scout window=fm-lab3 worktree=<lab>/pool/.treehouse/labproj-4d0f63/2/labproj
+exit=0
+$ grep -E '^(harness|approval_mode|backend|model|t3_thread_id)=' <lab>/home/state/lab3.meta
+harness=codex
+approval_mode=bypass
+model=gpt-6-luna
+backend=t3code
+t3_thread_id=mcp:322fdf10-9dd6-4160-9df3-5076c531077f
+exit=0
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # after the codex turn
+{"ok":true,"threadId":"mcp:322fdf10-9dd6-4160-9df3-5076c531077f","exists":true,"archived":false,"status":"failed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/2/labproj","turnAt":"2026-10-24T11:15:14.988Z"}
+exit=0
+$ FM_HOME=<lab>/home bin/fm-crew-state.sh lab3
+state: unknown · source: pane · harness state unavailable (unknown t3code-native)
+exit=0
+$ FM_HOME=<lab>/home bin/fm-peek.sh lab3 30   # why the turn failed (supervision banner lines omitted)
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+[user_message/completed] ⁣FIRSTMATE_OP: v1 launch-brief: # Current worker role contract You are a crewmate: an autonomous worker agent managed by firstmate. This section establishes your current identity before every project or task instruction below and super
+[error/failed] You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 9:39 AM.
+t3code: status=failed run=none
+# The spawn under test (bypass accepted, approval_mode=bypass recorded, thread launched at full-access, launch brief delivered as the first message) succeeded; the model turn then failed on the machine's Codex account usage limit, an environment quota outside Firstmate.

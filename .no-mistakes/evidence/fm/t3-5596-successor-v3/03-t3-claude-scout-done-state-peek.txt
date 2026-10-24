@@ -1,0 +1,30 @@
+$ bin/fm-t3-mcp.mjs state --thread <thread>
+{"ok":true,"threadId":"mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9","exists":true,"archived":false,"status":"completed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:11:23.467Z"}
+exit=0
+$ cat <lab>/home/state/lab1.status
+done [at=1792840266]: labproj README first line is '# labproj README first line'; report written, captain-hold inventory empty (firstmate to run complete --none)
+exit=0
+$ FM_HOME=<lab>/home bin/fm-crew-state.sh lab1
+state: done · source: status-log · labproj README first line is '# labproj README first line'; report written, captain-hold inventory empty (firstmate to run complete --none)
+exit=0
+$ FM_HOME=<lab>/home bin/fm-peek.sh lab1 25
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[user_message/completed] ⁣FIRSTMATE_OP: v1 launch-brief: # Current worker role contract You are a crewmate: an autonomous worker agent managed by firstmate. This section establishes your current identity before every project or task instruction below and supersedes any conflicting role identity in those instructions. Do the assigned work yourself and report only to firstmate; do not adopt a firstmate or secondmate supervisor identity, delegate the task, run fleet supervision, or address the captain. Your steering inbox is `<lab>/home/state/lab1.inbox`; this exact path belo
+[reasoning/completed] I need to run head on README.md in the worktree to check the first line, then write up the status report, while also checking the inbox and verifying the captain-hold-lifecycle completion gate.
+[command_execution/completed] $ head -n 1 '<lab>/pool/.treehouse/labproj-4d0f63/1/labproj/README.md'; echo "---"; date +%s; find '<lab>/home/state/lab1.inbox' -maxdepth 1 -name '*.msg' 2>/dev/null | sort -V; ls '<code>/.agents/skills/captain-hold-lifecycle/' 2>&1 # labproj README first line --- 1792840266 SKILL.md
+[reasoning/completed] The inbox appears empty, so nothing new there. The SKILL.md file exists though, so I should read it and follow its completion gate.
+[dynamic_tool/completed] { "toolName": "Read", "input": { "file_path": "<code>/.agents/skills/captain-hold-lifecycle/SKILL.md" }, "output": { "type": "text", "file": { "filePath": "<code>/.agents/skills/captain-hold-lifecycle/SKILL.md", "content": "---\nname: captain-hold-lifecycle\ndescription: >-\n Load before treating an investigation, scout report, structured review, or Lavish review as complete, before ending a visual review that exposed a capta
+[reasoning/completed] This is a scout task, so there's no captain decision to surface — I should run the completion gate with `--none` since the report doesn't produce any captain-owned question, but I need to check the gate lives in the originating work's authoritative FM_HOME rather than mutating anything as a worker. Before running the completion gate with `--none`, I want to confirm the script exists and check its `--help` output first, since that's read-only and won't risk writing to the backlog.
+[command_execution/completed] $ ls -la '<code>/bin/fm-captain-hold.sh' 2>&1; '<code>/bin/fm-captain-hold.sh' --help 2>&1 | head -n 40 -rwxr-xr-x@ 1 disco staff 97480 Oct 24 07:59 <code>/bin/fm-captain-hold.sh fm-captain-hold.sh - deterministic mechanics for tasks held for the captain. The semantic policy is owned once by .agents/skills/captain-hold-lifecycle/SKILL.md. This script never read
+[reasoning/completed] As a scout with no captain decisions to make, I don't have access to my origin id or the authoritative firstmate home, so I can't safely run the completion gate myself — I'll just note in my report that no captain-owned questions were found, meaning the inventory for that step is effectively empty.
+[command_execution/completed] $ mkdir -p '<lab>/home/data/lab1' && cat > '<lab>/home/data/lab1/report.md' <<'EOF' # lab1 scout report: first line of labproj README ## What I did - Ran `head -n 1 <lab>/pool/.treehouse/labproj-4d0f63/1/labproj/README.md` in the worktree. - Checked the firstmate instruction inbox (`<lab>/home/state/lab1.inbox`): no `*.msg` files, nothing to acknowledge. - Read the captain-hold lifecycle skill (`.agents/skills/captain-hold-lifecycle/SKILL.md`) and the `bin/fm-captain-hold.sh --help
+[assistant_message/completed] The first line of labproj's `README.md` is `# labproj README first line`. I wrote the report to `<lab>/home/data/lab1/report.md` and appended a `done` line to the status file. - **Inbox:** empty, so nothing to acknowledge. - **Captain-hold gate:** no captain-owned questions came out of this scout, so the inventory is empty. I did not run `bin/fm-captain-hold.sh complete --none` myself. It has to run in the originating home with the origin id, which I don't have, and it writes to the backlog. The report asks firstmate to run it. - **Code:** not
+[checkpoint/completed] []
+t3code: status=completed run=none
+exit=0

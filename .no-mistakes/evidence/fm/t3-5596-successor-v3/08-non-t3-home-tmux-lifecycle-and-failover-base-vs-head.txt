@@ -1,0 +1,177 @@
+# Non-T3 home: marked lab home2 with NO config/backend but a working T3 credential for the reachable lab T3 0.1.0 server.
+# Lab-built tmux 3.5a on a private TMUX_TMPDIR socket; workers are raw launch commands ('cat -u', and a stub named claude that execs cat -u), so no agent CLI or real Claude store is involved (CLAUDE_CONFIG_DIR=<lab>/claude-cfg).
+# Same driver (spawn, send, interrupt, crew-state, teardown; then managed approval failover on a claude-harness task) run against base 6c87d7bb (git archive) and HEAD 75f85506.
+# A read-only observer counts the lab T3 server's live (unarchived) threads before and after each run: it stays 0, so the credential never selects T3 and no thread is created.
+
+== base (6c87d7bb), normalized
+config: t3code-token   (no config/backend; a working t3code-token credential is present)
+T3 server threads (all projects, archived included): 0
+$ bin/fm-spawn.sh n1 <lab>/home2/projects/labproj --scout cat -u
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned n1 harness=cat kind=scout window=firstmate:fm-n1 worktree=<lab>/pool2/.treehouse/labproj-4d0f63/1/labproj
+exit=0
+$ cat <lab>/home2/state/n1.meta
+window=firstmate:fm-n1
+endpoint_task_id=n1
+worktree=<lab>/pool2/.treehouse/labproj-4d0f63/1/labproj
+project=<lab>/home2/projects/labproj
+harness=cat
+kind=scout
+tasktmp=/tmp/fm-n1
+model=default
+effort=default
+spawn_gen=<gen>
+exit=0
+$ tmux list-windows -a -F '#{session_name}:#{window_name} #{pane_current_command}'
+firstmate:zsh zsh
+firstmate:fm-n1 cat
+$ bin/fm-send.sh n1 hello from firstmate
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+$ bin/fm-control.sh n1 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+error: task n1 records harness 'cat', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command
+exit=1
+$ bin/fm-crew-state.sh n1
+state: unknown · source: pane · harness state unavailable (unknown missing)
+exit=0
+$ bin/fm-teardown.sh n1 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for n1: <pids>
+teardown: force-killing leaked worktree process(es) for n1: <pids>
+
+🌳 Worktree returned to pool.
+teardown n1 complete (window firstmate:fm-n1, worktree <lab>/pool2/.treehouse/labproj-4d0f63/1/labproj)
+Backlog: n1 just finished (this home keeps no markdown backlog at <lab>/home2/data/backlog.md). Update <lab>/home2/data/backlog.md - move n1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+state files left: []
+== managed approval failover on a claude-named raw stub (no backend line)
+$ bin/fm-spawn.sh n2 <lab>/home2/projects/labproj --scout <lab>/stub/claude --stub
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned n2 harness=claude kind=scout window=firstmate:fm-n2 worktree=<lab>/pool2/.treehouse/labproj-4d0f63/1/labproj
+exit=0
+$ grep -E '^(harness|approval_mode|backend)=' state/n2.meta
+harness=claude
+config before: t3code-token 
+$ bin/fm-approval-failover.sh apply n2
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+saved config/claude-permission-mode=auto; approvals use a model reviewer
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+error: task n2's endpoint reads 'ambiguous' rather than a positively classified state; refusing to send a lifecycle key into an unattributed endpoint
+error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control
+exit=1
+config after: claude-permission-mode t3code-token   claude-permission-mode=auto
+$ bin/fm-teardown.sh n2 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for n2: <pids>
+teardown: force-killing leaked worktree process(es) for n2: <pids>
+
+🌳 Worktree returned to pool.
+teardown n2 complete (window firstmate:fm-n2, worktree <lab>/pool2/.treehouse/labproj-4d0f63/1/labproj)
+Backlog: n2 just finished (this home keeps no markdown backlog at <lab>/home2/data/backlog.md). Update <lab>/home2/data/backlog.md - move n2 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+state files left: []
+T3 server threads (all projects, archived included): 0
+
+== HEAD (75f85506), normalized
+config: t3code-token   (no config/backend; a working t3code-token credential is present)
+T3 server threads (all projects, archived included): 0
+$ bin/fm-spawn.sh n1 <lab>/home2/projects/labproj --scout cat -u
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned n1 harness=cat kind=scout window=firstmate:fm-n1 worktree=<lab>/pool2/.treehouse/labproj-4d0f63/1/labproj
+exit=0
+$ cat <lab>/home2/state/n1.meta
+window=firstmate:fm-n1
+endpoint_task_id=n1
+worktree=<lab>/pool2/.treehouse/labproj-4d0f63/1/labproj
+project=<lab>/home2/projects/labproj
+harness=cat
+kind=scout
+tasktmp=/tmp/fm-n1
+model=default
+effort=default
+spawn_gen=<gen>
+exit=0
+$ tmux list-windows -a -F '#{session_name}:#{window_name} #{pane_current_command}'
+firstmate:zsh zsh
+firstmate:fm-n1 cat
+$ bin/fm-send.sh n1 hello from firstmate
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+$ bin/fm-control.sh n1 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+error: task n1 records harness 'cat', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command
+exit=1
+$ bin/fm-crew-state.sh n1
+state: unknown · source: pane · harness state unavailable (unknown missing)
+exit=0
+$ bin/fm-teardown.sh n1 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for n1: <pids>
+teardown: force-killing leaked worktree process(es) for n1: <pids>
+
+🌳 Worktree returned to pool.
+teardown n1 complete (window firstmate:fm-n1, worktree <lab>/pool2/.treehouse/labproj-4d0f63/1/labproj)
+Backlog: n1 just finished (this home keeps no markdown backlog at <lab>/home2/data/backlog.md). Update <lab>/home2/data/backlog.md - move n1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+state files left: []
+== managed approval failover on a claude-named raw stub (no backend line)
+$ bin/fm-spawn.sh n2 <lab>/home2/projects/labproj --scout <lab>/stub/claude --stub
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+spawned n2 harness=claude kind=scout window=firstmate:fm-n2 worktree=<lab>/pool2/.treehouse/labproj-4d0f63/1/labproj
+exit=0
+$ grep -E '^(harness|approval_mode|backend)=' state/n2.meta
+harness=claude
+config before: t3code-token 
+$ bin/fm-approval-failover.sh apply n2
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+saved config/claude-permission-mode=auto; approvals use a model reviewer
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+error: task n2's endpoint reads 'ambiguous' rather than a positively classified state; refusing to send a lifecycle key into an unattributed endpoint
+error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control
+exit=1
+config after: claude-permission-mode t3code-token   claude-permission-mode=auto
+$ bin/fm-teardown.sh n2 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for n2: <pids>
+teardown: force-killing leaked worktree process(es) for n2: <pids>
+
+🌳 Worktree returned to pool.
+teardown n2 complete (window firstmate:fm-n2, worktree <lab>/pool2/.treehouse/labproj-4d0f63/1/labproj)
+Backlog: n2 just finished (this home keeps no markdown backlog at <lab>/home2/data/backlog.md). Update <lab>/home2/data/backlog.md - move n2 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+state files left: []
+T3 server threads (all projects, archived included): 0
+
+$ diff <(normalized base) <(normalized HEAD)   # code/lab paths, spawn_gen stamps and reaped pids normalized
+diff exit=0 (0 = identical)

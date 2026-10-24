@@ -1,0 +1,50 @@
+$ FM_HOME=<lab>/home bin/fm-send.sh lab1 '<steer: run python3 -c "import time; time.sleep(173)" as one foreground tool call>'
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+exit=0
+running python3 time.sleep(173) tool-call processes after steer: (filter matched argv[0]=python3 only and missed macOS framework Python; see the corrected process proof below)
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # before failover
+{"ok":true,"threadId":"mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Ac0c22c46-4a57-4b73-ac95-a397eadb9de9:ordinal:2","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:11:49.796Z"}
+exit=0
+$ ls -A <lab>/home/config   # before failover
+backend
+t3code-token
+$ FM_HOME=<lab>/home bin/fm-approval-failover.sh apply lab1   # mid-run, harness=claude backend=t3code
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code already runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=auto; approve the pending request in T3 Code itself or choose another backend; nothing changed
+exit=1
+$ ls -A <lab>/home/config   # after failover
+backend
+t3code-token
+running tool-call processes 3s after refused failover: (same filter miss; see corrected proof below)
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # after failover: same active run
+{"ok":true,"threadId":"mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Ac0c22c46-4a57-4b73-ac95-a397eadb9de9:ordinal:2","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:11:49.796Z"}
+exit=0
+# corrected process proof: the worker's tool call (macOS runs python3 as .../Python.app/Contents/MacOS/Python)
+$ ps -o pid,lstart,command -p <pid>   # date now: Sat Oct 24 11:13:43 2026 UTC; failover was called at ~11:13 UTC
+  PID STARTED                      COMMAND
+62028 Sat Oct 24 08:11:56 2026     /opt/homebrew/Cellar/python@3.15/3.15.0_1/Frameworks/Python.framework/Versions/3.15/Resources/Python.app/Contents/MacOS/Pytho
+(lstart is local time, UTC-3)
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # still the same active run
+{"ok":true,"threadId":"mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3Ac0c22c46-4a57-4b73-ac95-a397eadb9de9:ordinal:2","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:11:49.796Z"}
+exit=0
+$ FM_HOME=<lab>/home bin/fm-control.sh lab1 interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+interrupt-delivered lab1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+exit=0
+$ ps -p <tool-call pid>   # after interrupt
+pid 62028 gone
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # after interrupt
+{"ok":true,"threadId":"mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:13:52.331Z"}
+exit=0
+$ FM_HOME=<lab>/home bin/fm-control.sh lab1 exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task lab1 runs on the t3code backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread
+exit=1
+$ FM_HOME=<lab>/home bin/fm-control.sh lab1 relaunch
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: task lab1 runs on the t3code backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch
+exit=1
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # thread unchanged by refused exit/relaunch
+{"ok":true,"threadId":"mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9","exists":true,"archived":false,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:13:52.331Z"}
+exit=0

@@ -1,0 +1,36 @@
+before: T3 threads: 2 -> [["fm-labproj", [["mcp:322fdf10", "failed", "unarchived"], ["mcp:c0c22c46", "interrupted", "unarchived"]]]]
+treehouse pool before:
+  slot 1 leased lab1)
+  slot 2 leased lab3)
+state files before: lab1.busy-gen lab1.busy-state lab1.git-hooks lab1.inbox lab1.meta lab1.status lab1.turn-ended lab3.git-hooks lab3.meta 
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-teardown.sh lab1 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+
+🌳 Worktree returned to pool.
+teardown lab1 complete (window mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9, worktree <lab>/pool/.treehouse/labproj-4d0f63/1/labproj)
+Backlog: lab1 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move lab1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-teardown.sh lab3 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for lab3: 75974
+
+🌳 Worktree returned to pool.
+teardown lab3 complete (window mcp:322fdf10-9dd6-4160-9df3-5076c531077f, worktree <lab>/pool/.treehouse/labproj-4d0f63/2/labproj)
+Backlog: lab3 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move lab3 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+after: T3 threads: 0 -> [["fm-labproj", []]]
+treehouse pool after:
+  slot 1 available 
+  slot 2 available 
+state files after: []
+CLAUDE.local.md / .codex left in slots: 0
+slot git status: ||
+$ bin/fm-t3-mcp.mjs state --thread mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9   # direct read after teardown
+{"ok":true,"threadId":"mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9","exists":true,"archived":true,"status":"interrupted","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:13:52.331Z"}
+exit=0
+$ bin/fm-t3-mcp.mjs state --thread mcp:322fdf10-9dd6-4160-9df3-5076c531077f   # direct read after teardown
+{"ok":true,"threadId":"mcp:322fdf10-9dd6-4160-9df3-5076c531077f","exists":true,"archived":true,"status":"failed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/2/labproj","turnAt":"2026-10-24T11:15:14.988Z"}
+exit=0
+# the project listing above omits archived threads; the direct reads show each thread archived:true with no active run

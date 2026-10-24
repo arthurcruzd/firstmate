@@ -1,0 +1,8 @@
+$ FM_T3CODE_PR_TOOLS_LIVE=1 FM_CONFIG_OVERRIDE=<lab>/home/config bin/fm-test-run.sh tests/fm-backend-t3code-pr-tools-live-e2e.test.sh
+FM_TEST_BEGIN 2026-10-24T11:23:48Z tests/fm-backend-t3code-pr-tools-live-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
+ok - t3code live: T3 0.1.0 with 2.1.310 (Claude Code) (claudeAgent claude-haiku-5-5) ran link_pull_request, list_thread_pull_requests, and unlink_pull_request in a Claude thread without a crash
+FM_TEST_END 2026-10-24T11:24:03Z tests/fm-backend-t3code-pr-tools-live-e2e.test.sh exit=0 duration_ms=15620 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=15700
+FM_TEST_SUMMARY_FAMILY family=live-harness-optin count=1 duration_ms=15620 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-backend-t3code-pr-tools-live-e2e.test.sh duration_ms=15620
+exit=0

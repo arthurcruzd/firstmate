@@ -1,0 +1,46 @@
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh lab4 <lab>/home/projects/labproj --scout --harness codex --model gpt-6-luna --effort low   # no approval file: default bypass
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+warning: could not confirm that ~/.codex/config.toml trusts <lab>/home/projects/labproj; Codex ignores an untrusted project's .codex/config.toml, so this T3 Codex thread would run without FM_TASK_ID, FM_TASK_INBOX, GOTMPDIR, and the core.hooksPath push guard Firstmate writes there; trust the project in the Codex configuration T3 uses ([projects."<main checkout>"] trust_level = "trusted", see docs/t3code-backend.md#setup)
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-4d0f63/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-4d0f63/1/labproj' to release it.
+spawned lab4 harness=codex kind=scout window=fm-lab4 worktree=<lab>/pool/.treehouse/labproj-4d0f63/1/labproj
+exit=0
+$ grep -E '^(harness|approval_mode|backend)=' <lab>/home/state/lab4.meta
+harness=codex
+approval_mode=bypass
+backend=t3code
+$ ls -A <lab>/home/config   # before failover
+backend
+t3code-token
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # before failover
+{"ok":true,"threadId":"mcp:34103747-1b9f-468f-be58-b5ecf3d9d927","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3A34103747-1b9f-468f-be58-b5ecf3d9d927:ordinal:1","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:23:32.514Z"}
+exit=0
+$ FM_HOME=<lab>/home bin/fm-approval-failover.sh apply lab4
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+error: backend=t3code already runs codex at T3's full-access runtime mode and cannot honor config/codex-approval-mode=approve-for-me; approve the pending request in T3 Code itself or choose another backend; nothing changed
+exit=1
+$ ls -A <lab>/home/config   # after failover
+backend
+t3code-token
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # after failover: not interrupted or archived by it
+{"ok":true,"threadId":"mcp:34103747-1b9f-468f-be58-b5ecf3d9d927","exists":true,"archived":false,"status":"running","activeRunId":"run:thread:mcp%3A34103747-1b9f-468f-be58-b5ecf3d9d927:ordinal:1","pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:23:32.514Z"}
+exit=0
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-teardown.sh lab4 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for lab4: 7309 8868
+
+🌳 Worktree returned to pool.
+teardown lab4 complete (window mcp:34103747-1b9f-468f-be58-b5ecf3d9d927, worktree <lab>/pool/.treehouse/labproj-4d0f63/1/labproj)
+Backlog: lab4 just finished (this home keeps no markdown backlog at <lab>/home/data/backlog.md). Update <lab>/home/data/backlog.md - move lab4 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+$ bin/fm-t3-mcp.mjs state --thread <thread>   # after teardown
+{"ok":true,"threadId":"mcp:34103747-1b9f-468f-be58-b5ecf3d9d927","exists":true,"archived":true,"status":"failed","activeRunId":null,"pendingRequestCount":0,"worktreePath":"<lab>/pool/.treehouse/labproj-4d0f63/1/labproj","turnAt":"2026-10-24T11:23:35.795Z"}
+exit=0

@@ -1,0 +1,24 @@
+$ FM_HOME=<lab>/home TREEHOUSE_ROOT=<lab>/pool bin/fm-spawn.sh lab1 <lab>/home/projects/labproj --scout --harness claude --model claude-haiku-5-5 --effort low
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <lab>/home
+
+🌳 Setting up worktree...
+🌳 Leased worktree at <lab>/pool/.treehouse/labproj-4d0f63/1/labproj. Run 'treehouse return <lab>/pool/.treehouse/labproj-4d0f63/1/labproj' to release it.
+spawned lab1 harness=claude kind=scout window=fm-lab1 worktree=<lab>/pool/.treehouse/labproj-4d0f63/1/labproj
+exit=0
+$ cat <lab>/home/state/lab1.meta
+window=fm-lab1
+endpoint_task_id=lab1
+worktree=<lab>/pool/.treehouse/labproj-4d0f63/1/labproj
+project=<lab>/home/projects/labproj
+harness=claude
+approval_mode=bypass
+kind=scout
+tasktmp=/tmp/fm-lab1
+model=claude-haiku-5-5
+effort=low
+busy_gen=g1792840255.22227.9470
+spawn_gen=s1792840256.20579.5053
+backend=t3code
+t3_thread_id=mcp:c0c22c46-4a57-4b73-ac95-a397eadb9de9
+t3_project_id=mcp:43feb14f-0da8-4069-902b-1304443b64d9
+exit=0
