@@ -98,6 +98,9 @@ What is never offered, or falls back to main:
 
 - While attended, a check-kind triggering close is never offered, even when other rows are eligible.
   Check-kind closes are merge-confirmation polls, Relay mentions, credential/auth failures, and every other legitimately main-only class.
+  The one exception is the watcher's own downtime resurface, `check: rearm-resurface`, which names no row and only asks for the queue to be presented again: it is offered when a clean scan leaves no row for main, an empty queue included, and the branch claims only the rows it may take.
+  On the attended supervision host only, `check: inactive-outcome` is offered when every row `bin/fm-inactive-reconcile.sh` queued repeats a done result main already has: a done child whose current status log holds a captain outcome in the outcome store recorded at or after its last `done` line; that row is claimed scoped to the child, and any other such row (a failed child, an uncovered done, a notice) keeps the close on main.
+  There too, `check: process-event source failed to start:` is offered when every key it names is a recorded second mate's reply-source launch failure (`procevent:remote-reply-<mate>:launch-failed:...`), claimed scoped to that mate for the branch prompt's verdict, because that source stops collecting whenever the mate's machine sleeps; any other source, a joined headline, and the episode's six-hour re-announcement (a key ending `-outage`) keep the close on main.
 - When a triggering close has no acceptor (extension absent, branch broken), it keeps today's wake-to-main path.
 - Watcher-failure alarms always go to main, because only main can repair the watcher cycle.
 
@@ -117,7 +120,9 @@ A decision-owned event surfaced by `bin/fm-watch.sh`'s signal path gets the same
 
 A second mate's status log is one shared channel carrying many independently keyed decisions, so its signal row is judged by the lines presented since the last drain rather than by the whole log.
 The row is excluded when one of those lines is a decision, blocked, or captain-held line, resolves a decision open just before it, or declares, in the status parser's key positions, the key of a decision still open in that log.
+Two lines that only echo what main already holds stay routine: a decision line that re-records a decision still open under the same key with the same note, and a resolution this home appended itself (main's own `fm-send --resolve-key` close, recorded in `bin/fm-classify-lib.sh`'s home-appends ledger).
 A resolution that closes nothing, key-less beside only keyed decisions or keyed for a key never open, stays routine.
+A second mate's row the watcher marked `needs-decision:` stays main's unless a cursor-bounded span explains the mark as such an unchanged re-record and holds nothing decision-owned.
 A key-less line otherwise falls back to its verb; an unrelated open decision alone leaves a routine span eligible, while a mixed span goes wholly to main.
 The status-presentation cursor bounds that span, and a missing or unmatched cursor falls back to the whole log.
 Single-task crewmate signals keep their existing Pi payload and attended-host whole-log rules, except that the TypeScript decision fold now ignores bare transition words without a colon or complete key token, matching `bin/fm-classify-lib.sh` on both crewmate and second-mate logs.
@@ -134,7 +139,7 @@ The cross-reference then applies two rules:
 
 - Any signal or stale trigger containing a decision-owned task goes wholly to main, including a batch that also contains routine rows.
 - An unread decision for one task keeps every later signal or stale trigger for that same task on main until the decision row is read.
-  This holds regardless of which key a row carries for that task: its status-file key, its `window=` alias, or its `terminal=` handle, which is what `bin/fm-watch.sh` keys an Orca task's stale rows by.
+  This holds regardless of which key a row carries for that task: its status-file key, its `window=` alias, its `terminal=` handle, which is what `bin/fm-watch.sh` keys an Orca task's stale rows by, or its `t3_thread_id=`, which keys a T3 Code task's.
 
 Other tasks remain independently eligible.
 The wake message itself retains its existing shape, so other harness-arm scripts remain unchanged.

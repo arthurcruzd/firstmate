@@ -698,7 +698,11 @@ test_classify_check_and_unknown_escalate() {
   case "$out" in escalate\|*) ;; *) fail "unknown did not fail-safe escalate: $out" ;; esac
   out=$(classify_heartbeat)
   case "$out" in self\|*) ;; *) fail "heartbeat did not self-handle: $out" ;; esac
-  pass "check + unknown escalate; heartbeat self-handles"
+  out=$(classify_check "check: rearm-resurface")
+  case "$out" in self\|*) ;; *) fail "the watcher's own recovery wake must self-handle under the daemon's drain: $out" ;; esac
+  out=$(classify_check "check: rearm-resurface: extra")
+  case "$out" in escalate\|*) ;; *) fail "only the exact watcher recovery wake may self-handle: $out" ;; esac
+  pass "check + unknown escalate; heartbeat and the watcher's own recovery wake self-handle"
 }
 
 # An unrecognized wake escalates once per identity. Delivery acknowledges that

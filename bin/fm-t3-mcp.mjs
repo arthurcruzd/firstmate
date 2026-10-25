@@ -15,13 +15,17 @@
 //     operator's own `t3 auth pairing create` scoped to SCOPES, spends it on
 //     T3's OAuth decision API at the chosen ceiling, exchanges the code with a PKCE verifier, and writes
 //     the credential, the server's origin, its environment id, and its version
-//     to the token file (mode 0600). The token and pairing code are never
-//     printed. Only the full-access ceiling is accepted. The origin defaults to
+//     to the token file (mode 0600). T3 0.1.2+ approves full access only from
+//     a code carrying its standard scope set, so against such a server (known
+//     from the matching runtime file's serverVersion, or from that exact
+//     decision refusal, retried once) the code is minted without --scope. The
+//     token and pairing code are never printed. Only the full-access ceiling is accepted. The origin defaults to
 //     $FM_T3CODE_ORIGIN, else the `origin` in
 //     ~/.t3/userdata/server-runtime.json.
 //   fm-t3-mcp.mjs status
-//     Credential expiry, the capability gate, and whether a loopback server's
-//     own process runs with telemetry off (telemetry: off|on|unknown; anything
+//     Credential expiry, the capability gate, and whether a server on this
+//     machine (loopback or one of its own interface addresses) runs with
+//     telemetry off in its own process (telemetry: off|on|unknown; anything
 //     but off adds a stderr warning). Changes nothing.
 //   fm-t3-mcp.mjs project-ensure --root <abs-path> [--title <title>]
 //     The live T3 project whose workspaceRoot is <root> by real path, created
@@ -30,15 +34,16 @@
 //   fm-t3-mcp.mjs project-read --project <id>
 //     That project's record (defaultModelSelection included); exit 3 with
 //     code project_not_found when T3 lists no live project with that id.
-//   fm-t3-mcp.mjs resolve-selection --harness <claude|codex> --instance <id>
+//   fm-t3-mcp.mjs resolve-selection --harness <claude|codex|grok|muse> --instance <id>
 //       --model <slug|default> --effort <level|default> [--project <id>]
 //     The model selection a launch sends, resolved against T3's own catalog
 //     (orchestrator_capabilities): the instance must exist, be usable, and run
-//     the harness's driver (claude: claudeAgent, codex: codex); the model must
+//     the harness's driver (claude: claudeAgent, codex: codex, grok: grok,
+//     muse: muse); the model must
 //     be one that instance lists; model default takes the project's default
 //     selection, which must name the same instance. A non-default effort
-//     replaces only the driver's reasoning option (claude: effort, codex:
-//     reasoningEffort) and keeps every other default option; every option is
+//     replaces only the driver's reasoning option (claude: effort, codex, grok,
+//     and muse: reasoningEffort) and keeps every other default option; every option is
 //     then checked against that model's descriptors. Exit 4 refuses.
 //   fm-t3-mcp.mjs launch --project <id> --title <title> --model-selection <json>
 //       [--worktree <abs-path>] [--branch <name>] [--message-file <file>]
@@ -69,9 +74,17 @@
 //     exits 1.
 //   fm-t3-mcp.mjs state --thread <id>
 //     exists, archived, status, activeRunId, pendingRequestCount,
-//     worktreePath, and turnAt (the latest run's completion, else its start or
-//     request time); a thread the verified server does not have reads
-//     exists:false.
+//     worktreePath, providerInstanceId, model, latestRunId, latestRunStatus,
+//     and turnAt (the latest run's completion, else its start or request
+//     time); a thread the verified server does not have reads exists:false.
+//   fm-t3-mcp.mjs resume --thread <id> --model-selection <json> [--worktree <abs-path>]
+//     Prepare an existing thread with no active run for a relaunch: unarchive
+//     it when archived, apply the model selection with t3_thread_configure,
+//     and read both back (resumed=true). It refuses, changing nothing, unless
+//     the thread is bound to <worktree> (the project root without it). A
+//     thread bound to another provider instance is left untouched and reads
+//     resumed=false, because a thread that has run cannot switch driver; the
+//     caller launches a new thread.
 //   fm-t3-mcp.mjs read --thread <id> [--limit <n>]
 //     t3_thread_read: the thread record and its latest run, unchanged. T3
 //     caps --limit at 100.
@@ -115,6 +128,9 @@
 //     archived:true and activeRunId:null (closed=true). A thread the verified
 //     server no longer has is already closed (missing=true). A close the
 //     read-back does not prove within the timeout exits 1 (close_unproven).
+//   fm-t3-mcp.mjs pin --thread <id> [--action pin|unpin]
+//     t3_thread_organize pin (or unpin): keeps a home's own primary thread at
+//     the top of every T3 client's sidebar (bin/fm-t3-host.sh).
 //   fm-t3-mcp.mjs thread-for-root --root <abs-path>
 //     The one unarchived, worktree-less thread with an active run on the live
 //     project rooted at <root>, across every t3_thread_list page; a fork
@@ -166,6 +182,7 @@ export const REQUIRED_TOOLS = [
   "t3_thread_wait",
   "t3_thread_interrupt",
   "t3_thread_organize",
+  "t3_thread_configure",
   "t3_thread_list",
   "t3_thread_configuration",
   "t3_project_list",
@@ -210,6 +227,8 @@ const READ_LIMIT_MAX = 100;
 const DRIVERS = {
   claude: { driverKind: "claudeAgent", effortOption: "effort" },
   codex: { driverKind: "codex", effortOption: "reasoningEffort" },
+  grok: { driverKind: "grok", effortOption: "reasoningEffort" },
+  muse: { driverKind: "muse", effortOption: "reasoningEffort" },
 };
 const REPEATABLE = new Set(["option", "thread", "escalated"]);
 // Every MCP session this invocation opened, ended when the verb returns.
@@ -268,12 +287,16 @@ export function tokenFile(flags, env = process.env) {
   return path.join(config, "t3code-token");
 }
 
+function runtimeFile(env) {
+  return path.join(env.HOME || os.homedir(), ".t3", "userdata", "server-runtime.json");
+}
+
 // The sign-in origin: --url, else $FM_T3CODE_ORIGIN, else the origin the
 // local T3 server writes to its runtime file.
 export function loginOrigin(flags, env = process.env) {
   if (flags.url) return normalizeOrigin(flags.url);
   if (env.FM_T3CODE_ORIGIN) return normalizeOrigin(env.FM_T3CODE_ORIGIN);
-  const runtime = path.join(env.HOME || os.homedir(), ".t3", "userdata", "server-runtime.json");
+  const runtime = runtimeFile(env);
   let origin = "";
   try {
     origin = JSON.parse(readFileSync(runtime, "utf8")).origin || "";
@@ -282,6 +305,26 @@ export function loginOrigin(flags, env = process.env) {
   }
   if (!origin) usage(`no T3 origin: pass --url, set FM_T3CODE_ORIGIN, or start T3 Code so it writes ${runtime}`);
   return normalizeOrigin(origin);
+}
+
+// True when the local runtime file describes the server at <origin> and its
+// serverVersion is at least 0.1.2, the release whose full-access approval
+// needs a pairing code with T3's standard scope set. A prerelease of 0.1.2
+// counts as older; the decision-refusal retry covers it.
+export function standardScopesKnown(origin, env = process.env) {
+  const runtime = runtimeFile(env);
+  let info;
+  try {
+    info = JSON.parse(readFileSync(runtime, "utf8"));
+    if (new URL(info.origin).origin !== origin) return false;
+  } catch {
+    return false;
+  }
+  const m = /^(\d+)\.(\d+)\.(\d+)(-)?/.exec(String(info.serverVersion ?? ""));
+  if (!m) return false;
+  const [major, minor, patch] = m.slice(1, 4).map(Number);
+  const cmp = major - 0 || minor - 1 || patch - 2;
+  return cmp > 0 || (cmp === 0 && !m[4]);
 }
 
 function normalizeOrigin(raw) {
@@ -533,19 +576,26 @@ function isNotFound(err) {
 // T3CODE_TELEMETRY_ENABLED false (apps/server's AnalyticsService config).
 // Only a loopback server's own process environment can show that, read from
 // the listening process on this machine; anything else reads `unknown`.
-export function telemetryState(origin, probe = probeListenerEnv) {
+export function telemetryState(origin, probe = probeListenerEnv, localAddresses = interfaceAddresses) {
   let url;
   try {
     url = new URL(origin);
   } catch {
     return "unknown";
   }
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return "unknown";
+  // A loopback origin or one of this machine's own interface addresses, such
+  // as its tailnet address, is a server whose process this machine can read.
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (!["127.0.0.1", "localhost", "::1"].includes(host) && !localAddresses().includes(host)) return "unknown";
   const env = probe(url.port || (url.protocol === "https:" ? "443" : "80"));
   if (env === null) return "unknown";
   const m = env.match(/(?:^|\s|\0)T3CODE_TELEMETRY_ENABLED=([^\s\0]*)/);
   if (!m) return "on";
   return /^(false|0|no|off)$/i.test(m[1]) ? "off" : "on";
+}
+
+function interfaceAddresses() {
+  return Object.values(os.networkInterfaces()).flat().filter(Boolean).map((a) => a.address);
 }
 
 function probeListenerEnv(port) {
@@ -587,21 +637,35 @@ async function login(flags) {
     state,
     resource,
   };
-  const pairingArgs = ["auth", "pairing", "create"];
-  if (flags["base-dir"]) pairingArgs.push("--base-dir", flags["base-dir"]);
-  for (const scope of SCOPES) pairingArgs.push("--scope", scope);
-  pairingArgs.push("--ttl", "2m", "--label", `${label}-mcp-approval`, "--json");
-  let pairing;
-  try {
-    pairing = JSON.parse(execFileSync(t3, pairingArgs, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-  } catch (err) {
-    throw new Refusal("pairing_failed", `could not mint a pairing code with '${t3} auth pairing create': ${err.status !== undefined ? `exit ${err.status}` : err.message}`, 1);
+  // Narrow scopes where T3 allows them; T3's standard set where it requires it.
+  const approve = async (scoped) => {
+    const pairingArgs = ["auth", "pairing", "create"];
+    if (flags["base-dir"]) pairingArgs.push("--base-dir", flags["base-dir"]);
+    if (scoped) for (const scope of SCOPES) pairingArgs.push("--scope", scope);
+    pairingArgs.push("--ttl", "2m", "--label", `${label}-mcp-approval`, "--json");
+    let pairing;
+    try {
+      pairing = JSON.parse(execFileSync(t3, pairingArgs, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    } catch (err) {
+      throw new Refusal("pairing_failed", `could not mint a pairing code with '${t3} auth pairing create': ${err.status !== undefined ? `exit ${err.status}` : err.message}`, 1);
+    }
+    if (!pairing?.credential) throw new Refusal("pairing_failed", "t3 auth pairing create returned no credential", 1);
+    return postJson(`${origin}/oauth/mcp/decision`, {
+      authorization,
+      decision: { _tag: "pairing-code", access, code: pairing.credential },
+    });
+  };
+  let decision;
+  if (standardScopesKnown(origin)) {
+    decision = await approve(false);
+  } else {
+    try {
+      decision = await approve(true);
+    } catch (err) {
+      if (!(err instanceof Refusal && /cannot grant this access/i.test(err.message))) throw err;
+      decision = await approve(false);
+    }
   }
-  if (!pairing?.credential) throw new Refusal("pairing_failed", "t3 auth pairing create returned no credential", 1);
-  const decision = await postJson(`${origin}/oauth/mcp/decision`, {
-    authorization,
-    decision: { _tag: "pairing-code", access, code: pairing.credential },
-  });
   const back = new URL(decision.redirectTo);
   if (back.searchParams.get("state") !== state) throw new Refusal("oauth_failed", "OAuth state mismatch on the decision redirect", 3);
   const code = back.searchParams.get("code");
@@ -684,6 +748,10 @@ async function state(flags) {
     activeRunId: t.activeRunId ?? null,
     pendingRequestCount: t.pendingRequestCount ?? 0,
     worktreePath: t.worktreePath ?? null,
+    providerInstanceId: t.providerInstanceId ?? null,
+    model: t.model ?? null,
+    latestRunId: run.runId ?? t.latestRunId ?? null,
+    latestRunStatus: run.status ?? null,
     turnAt: run.completedAt ?? run.startedAt ?? run.requestedAt ?? null,
   };
 }
@@ -774,7 +842,7 @@ function optionProblem(model, option) {
 async function resolveSelection(flags) {
   const harness = need(flags, "harness");
   const driver = DRIVERS[harness];
-  if (!driver) throw new Refusal("harness_unsupported", `backend=t3code supports only the claude and codex harnesses, not '${harness}'`);
+  if (!driver) throw new Refusal("harness_unsupported", `backend=t3code supports only the claude, codex, grok, and muse harnesses, not '${harness}'`);
   const instanceId = need(flags, "instance");
   const wantModel = need(flags, "model");
   const effort = need(flags, "effort");
@@ -1185,6 +1253,55 @@ async function listThreads(session, projectId, statuses) {
   return [...seen.values()];
 }
 
+// resume: the relaunch half that keeps the same thread, so the replacement
+// agent continues the thread's transcript in the same worktree. Only a thread
+// with no active run is prepared; a thread bound to another provider instance
+// is reported, never changed.
+async function resume(flags) {
+  const threadId = need(flags, "thread");
+  const selection = modelSelection(flags);
+  const { session } = await verifiedSession(flags);
+  const worktree = flags.worktree;
+  if (worktree !== undefined && !path.isAbsolute(worktree)) usage("--worktree must be an absolute path");
+  let t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+  if (worktree ? realOrRaw(t.worktreePath ?? "") !== realOrRaw(worktree) : (t.worktreePath ?? null) !== null) {
+    throw new Refusal("binding_mismatch", `thread ${threadId} is bound to ${t.worktreePath ?? "the project root"}, not ${worktree ?? "the project root"}; refusing to resume it there`, 4);
+  }
+  if ((t.providerInstanceId ?? null) !== selection.instanceId) {
+    return { ok: true, threadId, resumed: false, providerInstanceId: t.providerInstanceId ?? null };
+  }
+  if (t.activeRunId) {
+    throw new Refusal("run_active", `thread ${threadId} still has active run ${t.activeRunId}; stop it before resuming`, 4, { activeRunId: t.activeRunId });
+  }
+  const unarchived = t.archived === true || Boolean(t.archivedAt);
+  if (unarchived) await session.call("t3_thread_organize", { threadId, action: "unarchive" });
+  try {
+    await session.call("t3_thread_configure", { threadId, modelSelection: selection });
+    t = threadOf(await session.call("t3_thread_read", { threadId, limit: 1, runLimit: 1 }));
+    const problems = [];
+    if (t.archived === true || t.archivedAt) problems.push("still archived");
+    if (t.providerInstanceId !== selection.instanceId) problems.push(`provider ${t.providerInstanceId ?? "none"}`);
+    if (t.model !== selection.model) problems.push(`model ${t.model ?? "none"}`);
+    if (problems.length) throw new Refusal("resume_unproven", `thread ${threadId} did not read back resumed (${problems.join(", ")})`, 3);
+  } catch (err) {
+    // A resume that unarchived the thread and then failed archives it again
+    // (best effort), so a failed relaunch never leaves an active thread a
+    // doorbell would wake.
+    if (unarchived) await session.call("t3_thread_organize", { threadId, action: "archive" }).catch(() => {});
+    throw err;
+  }
+  return { ok: true, threadId, resumed: true, model: t.model, status: t.status ?? null };
+}
+
+async function pin(flags) {
+  const threadId = need(flags, "thread");
+  const action = flags.action ?? "pin";
+  if (!["pin", "unpin"].includes(action)) usage(`--action ${action} is not pin or unpin`);
+  const { session } = await verifiedSession(flags);
+  await session.call("t3_thread_organize", { threadId, action });
+  return { ok: true, threadId, action };
+}
+
 // thread-for-root: away-mode supervisor discovery. T3 puts no thread id into
 // the agent's environment, so the only self-discovery is a cwd match: on the
 // project rooted at <root>, the unarchived thread with no worktree of its own
@@ -1216,6 +1333,7 @@ const VERBS = {
   "project-read": projectRead,
   "resolve-selection": resolveSelection,
   launch,
+  resume,
   send,
   read,
   capture,
@@ -1225,6 +1343,7 @@ const VERBS = {
   respond,
   watch,
   archive,
+  pin,
   "thread-for-root": threadForRoot,
 };
 

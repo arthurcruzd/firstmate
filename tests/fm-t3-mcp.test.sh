@@ -61,6 +61,48 @@ test_login_writes_private_credential_and_never_prints_token() {
   pass "fm-t3-mcp login: PKCE sign-in writes a 0600 credential with the environment id and prints no secret"
 }
 
+test_login_standard_scopes_on_0_1_2() {
+  local cli home
+  t3_fake_case "$TMP_ROOT/cases/login-standard" '{"standardScopesOnly":true}'
+  home="$TMP_ROOT/std-home"
+  mkdir -p "$home/.t3/userdata"
+  rm -rf "$TMP_ROOT/cli-std"; cli=$(t3_fake_t3_cli "$TMP_ROOT/cli-std")
+  rm -f "$CRED"
+  OUT=$(HOME="$home" node "$HELPER" login --url "$T3_FAKE_URL" --access full-access --t3 "$cli" --token-file "$CRED" 2>"$TMP_ROOT/stderr"); RC=$?
+  ERR=$(cat "$TMP_ROOT/stderr")
+  expect_code 0 "$RC" "an unknown-version server's scope refusal should retry with T3's standard scopes: $ERR"
+  assert_equals 2 "$(grep -c 'auth pairing create' "$TMP_ROOT/cli-std/t3-cli.log")" "the refusal costs exactly one retry"
+  assert_equals 1 "$(grep 'auth pairing create' "$TMP_ROOT/cli-std/t3-cli.log" | grep -vc -- '--scope')" "the retry mints without --scope"
+  assert_grep '"scope":"orchestration:read orchestration:operate standard:fake"' "$CRED" "the credential records the scope T3 granted"
+  assert_equals "orchestration:read orchestration:operate standard:fake" "$(field "$OUT" scope)" "login reports the granted scope"
+  assert_not_contains "$OUT$ERR" "PAIR-OK" "login must never print either pairing code"
+  assert_not_contains "$OUT$ERR" "tok-" "login must never print the access token"
+
+  printf '{"origin":"%s/","serverVersion":"0.1.2"}\n' "$T3_FAKE_URL" > "$home/.t3/userdata/server-runtime.json"
+  rm -rf "$TMP_ROOT/cli-std"; cli=$(t3_fake_t3_cli "$TMP_ROOT/cli-std")
+  rm -f "$CRED"
+  OUT=$(HOME="$home" node "$HELPER" login --url "$T3_FAKE_URL" --access full-access --t3 "$cli" --token-file "$CRED" 2>"$TMP_ROOT/stderr"); RC=$?
+  expect_code 0 "$RC" "a known 0.1.2 server should sign in with T3's standard scopes: $(cat "$TMP_ROOT/stderr")"
+  assert_equals 1 "$(grep -c 'auth pairing create' "$TMP_ROOT/cli-std/t3-cli.log")" "a known 0.1.2 server wastes no pairing code"
+  assert_no_grep "--scope" "$TMP_ROOT/cli-std/t3-cli.log" "a known 0.1.2 server gets a code without --scope"
+  assert_grep '"scope":"orchestration:read orchestration:operate standard:fake"' "$CRED" "the credential records the standard scope set"
+
+  # shellcheck disable=SC2016
+  assert_equals "false true true false false" "$(HOME="$home" FM_T3_HELPER="$HELPER" FM_T3_ORIGIN="$T3_FAKE_URL" node --input-type=module -e '
+    import { writeFileSync } from "node:fs";
+    const { standardScopesKnown } = await import(process.env.FM_T3_HELPER);
+    const origin = process.env.FM_T3_ORIGIN;
+    const file = `${process.env.HOME}/.t3/userdata/server-runtime.json`;
+    const out = [];
+    for (const [v, o] of [["0.1.1", origin], ["0.1.2", origin], ["0.2.0", origin], ["0.1.2-nightly.1", origin], ["0.1.2", "http://127.0.0.1:1"]]) {
+      writeFileSync(file, JSON.stringify({ origin: o, serverVersion: v }));
+      out.push(standardScopesKnown(origin));
+    }
+    console.log(out.join(" "));')" "only a matching runtime file at 0.1.2 or later skips the narrow attempt"
+  t3_fake_credential "$CRED"
+  pass "fm-t3-mcp login: T3 0.1.2's full-access approval gets T3's standard scopes, by version or by one retry on its refusal"
+}
+
 test_login_origin_defaults() {
   local cli home
   t3_fake_case "$TMP_ROOT/cases/login-origin"
@@ -124,10 +166,16 @@ test_gate_refuses_missing_tools() {
   expect_code 4 "$RC" "a server without t3_thread_launch must be refused"
   assert_equals capability_gate "$(field "$OUT" error.code)" "the refusal should be the capability gate"
   assert_contains "$ERR" "t3_thread_launch" "the refusal should name the missing tool"
-  t3_fake_set 'w.tools = ["t3_thread_launch","t3_thread_send","t3_thread_read","t3_thread_wait","t3_thread_interrupt","t3_thread_organize","t3_thread_list","t3_thread_configuration","t3_project_list","t3_project_create","t3_pending_request_list","t3_pending_request_read","t3_pending_request_respond","orchestrator_capabilities"]'
+  t3_fake_set 'w.tools = ["t3_thread_launch","t3_thread_send","t3_thread_read","t3_thread_wait","t3_thread_interrupt","t3_thread_organize","t3_thread_configure","t3_thread_list","t3_thread_configuration","t3_project_list","t3_project_create","t3_pending_request_list","t3_pending_request_read","t3_pending_request_respond","orchestrator_capabilities"]'
   mcp status
   expect_code 4 "$RC" "a server without t3_environment_read cannot prove its identity"
   assert_contains "$ERR" "lacks t3_environment_read" "the refusal should name the missing identity tool"
+  # resume configures the thread, so a server without that tool is refused
+  # before any mutation.
+  t3_fake_set 'w.tools = ["t3_thread_launch","t3_thread_send","t3_thread_read","t3_thread_wait","t3_thread_interrupt","t3_thread_organize","t3_thread_list","t3_thread_configuration","t3_project_list","t3_project_create","t3_pending_request_list","t3_pending_request_read","t3_pending_request_respond","orchestrator_capabilities","t3_environment_read"]'
+  mcp status
+  expect_code 4 "$RC" "a server without t3_thread_configure must be refused"
+  assert_contains "$ERR" "t3_thread_configure" "the refusal should name t3_thread_configure"
   pass "fm-t3-mcp gate: refuses a server missing a required tool or its identity tool"
 }
 
@@ -363,6 +411,57 @@ test_send_state_capture_interrupt_archive() {
   pass "fm-t3-mcp thread verbs: idempotent send, state and turn time, bounded capture, interrupt claims, and proven archive"
 }
 
+test_resume_prepares_the_same_thread() {
+  local thread msg
+  fresh_case resume
+  thread=$(new_thread)
+  msg="$TMP_ROOT/msg"
+  printf 'first turn' > "$msg"
+  mcp send --thread "$thread" --message-file "$msg" --client-request-id resume-1
+  mcp resume --thread "$thread" --model-selection "$SEL" --worktree "$WT"
+  expect_code 4 "$RC" "a thread with an active run must not be resumed"
+  assert_equals run_active "$(field "$OUT" error.code)" "the refusal names the active run"
+  mcp archive --thread "$thread"
+  mcp state --thread "$thread"
+  assert_equals true "$(field "$OUT" archived)" "the fixture thread is archived"
+  : > "$T3_FAKE_LOG"
+  mcp resume --thread "$thread" --model-selection '{"instanceId":"claudeAgent","model":"claude-haiku-5-5"}' --worktree "$TMP_ROOT/elsewhere"
+  expect_code 4 "$RC" "a thread bound to another workspace must not be resumed"
+  assert_equals binding_mismatch "$(field "$OUT" error.code)" "the refusal names the binding"
+  [ -z "$(t3_fake_mutations)" ] || fail "a refused resume changes nothing, got '$(t3_fake_mutations)'"
+  mcp resume --thread "$thread" --model-selection '{"instanceId":"claudeAgent","model":"claude-haiku-5-5"}' --worktree "$WT"
+  expect_code 0 "$RC" "resume should unarchive and reconfigure: $ERR"
+  assert_equals true "$(field "$OUT" resumed)" "a same-instance thread resumes"
+  assert_equals claude-haiku-5-5 "$(field "$OUT" model)" "the new model is read back"
+  [ "$(t3_fake_mutations)" = "t3_thread_organize t3_thread_configure" ] || fail "resume must unarchive then configure, got '$(t3_fake_mutations)'"
+  assert_contains "$(t3_fake_calls t3_thread_organize)" '"action":"unarchive"' "resume unarchives"
+  mcp state --thread "$thread"
+  assert_equals false "$(field "$OUT" archived)" "a resumed thread is not archived"
+  assert_equals claude-haiku-5-5 "$(field "$OUT" model)" "state reports the thread's model"
+  assert_equals claudeAgent "$(field "$OUT" providerInstanceId)" "state reports the thread's provider instance"
+  : > "$T3_FAKE_LOG"
+  mcp resume --thread "$thread" --model-selection '{"instanceId":"codex","model":"gpt-6-luna"}' --worktree "$WT"
+  expect_code 0 "$RC" "a thread on another instance is reported, not an error: $ERR"
+  assert_equals false "$(field "$OUT" resumed)" "another instance reads resumed=false"
+  assert_equals claudeAgent "$(field "$OUT" providerInstanceId)" "the bound instance is reported"
+  [ -z "$(t3_fake_mutations)" ] || fail "a thread on another instance is left untouched, got '$(t3_fake_mutations)'"
+  # A configure failure after the unarchive archives the thread again instead
+  # of leaving it active.
+  mcp archive --thread "$thread"
+  t3_fake_set 'w.failTools = { t3_thread_configure: { code: "invalid_request", message: "configure refused" } }'
+  mcp resume --thread "$thread" --model-selection '{"instanceId":"claudeAgent","model":"claude-sonnet-5-5"}' --worktree "$WT"
+  expect_code 3 "$RC" "a refused configure must fail the resume"
+  t3_fake_set 'w.failTools = {}'
+  mcp state --thread "$thread"
+  assert_equals true "$(field "$OUT" archived)" "a resume that failed after unarchiving must leave the thread archived"
+  mcp pin --thread "$thread"
+  expect_code 0 "$RC" "pin should succeed: $ERR"
+  assert_contains "$(t3_fake_calls t3_thread_organize)" '"action":"pin"' "pin organizes the thread with the pin action"
+  mcp pin --thread "$thread" --action sideways
+  expect_code 2 "$RC" "pin refuses an unknown action"
+  pass "fm-t3-mcp resume: refuses an active run or another workspace, unarchives and reconfigures the same thread, reports another instance untouched, re-archives on a failed configure, and pins"
+}
+
 test_thread_for_root() {
   local project captain other
   fresh_case thread-for-root
@@ -431,6 +530,26 @@ test_telemetry_reported() {
   assert_not_equals off "$(field "$OUT" telemetry)" "a server without the setting is not reported off"
   assert_contains "$ERR" "T3CODE_TELEMETRY_ENABLED=false" "telemetry not proven off warns with the fix"
   pass "fm-t3-mcp status: reports telemetry off only when the server process proves it, and warns otherwise"
+}
+
+# A server bound to one of this machine's own interface addresses, such as its
+# tailnet address, is read like a loopback one; any other host stays unknown.
+test_telemetry_reads_a_local_interface_origin() {
+  local states
+  # shellcheck disable=SC2016
+  states=$(FM_T3_HELPER="$HELPER" node --input-type=module -e '
+const { telemetryState } = await import(process.env.FM_T3_HELPER);
+const off = () => "T3CODE_TELEMETRY_ENABLED=false\0";
+const local = () => ["100.64.0.7", "fd7a::7"];
+console.log([
+  telemetryState("http://100.64.0.7:3773", off, local),
+  telemetryState("http://[fd7a::7]:3773", off, local),
+  telemetryState("http://100.64.0.8:3773", off, local),
+  telemetryState("http://[::1]:3773", off, local),
+].join(" "));
+')
+  assert_equals "off off unknown off" "$states" "an origin on this machine's own interface reads its process"
+  pass "fm-t3-mcp telemetry: a tailnet or other local interface origin is probed like loopback, a foreign host stays unknown"
 }
 
 test_read_limit_matches_t3_cap() {
@@ -801,6 +920,7 @@ test_capture_clamps_lines_and_closes_session() {
 
 t3_fake_start "$TMP_ROOT/server"
 test_login_writes_private_credential_and_never_prints_token
+test_login_standard_scopes_on_0_1_2
 test_login_origin_defaults
 test_login_refuses_other_ceilings
 test_status_gate_and_protocol
@@ -812,9 +932,11 @@ test_projects_by_real_path
 test_launch_binds_workspace
 test_launch_refusals
 test_send_state_capture_interrupt_archive
+test_resume_prepares_the_same_thread
 test_thread_for_root
 test_typed_failure_and_transport_errors
 test_telemetry_reported
+test_telemetry_reads_a_local_interface_origin
 test_read_limit_matches_t3_cap
 test_interrupt_confirms_only_the_interrupted_run
 test_send_lost_reply_is_unconfirmed_and_retry_is_one_delivery

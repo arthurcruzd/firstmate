@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bin/backends/t3code.sh - the T3 Code orchestration-server adapter.
 #
-# T3 owns the agent session (it launches Claude or Codex itself) while
+# T3 owns the agent session (it launches Claude, Codex, Grok, or Muse itself) while
 # Treehouse still owns the task worktree. Firstmate drives the T3 server only
 # through its Orchestrator V2 `/mcp` endpoint, signed in as an OAuth
 # `mcp-client`; bin/fm-t3-mcp.mjs owns that transport, the credential, the
@@ -19,12 +19,14 @@
 # instead as per-directory harness config that bin/fm-spawn.sh writes into the
 # launch directory before the first turn: `.claude/settings.local.json` `env`
 # for Claude, `.codex/config.toml` `[shell_environment_policy] set` for Codex.
+# Grok and Muse read no per-directory environment, so their workers get none
+# and rely on the brief's absolute paths (docs/t3code-backend.md).
 #
 # Config (gitignored config/ of the active home):
 #   t3code-token      the mcp-client credential the captain's
 #                     `bin/fm-t3-mcp.mjs login` writes, mode 0600
 #   t3code-instances  optional `harness=instanceId` lines (claude=claudeAgent,
-#                     codex=codex by default)
+#                     codex=codex, grok=grok, muse=muse by default)
 
 # T3 has no composer, but the shared submit dispatcher in bin/fm-backend.sh
 # prepares and reads the composer dialog sink around every adapter, so this
@@ -93,7 +95,9 @@ fm_backend_t3code_instance_id() {  # <harness>
   case "$harness" in
     claude) value=claudeAgent ;;
     codex) value=codex ;;
-    *) echo "error: backend=t3code supports only the claude and codex harnesses, not '$harness'" >&2; return 1 ;;
+    grok) value=grok ;;
+    muse) value=muse ;;
+    *) echo "error: backend=t3code supports only the claude, codex, grok, and muse harnesses, not '$harness'" >&2; return 1 ;;
   esac
   file="$(fm_backend_t3code_config_dir)/t3code-instances"
   if [ -f "$file" ]; then
@@ -253,7 +257,7 @@ fm_backend_t3code_thread_state() {  # <thread-id>
 # drains), ready (completed), interrupted (interrupted, cancelled,
 # rolled_back), error (failed), archived, closing (archived while its run
 # still drains: not yet proven closed, so it reads unreadable rather than
-# missing), http-404 (the verified server has no such thread), or
+# dead), http-404 (the verified server has no such thread), or
 # http-failure (unreachable, refused, or unreadable).
 fm_backend_t3code_probe() {  # <thread-id>
   local out
@@ -294,15 +298,20 @@ process.stdout.write(String(Math.max(0, Math.floor((Date.now() - at) / 1000))));
 ' 2>/dev/null
 }
 
-# The one status table: "<busy_state> <agent_state>" per probe row.
+# The one status table: "<busy_state> <agent_state>" per probe row. An
+# archived thread whose run has drained is a stopped agent whose thread,
+# transcript, and worktree binding are kept (exit archives; relaunch
+# unarchives), so it reads dead, while only a thread the verified server does
+# not have reads missing.
 fm_backend_t3code_state_row() {  # <probe-row>
   case "$1" in
     starting|running) printf 'busy alive' ;;
     # A pending request is not progress: like a pane's blocked prompt it
     # reads idle, so the wedge ladder never defers it as a running turn.
     blocked|ready|idle|interrupted) printf 'idle alive' ;;
+    archived) printf 'idle dead' ;;
     error) printf 'unknown dead' ;;
-    archived|http-404) printf 'unknown missing' ;;
+    http-404) printf 'unknown missing' ;;
     *) printf 'unknown unreadable' ;;
   esac
 }
@@ -396,6 +405,66 @@ fm_backend_t3code_kill() {  # <thread-id>
   fi
   out=$(fm_backend_t3code_mcp archive --thread "$thread") || return 1
   [ "$(printf '%s' "$out" | fm_backend_t3code_json_get closed)" = true ]
+}
+
+# fm_backend_t3code_agent_stop: the control plane's `exit`. V2 `/mcp` has no
+# session stop, so the agent is stopped the one way T3 offers: interrupt any
+# running turn, then archive the thread, which ends its provider process. The
+# thread, transcript, and worktree binding stay, and the archive is
+# reversible, so the endpoint is preserved for a relaunch to resume. Success
+# needs the same read-back the teardown close needs.
+fm_backend_t3code_agent_stop() {  # <thread-id>
+  fm_backend_t3code_kill "$1"
+}
+
+# fm_backend_t3code_thread_resume <thread-id> <model-selection-json>
+# [worktree]: the relaunch half that keeps the endpoint. Prints `resumed` once
+# T3 reads the thread back unarchived on <model-selection> and bound to
+# <worktree> (the project root when empty), so the next message continues the
+# same transcript in the copy holding the work; prints `rebind` when the thread
+# is bound to another provider instance, which a thread that has run cannot
+# leave, so the caller launches a new thread in the same worktree instead.
+# Fails otherwise, a thread bound to any other workspace included.
+fm_backend_t3code_thread_resume() {  # <thread-id> <model-selection-json> [worktree]
+  local out
+  local -a where=()
+  [ -z "${3:-}" ] || where=(--worktree "$3")
+  out=$(fm_backend_t3code_mcp resume --thread "$1" --model-selection "$2" ${where[@]+"${where[@]}"}) || return 1
+  case "$(printf '%s' "$out" | fm_backend_t3code_json_get resumed)" in
+    true) printf 'resumed' ;;
+    false) printf 'rebind' ;;
+    *) return 1 ;;
+  esac
+}
+
+# fm_backend_t3code_restart_reconcile <thread-id> <marker-file> <message>: a
+# T3 server restart terminalizes every in-flight run as `cancelled` and does
+# not resume it, so the worker's turn ended without its own status line.
+# Firstmate never cancels a run itself (its interrupt ends a run
+# `interrupted`), so a latest run that reads `cancelled` and is not yet in
+# <marker-file> is re-steered once with <message>, under a request id derived
+# from that run so a retried send is the same message. Prints the reconciled
+# run id and returns 0 after the send; returns 1 when there is nothing to
+# reconcile; returns 2 when the read or send failed (the marker is untouched,
+# so the next poll retries).
+fm_backend_t3code_restart_reconcile() {  # <thread-id> <marker-file> <message>
+  local thread=$1 marker=$2 message=$3 out run seen='' rid file rc=0
+  out=$(fm_backend_t3code_thread_state "$thread" 2>/dev/null) || return 2
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get exists)" = true ] || return 1
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get archived)" = false ] || return 1
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get status)" = cancelled ] || return 1
+  [ "$(printf '%s' "$out" | fm_backend_t3code_json_get latestRunStatus)" = cancelled ] || return 1
+  run=$(printf '%s' "$out" | fm_backend_t3code_json_get latestRunId) || return 1
+  [ ! -f "$marker" ] || IFS= read -r seen < "$marker" || true
+  [ "$seen" != "$run" ] || return 1
+  rid="fm-restart-$(printf '%s' "$run" | LC_ALL=C tr -c 'A-Za-z0-9._:-' '_')"
+  file=$(mktemp "${TMPDIR:-/tmp}/fm-t3code-msg.XXXXXX") || return 2
+  printf '%s' "$message" > "$file" || { rm -f "$file"; return 2; }
+  fm_backend_t3code_mcp send --thread "$thread" --message-file "$file" --client-request-id "$rid" >/dev/null || rc=$?
+  rm -f "$file"
+  [ "$rc" -eq 0 ] || return 2
+  printf '%s\n' "$run" > "$marker" || return 2
+  printf '%s' "$run"
 }
 
 # fm_backend_t3code_home_env_cleanup: remove what a T3 secondmate spawn wrote
@@ -575,11 +644,42 @@ fm_backend_t3code_resume_failed() {  # <thread-id>
   fm_backend_t3code_turn_start "$1" "Firstmate recovery: your previous T3 run ended failed. Re-read your AGENTS.md and your home's config first, since either may have changed while the run was down. Then reconcile the work already recorded in your home, report anything your parent needs through your parent channel, then idle as your charter says."
 }
 
+# Ship and scout workers; bin/fm-spawn.sh keeps a secondmate to claude and
+# codex, the harnesses with a verified T3 supervision path.
 fm_backend_t3code_validate_harness() {  # <harness>
   case "$1" in
-    claude|codex) return 0 ;;
-    *) echo "error: backend=t3code runs only the claude and codex harnesses, not '$1'" >&2; return 1 ;;
+    claude|codex|grok|muse) return 0 ;;
+    *) echo "error: backend=t3code runs only the claude, codex, grok, and muse harnesses, not '$1'" >&2; return 1 ;;
   esac
+}
+
+# fm_backend_t3code_admit <harness> <kind> <claude-permission-mode>
+#   <launch-env-enabled 0|1> <worker-account>: the launch settings T3 can run,
+# checked by bin/fm-control.sh before a relaunch stops the running agent. T3
+# starts the agent itself, at full access, with its provider instance's own
+# account and environment, so a launch setting only a Firstmate-built command
+# line can apply refuses instead of being silently widened or dropped.
+# bin/fm-spawn.sh applies the full launch admission again before any mutation.
+fm_backend_t3code_admit() {
+  fm_backend_t3code_validate_harness "$1" || return 1
+  # Grok and Muse run T3 ship and scout workers only: a secondmate needs the
+  # supervision path verified for claude and codex threads.
+  if [ "$2" = secondmate ] && [ "$1" != claude ] && [ "$1" != codex ]; then
+    echo "error: backend=t3code runs a secondmate only on the claude or codex harness, not '$1'" >&2
+    return 1
+  fi
+  if [ "$1" = claude ] && [ "$3" != bypass ]; then
+    echo "error: backend=t3code runs claude at T3's full-access runtime mode and cannot honor config/claude-permission-mode=$3; remove that file or choose another backend" >&2
+    return 1
+  fi
+  if [ "$4" = 1 ]; then
+    echo "error: backend=t3code cannot apply config/launch-env-allowlist because T3 starts the agent with its provider instance's environment; remove that file or choose another backend" >&2
+    return 1
+  fi
+  if [ -n "$5" ]; then
+    echo "error: backend=t3code cannot apply the $1 worker account pin because T3's provider instance owns the account; select that instance in config/t3code-instances instead" >&2
+    return 1
+  fi
 }
 
 # fm_backend_t3code_codex_trusted: whether ${CODEX_HOME:-~/.codex}/config.toml

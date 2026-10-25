@@ -159,6 +159,8 @@ esac
 . "$SCRIPT_DIR/fm-hook-host-lib.sh"
 # shellcheck source=bin/fm-supervision-engine-lib.sh
 . "$SCRIPT_DIR/fm-supervision-engine-lib.sh"
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$SCRIPT_DIR/fm-t3-host-lib.sh"
 
 # fm-watch.sh touches the liveness beacon once per cycle, immediately before
 # its terminal wait, so a healthy watcher's beacon can legitimately age up to
@@ -215,6 +217,9 @@ fi
 
 # --- AFK: the away daemon owns the watcher and triage; never rewake ----------
 [ -e "$STATE/.afk" ] && exit 0
+# A T3-hosted home whose wake relay owns the watcher (bin/fm-t3-host.sh) never
+# arms from the session: T3 can unload an idle session and its hooks with it.
+fm_t3_relay_owns_home "$STATE" && exit 0
 
 # --- need: whatever bin/fm-supervision-lib.sh counts as supervision need ------
 need_supervision() {

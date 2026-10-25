@@ -5,6 +5,8 @@ The router owns Muse's task-kind boundary.
 
 ## Operating facts
 
+These command-line and terminal facts apply to pane-backed sessions; for T3 Code, which runs Muse ship and scout workers only, read the [native lifecycle](../../../../../docs/t3code-backend.md#current-lifecycle-and-safety) and [provider-command limits](../../../../../docs/t3code-backend.md#active-limits).
+
 | Fact | Value |
 |---|---|
 | Binary | Absolute `muse` from `PATH`, refused if absent; launcher `~/.local/bin/muse` execs versioned `muse-bin-<version>`, so live process name changes on update. |

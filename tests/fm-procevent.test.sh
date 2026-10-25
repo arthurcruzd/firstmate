@@ -484,11 +484,23 @@ cat > "$ADAPTER_ROOT/bin/fm-procevent-selfann.sh" <<'SH'
 #!/usr/bin/env bash
 # Fixture adapter that declares a durable downstream announcement of its own.
 # FM_HOME/state/selfann-fail makes its application fail so the fallback
-# publication path stays provable.
+# publication path stays provable. FM_HOME/state/selfann-gate-<source-id> holds
+# an application in flight until it is removed, recording the applying runner
+# in selfann-applying-<source-id>-<sequence>; an application whose runner died
+# meanwhile does not acknowledge.
 case "${1-}" in
   self-announcing) exit 0 ;;
   autohandle)
     [ ! -e "$FM_HOME/state/selfann-fail" ] || exit 1
+    if [ -e "$FM_HOME/state/selfann-gate-$2" ]; then
+      runner=$PPID
+      printf '%s\n' "$runner" > "$FM_HOME/state/selfann-applying-$2-$3"
+      for _ in $(seq 1 600); do
+        [ -e "$FM_HOME/state/selfann-gate-$2" ] || break
+        sleep 0.05
+      done
+      kill -0 "$runner" 2>/dev/null || exit 1
+    fi
     printf '%s %s\n' "$2" "$3" >> "$FM_HOME/state/applied"
     "$FM_PROCEVENT_UNDER_TEST" handled "$2" "$3" >/dev/null
     ;;
@@ -567,6 +579,51 @@ assert_contains "$(wake_payloads "$HSELF")" "procevent selfann self-src 2" \
   "a capture the self-announcing adapter could not apply lost its check-wake announcement"
 rm -f "$HSELF/state/selfann-fail"
 pass "a self-announcing adapter applies quietly and still publishes what it could not apply"
+
+# Captures of two self-announcing sources can land together, as remote second
+# mates' replies do when their machine comes back. While one runner is still
+# applying its capture, another source's runner sweeps every pending result
+# after its own, and every supervision cycle reconciles: neither may announce
+# the capture its own runner is applying, or one remote note becomes a second,
+# already-applied check wake. A runner gone mid-application leaves its capture
+# to re-announcement as before.
+HAPPLY="$TMP_ROOT/happly"; new_home "$HAPPLY"
+fm_test_track_procevent_home "$HAPPLY"
+pe_adapter "$HAPPLY" register selfann slow-src -- /bin/echo "slow apply" >/dev/null
+pe_adapter "$HAPPLY" register selfann quick-src -- /bin/echo "quick apply" >/dev/null
+: > "$HAPPLY/state/selfann-gate-slow-src"
+pe_adapter "$HAPPLY" start slow-src > "$TMP_ROOT/slow-start.out" 2>&1 &
+SLOW_START_PID=$!
+wait_for "$HAPPLY/state/selfann-applying-slow-src-1" || fail "the gated application never started"
+out=$(pe_adapter "$HAPPLY" start quick-src 2>&1)
+assert_contains "$out" "autohandled: quick-src" "the second source did not apply its own capture"
+assert_absent "$HAPPLY/state/procevent-inbox/slow-src.1.handled" "the gated application finished before the sweep it must survive"
+assert_not_contains "$(wake_payloads "$HAPPLY")" "procevent selfann slow-src 1" \
+  "another source's sweep announced a capture its own runner was still applying"
+pe_adapter "$HAPPLY" retire quick-src >/dev/null
+out=$(pe_adapter "$HAPPLY" reconcile)
+assert_contains "$out" "published=0" "reconcile announced a capture its own runner was still applying"
+rm -f "$HAPPLY/state/selfann-gate-slow-src"
+wait "$SLOW_START_PID" || fail "the gated runner failed after its application was released"
+assert_contains "$(cat "$TMP_ROOT/slow-start.out")" "autohandled: slow-src" "the released application was not reported as applied"
+assert_present "$HAPPLY/state/procevent-inbox/slow-src.1.handled" "the released application was not acknowledged"
+assert_not_contains "$(wake_payloads "$HAPPLY")" "procevent selfann slow-src" \
+  "a capture applied by its own runner still gained a check wake"
+: > "$HAPPLY/state/selfann-gate-slow-src"
+pe_adapter "$HAPPLY" start slow-src > "$TMP_ROOT/slow-dead.out" 2>&1 &
+SLOW_DEAD_PID=$!
+wait_for "$HAPPLY/state/selfann-applying-slow-src-2" || fail "the second gated application never started"
+kill -KILL "$(cat "$HAPPLY/state/selfann-applying-slow-src-2")" 2>/dev/null \
+  || fail "the applying runner could not be stopped"
+wait "$SLOW_DEAD_PID" 2>/dev/null || true
+rm -f "$HAPPLY/state/selfann-gate-slow-src"
+pe_adapter "$HAPPLY" retire slow-src >/dev/null 2>&1 || true
+assert_absent "$HAPPLY/state/procevent-inbox/slow-src.2.handled" "an application whose runner died was acknowledged"
+out=$(pe_adapter "$HAPPLY" reconcile)
+assert_contains "$out" "published=1" "a capture whose applying runner died was not re-announced"
+assert_contains "$(wake_payloads "$HAPPLY")" "procevent selfann slow-src 2" \
+  "a capture whose applying runner died lost its check-wake announcement"
+pass "a capture its own runner is applying is announced by no other publication, and re-announced once that runner is gone"
 
 HTERM="$TMP_ROOT/hterm"; new_home "$HTERM"
 fm_test_track_procevent_home "$HTERM"
@@ -2253,10 +2310,10 @@ pass "start reclaims a reused-pid claim whose leftovers can still be tidied"
 # `bin/fm-watch.sh` discards reconcile's `failed=` count and exit status, so a
 # runner that dies before claiming - for any cause, not only the claim wedge -
 # would be relaunched and reported failed every cycle with nobody told: armed
-# in appearance, a dead drop in fact. The episode is keyed by the registration
-# identity the launch ran under and ends when a launch of that source confirms,
-# so the registration below is damaged and repaired IN PLACE to keep that
-# identity fixed across the whole sequence. The wake changes nothing about the
+# in appearance, a dead drop in fact. The episode's key names the registration
+# identity it began under and the episode ends when a runner of that source
+# collects, so the registration below is damaged and repaired IN PLACE to keep
+# that identity fixed across the whole sequence. The wake changes nothing about the
 # launch: every failing cycle below still relaunches and still reports failed.
 HEP="$TMP_ROOT/hep"; new_home "$HEP"
 EP_SOURCE_CMD="$TMP_ROOT/episode-source.sh"
@@ -2299,14 +2356,14 @@ assert_contains "$ep_wake" "episode-src" \
 # The payload may state only what confirmation observed: no claim proved
 # inside the window. It cannot know whether the runner died or was slow, so it
 # must not assert a cause, must not present `start` as the fix, and must say
-# that a later cycle finding the source owned closes the episode by itself.
+# that a runner of the source collecting closes the episode by itself.
 assert_contains "$ep_wake" "did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS" \
   "the launch-failed wake does not state what confirmation observed: $ep_wake"
 assert_contains "$ep_wake" "attached bin/fm-procevent.sh start episode-src to reproduce a refusal" \
   "the launch-failed wake does not say start reproduces rather than fixes: $ep_wake"
 assert_contains "$ep_wake" "adapter binary" \
   "the launch-failed wake does not name what to check: $ep_wake"
-assert_contains "$ep_wake" "finds the source owned ends this episode on its own" \
+assert_contains "$ep_wake" "the episode ends on its own when a runner of this source returns a result or a clean empty window" \
   "the launch-failed wake does not say a slow runner closes its own episode: $ep_wake"
 case "$ep_wake" in
   *"never claimed"*|*"exited without"*|*"runner died"*)
@@ -2344,6 +2401,142 @@ esac
 ep_repair
 pe "$HEP" retire episode-src >/dev/null 2>&1 || true
 pass "a launch that cannot confirm is announced once per failure episode"
+
+# --- a second mate's reply source still failing after six hours is announced once more
+# A laptop that sleeps opens a launch-failure episode every time it drops off,
+# and the attended supervision host keeps those first announcements off MAIN
+# while the machine is unreachable, so a machine that never comes back must
+# still surface: an episode still open six hours after it began is announced
+# once more, under the episode's own key plus "-outage", which the host leaves
+# to MAIN. Only a reply source gets it, and only once per episode.
+HLO="$TMP_ROOT/hlo"; new_home "$HLO"
+pe_register "$HLO" remote-reply remote-reply-sleepy -- "$EP_SOURCE_CMD" >/dev/null \
+  || fail "could not register the reply source fixture"
+pe_register "$HLO" lavish board-src -- "$EP_SOURCE_CMD" >/dev/null \
+  || fail "could not register the board source fixture"
+for lo_id in remote-reply-sleepy board-src; do
+  lo_src="$HLO/state/procevent/$lo_id.source"
+  awk '/^argv:$/ { print; exit } { print }' "$lo_src" > "$lo_src.tmp" && cat "$lo_src.tmp" > "$lo_src" && rm -f -- "$lo_src.tmp" \
+    || fail "could not damage the $lo_id registration"
+done
+lo_outage_keys() { awk -F '\t' '$3 == "check" && $4 ~ /-outage$/ { print $4 }' "$HLO/state/.wake-queue" 2>/dev/null || true; }
+lo_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HLO" reconcile) || true
+assert_contains "$lo_out" "failed=2" "both damaged sources were not reported failed: $lo_out"
+[ "$(launch_failed_wake_count "$HLO" remote-reply-sleepy)" = 1 ] \
+  || fail "the reply source's first launch failure was not announced: $lo_out"
+[ -z "$(lo_outage_keys)" ] || fail "a fresh episode was announced as a long outage: $(lo_outage_keys)"
+lo_first=$(launch_failed_wake_keys "$HLO" remote-reply-sleepy)
+touch -t 202001010000 "$HLO/state/procevent/.remote-reply-sleepy.launch-failed" "$HLO/state/procevent/.board-src.launch-failed" \
+  || fail "could not age the episode markers"
+lo_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HLO" reconcile) || true
+[ "$(lo_outage_keys)" = "$lo_first-outage" ] \
+  || fail "a reply source episode open past six hours was not announced once under its own key: $(lo_outage_keys) (first: $lo_first)"
+lo_wake=$(awk -F '\t' '$3 == "check" && $4 ~ /-outage$/ { print $5 }' "$HLO/state/.wake-queue")
+assert_contains "$lo_wake" "remote-reply-sleepy has collected nothing for more than 6 hours" \
+  "the long-outage wake does not name the source and the bound: $lo_wake"
+lo_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HLO" reconcile) || true
+[ "$(lo_outage_keys | grep -c .)" = 1 ] || fail "one long outage was announced twice: $(lo_outage_keys)"
+[ "$(launch_failed_wake_count "$HLO" remote-reply-sleepy)" = 2 ] \
+  || fail "the long outage changed the episode itself: $(launch_failed_wake_keys "$HLO" remote-reply-sleepy)"
+pe "$HLO" retire remote-reply-sleepy >/dev/null 2>&1 || true
+pe "$HLO" retire board-src >/dev/null 2>&1 || true
+[ ! -e "$HLO/state/procevent/.remote-reply-sleepy.launch-outage" ] \
+  || fail "retiring the source left its long-outage marker"
+pass "a second mate's reply source still failing after six hours is announced once more, and no other source is"
+
+# --- one outage of a flapping source is one episode --------------------------
+# The reported shape: a remote secondmate's host is offline, so its source's
+# launches fail to confirm, then a runner briefly holds the claim while ssh
+# blocks and dies on the transport timeout with nothing read, and every session
+# start re-registers the source under a new identity. Each of those used to end
+# or re-key the episode, so one outage announced itself over and over. Only a
+# runner proving the source collected ends it; a real recovery still lets the
+# next failure announce.
+HFL="$TMP_ROOT/hfl"; new_home "$HFL"
+FL_SOURCE="$HFL/state/procevent/flap-src.source"
+FL_TRIGGER="$TMP_ROOT/flap-transport-timeout"
+FL_DEAD_READ="$TMP_ROOT/flap-dead-read.sh"
+cat > "$FL_DEAD_READ" <<'SH'
+#!/usr/bin/env bash
+# Blocks like ssh to an unreachable host, then fails as its timeout does:
+# exit 255 with nothing on stdout.
+while [ ! -e "$1" ]; do
+  [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ] || break
+  sleep 0.05
+done
+exit 255
+SH
+chmod +x "$FL_DEAD_READ"
+fl_damage() {  # truncate the argv in place, so the runner dies before claiming
+  if ! { awk '/^argv:$/ { print; exit } { print }' "$FL_SOURCE" > "$FL_SOURCE.tmp" \
+    && cat "$FL_SOURCE.tmp" > "$FL_SOURCE" && rm -f -- "$FL_SOURCE.tmp"; }; then
+    fail "could not damage the flapping registration"
+  fi
+}
+# A launch expected to confirm gets a generous window, which ends early on
+# evidence, and is asserted only as not failed: on a loaded host a runner from
+# an earlier cycle may be the one that ends up owning the source.
+fl_reconcile() {  # <expected-fragment> <msg> [confirm-seconds]; sets fl_out
+  fl_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=${3:-2} pe "$HFL" reconcile) || true
+  assert_contains "$fl_out" "$1" "$2: $fl_out"
+}
+fl_wait_unclaimed() {  # <msg>
+  for _ in $(seq 1 100); do
+    [ -e "$FM_PROCEVENT_CLAIM_ROOT/flap-src.claim" ] || return 0
+    sleep 0.1
+  done
+  fail "$1"
+}
+fl_identity() { perl -e 'print((stat shift)[1])' "$FL_SOURCE"; }
+
+pe_register "$HFL" lavish flap-src -- "$FL_DEAD_READ" "$FL_TRIGGER" >/dev/null
+fl_damage
+fl_reconcile "failed=1" "the offline source's first launch was not reported failed"
+[ "$(launch_failed_wake_count "$HFL" flap-src)" = 1 ] \
+  || fail "the offline source's first failed launch was not announced: $fl_out"
+# Session start re-arms the source: a new registration whose runner claims and
+# blocks, is seen owned by a later cycle, then dies on the transport timeout.
+fl_first_identity=$(fl_identity)
+pe_register "$HFL" lavish flap-src -- "$FL_DEAD_READ" "$FL_TRIGGER" >/dev/null
+[ "$(fl_identity)" != "$fl_first_identity" ] \
+  || fail "fixture invalid: re-registration kept the registration identity"
+fl_reconcile "failed=0" "the briefly healthy runner did not confirm" 30
+fl_reconcile "started=0" "a cycle relaunched a source its runner still owned"
+assert_contains "$fl_out" "failed=0" "a cycle that found the source owned reported a failure: $fl_out"
+: > "$FL_TRIGGER"
+fl_wait_unclaimed "the dead-read runner never released its claim"
+[ -z "$(first_result "$HFL" flap-src)" ] \
+  || fail "fixture invalid: the dead read captured a result"
+# The outage goes on: the next launch fails again, under that same registration
+# and then under one more re-registration.
+fl_damage
+fl_reconcile "failed=1" "the offline source's launch after the dead read was not reported failed"
+pe_register "$HFL" lavish flap-src -- "$FL_DEAD_READ" "$FL_TRIGGER" >/dev/null
+fl_damage
+fl_reconcile "failed=1" "the re-registered offline source's launch was not reported failed"
+[ "$(launch_failed_wake_count "$HFL" flap-src)" = 1 ] \
+  || fail "one outage of a flapping source announced $(launch_failed_wake_count "$HFL" flap-src) launch failures: $(launch_failed_wake_keys "$HFL" flap-src)"
+# The host comes back: a runner returns a real result, which ends the episode,
+# so the next failure is a new outage and announces again.
+pe_register "$HFL" lavish flap-src -- "$EP_SOURCE_CMD" >/dev/null
+fl_reconcile "failed=0" "the recovered source did not confirm" 30
+for _ in $(seq 1 100); do
+  [ -z "$(first_result "$HFL" flap-src)" ] || break
+  sleep 0.1
+done
+[ -n "$(first_result "$HFL" flap-src)" ] \
+  || fail "fixture invalid: the recovered source captured no result"
+fl_wait_unclaimed "the recovered runner never released its claim"
+# Still registered, so it is the runner's result that ended the episode and
+# not a retirement clearing its marker.
+[ -f "$FL_SOURCE" ] || fail "fixture invalid: the recovered source was retired"
+pe_register "$HFL" lavish flap-src -- "$FL_DEAD_READ" "$FL_TRIGGER" >/dev/null
+fl_damage
+fl_reconcile "failed=1" "the source failing after a real recovery was not reported failed"
+[ "$(launch_failed_wake_count "$HFL" flap-src)" = 2 ] \
+  || fail "a failure after a real recovery was not announced as a new episode: $(launch_failed_wake_keys "$HFL" flap-src)"
+pe "$HFL" retire flap-src >/dev/null 2>&1 || true
+pass "one outage of a flapping source is announced once, and a real recovery reopens announcing"
 
 # --- the launch-failed key fits the watcher's seen marker at the id limit ----
 # bin/fm-watch.sh names the marker for a surfaced key `.seen-procevent-<hex>`,

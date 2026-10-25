@@ -207,6 +207,10 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$FM_DAEMON_DIR/fm-busy-lib.sh"
 
+# The reopened-session hint for a T3-hosted supervisor thread.
+# shellcheck source=bin/fm-t3-host-lib.sh
+. "$FM_DAEMON_DIR/fm-t3-host-lib.sh"
+
 # --- tunables ---------------------------------------------------------------
 # Supervisor backends this daemon knows how to inject into today. rex goes
 # through the same dispatcher primitives as herdr (bin/backends/rex.sh). zellij,
@@ -486,6 +490,14 @@ classify_stale() {  # <window> <state> [<span-record> <span-status>]
 }
 
 classify_check() {  # <full reason>  — check scripts print only when firstmate should wake
+  # The watcher's own downtime recovery (after any watcher stop, such as a
+  # relay handing its cycle to this daemon or a service restart) asks for the
+  # queued wakes to be presented again; this drain already presents and
+  # classifies each of them, so the recovery wake itself needs no turn.
+  if [ "$1" = "check: rearm-resurface" ]; then
+    printf 'self|watcher recovery: queued wakes re-presented by this drain'
+    return 0
+  fi
   printf 'escalate|%s' "$1"
 }
 
@@ -787,8 +799,10 @@ task_window_harness() {  # <window> <state>
 # stale_window_is_busy: 0 when the semantic busy-state contract
 # (bin/fm-busy-lib.sh) reports busy, 2 when the endpoint is gone, 3 for T3
 # native uncertainty, and 1 otherwise. Uncertainty cannot prove work resumed.
-# A T3 thread is gone only when the adapter reads it missing (archived or 404);
-# its verdict is native, so a failed transcript read is uncertainty, not removal.
+# A T3 thread is gone when the adapter reads it missing (the server has no such
+# thread) or reads a stopped agent with nothing left to wedge (an archived
+# thread reads idle and dead); its verdict is native, so a failed transcript
+# read or a failed run is uncertainty, not removal.
 # Other backends treat a failed capture as gone.
 stale_window_is_busy() {  # <window> <state>
   local win=$1 state=$2 backend harness label task tail40='' verdict
@@ -797,7 +811,10 @@ stale_window_is_busy() {  # <window> <state>
   task=$(window_to_task "$win" "$state")
   label="fm-$task"
   if [ "$backend" = t3code ]; then
-    [ "$(fm_backend_agent_state "$backend" "$win" 2>/dev/null)" != missing ] || return 2
+    case "$(fm_backend_agent_state "$backend" "$win" 2>/dev/null)" in
+      missing) return 2 ;;
+      dead) [ "$(fm_backend_busy_state "$backend" "$win" 2>/dev/null)" != idle ] || return 2 ;;
+    esac
   else
     tail40=$(fm_backend_capture "$backend" "$win" 40 "$label" 2>/dev/null) || return 2
   fi
@@ -1615,6 +1632,12 @@ inject_msg() {  # <message> [state] [exact] [request-id]
   # request id is the T3 client request id the digest's delivery owns.
   if [ "$exact" != exact ]; then
     msg=$(_collapse_newlines "$msg")
+    # A T3 thread that T3 unloaded reopens on this message without its
+    # SessionStart hooks, so the escalation carries the relay's
+    # run-session-start hint whenever the session lock names a dead process.
+    if [ "${FM_SUPERVISOR_BACKEND:-tmux}" = t3code ] && ! fm_t3_session_holder_alive "$state"; then
+      msg="$msg $FM_T3_REOPENED_SESSION_HINT"
+    fi
     fm_operational_input_encode away-supervisor "$msg" encoded \
       || { INJECT_LAST_FAILURE="the digest could not be encoded"; log "inject failed: $INJECT_LAST_FAILURE"; return 1; }
     body=$msg
@@ -2138,7 +2161,7 @@ fm_super_main() {
     WATCHER_PID=$!
   }
 
-  local rc reason
+  local rc reason target_seen_at=0 now
   while true; do
     # --- pane-gone guard (preserved) ---------------------------------------
     # With the #29 watcher's enqueue-before-suppress, a wake is no longer
@@ -2146,12 +2169,18 @@ fm_super_main() {
     # off while the pane is gone: self-handling needs no pane, but escalation
     # has nowhere to go, and firstmate itself is the consumer of escalations.
     # Catch-up signals persist in state/*.status and flow on the next run, so
-    # this delays rather than loses work.
-    if ! fm_backend_target_exists "$BACKEND" "$TARGET"; then
-      log "warn: supervisor target '$TARGET' gone; backing off ${INJECT_FAIL_SLEEP}s, will retry"
-      # Flush is pointless with no pane; preserve any buffered escalations.
-      sleep "$INJECT_FAIL_SLEEP"
-      continue
+    # this delays rather than loses work. A target seen alive is rechecked on
+    # the housekeeping cadence rather than every loop pass, because a T3 read
+    # is a network call; inject_msg still checks the target before each send.
+    now=$(_now)
+    if [ $((now - target_seen_at)) -ge "${FM_HOUSEKEEPING_TICK:-$HOUSEKEEPING_TICK_DEFAULT}" ]; then
+      if ! fm_backend_target_exists "$BACKEND" "$TARGET"; then
+        log "warn: supervisor target '$TARGET' gone; backing off ${INJECT_FAIL_SLEEP}s, will retry"
+        # Flush is pointless with no pane; preserve any buffered escalations.
+        sleep "$INJECT_FAIL_SLEEP"
+        continue
+      fi
+      target_seen_at=$now
     fi
 
     # --- (re)start watcher if it has exited --------------------------------

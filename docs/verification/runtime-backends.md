@@ -2486,7 +2486,48 @@ Live facts the backend relies on:
 - T3's Claude reads the worktree's `.claude/settings.local.json`: Firstmate's busy and turn-end hooks fired, and a lab commit carried no agent co-author trailer.
 - The listening server's process environment showed `T3CODE_TELEMETRY_ENABLED=false`, so status reported `telemetry: off`.
 - After `t3 auth session revoke`, `t3 auth session list` reported no active sessions and the next helper call was refused as unauthorized.
-- The 0.0.46 nightly binary's schemas offer the `root`, `existing_worktree`, and `worktree` launch workspace strategies, `t3_thread_list` filtered by status per project, and no session-stop tool, which is why a secondmate launches at `root` and `fm-control.sh exit` refuses.
+- The 0.0.46 nightly binary's schemas offer the `root`, `existing_worktree`, and `worktree` launch workspace strategies, `t3_thread_list` filtered by status per project, and no session-stop tool, which is why a secondmate launches at `root` and `fm-control.sh exit` stops an agent by archiving its thread.
+
+### Semantic supervision
+
+Verified live on 2026-10-09 against `t3 v0.0.46-nightly.20261008.2849`, run as a loopback lab server with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295 (`claude-sonnet-5-5`, low effort), node 26.8.2, and treehouse 2.3.0 on macOS arm64.
+The run used real `bin/fm-spawn.sh`, `bin/fm-send.sh`, `bin/fm-control.sh`, `bin/fm-watch.sh`, and `bin/fm-teardown.sh` from a clone of this backend in a scratch Firstmate home with `config/backend=t3code`, a scratch project, and a private Treehouse pool root, on one `fm-brief.sh` Claude scout thread.
+
+```sh
+bin/fm-spawn.sh lab1 projects/labproj claude --scout --model claude-sonnet-5-5 --effort low
+bin/fm-t3-mcp.mjs watch --threads <thread> --timeout-ms 180000
+bin/fm-control.sh lab1 interrupt
+bin/fm-control.sh lab1 exit
+bin/fm-control.sh lab1 relaunch --note '<progress note>'
+FM_STALE_ESCALATE_SECS=30 bin/fm-watch.sh        # T3 restarted by its native pid mid-run
+FM_BUSY_TURN_MAX_SECS=60 FM_STALE_ESCALATE_SECS=20 bin/fm-watch.sh   # a deliberately hung run
+bin/fm-teardown.sh lab1
+```
+
+```text
+busy verdict: busy t3code-native ... busy verdict: idle t3code-native
+{"ok":true,"trigger":"turn-end","timedOut":false,"threads":[{...,"status":"completed","latestRunStatus":"completed"}]}
+interrupt-delivered lab1 harness=claude backend=t3code verified=agent-alive cancel=confirmed
+stopped lab1 harness=claude backend=t3code endpoint=<thread> ...
+relaunched lab1 harness=claude from=claude model=claude-sonnet-5-5 effort=low backend=t3code endpoint=<same thread> ...
+re-steered after a T3 restart cancelled run run:thread:<thread>:ordinal:7: <thread>
+stale: <thread> (idle 20s, possible wedge, escalation 1)
+```
+
+| Step | Result |
+| --- | --- |
+| Busy and idle | The task read `busy t3code-native` from spawn until the launch turn ended, then `idle t3code-native`, with no harness hook consulted. |
+| Turn-end push | `watch` returned `turn-end` 0.95 s after T3's recorded `completedAt`. |
+| Interrupt of a running `python3` tool call | `cancel=confirmed` in 3.4 s; the child was gone 2 s later. |
+| Exit | 4.2 s; the thread read back `archived:true` with no active run, and the agent state read `dead`. |
+| Relaunch | 14.5 s; the same thread id, unarchived, took the relaunch brief as run 4, and the worker recalled a codeword it had been given in the thread before the exit and never wrote down. |
+| T3 restart mid-run (SIGTERM to the native pid) | The run read `cancelled` and its child was gone; the watcher re-steered the thread within about 1 s of the server answering again, a new run started, and no stale or wedge wake followed in the next 90 s on a 30 s stale timer. |
+| Hung run, 60 s busy-turn bound, 20 s stale timer, 5 s poll | A possible-wedge wake for the thread 73.4 s after the run started, while the run still read `running`. |
+| Teardown of the relaunched task | 6.6 s; the thread read back archived with no active run, the record was removed, and the slot read `available`. |
+
+Also observed on this nightly: the server advertises `threadRestartContinuation`, yet the run cancelled by the restart was not resumed; `t3_thread_list` rows carry no pending-request count, so the push reads `t3_thread_read` for each running thread; and `t3_thread_configure` changes the model of a thread that has run on the same provider instance.
+
+The `watch` call and its turn-end push above were later replaced by the pending-request watch recorded under [Run identity, pending requests, and secondmate retirement](#run-identity-pending-requests-and-secondmate-retirement); the exit, relaunch, and restart rows still describe this backend.
 
 ### Adapter wiring on Linux
 
@@ -2634,6 +2675,73 @@ ok - t3code live transport: T3 0.1.0 environment <id> passes the gate (telemetry
 
 That result is from the 2026-10-17 stable 0.1.0 lab run; refresh it with the command above after signing in.
 
+### Remote second mate on its host's T3 server
+
+The `endpoint: t3code` remote route was verified live on 2026-10-09 against a headless `t3 v0.0.46-nightly.20261008.2849` server (native `@t3code/t3-darwin-arm64`) on macOS 26.3 arm64, run as an Aqua launch agent bound to the host's tailnet address with `T3CODE_TELEMETRY_ENABLED=false`, with Claude Code 2.1.295, codex-cli 0.162.0, node 26.8.2, treehouse 2.3.0, tasks-axi 0.2.6, and the host's stock bash 3.2.57.
+The parent was a scratch home on a Linux VPS; the route used a scratch code root and remote home on the Mac, reached through an isolated `FM_REMOTE_JOB_STATE_ROOT` so the account's own remote-job worker was never used.
+The mate and its scout ran Claude `claude-opus-5-5`.
+
+```sh
+bin/fm-remote-home-seed.sh --endpoint t3code <id> <alias> <remote-root> <remote-home> <project>=<origin>
+FM_HOME=<remote-home> <remote-home>/bin/fm-t3-mcp.mjs login --access full-access --url <origin> --t3 <t3> --base-dir <base-dir>
+bin/fm-spawn.sh <id> --secondmate
+bin/fm-send.sh fm-<id> '<request>'
+bin/fm-on.sh <id> fm-remote-secondmate-control.sh interrupt <id>
+launchctl kickstart -k gui/<uid>/<t3 server label>
+```
+
+```text
+remote_backend=t3code
+remote_target=mcp:<uuid>
+interrupt-delivered <id> harness=claude backend=t3code verified=agent-alive cancel=confirmed
+fm-t3-host relay: delivered fm-t3-relay-<pid>-<arm>-<n> to mcp:<uuid> (started)
+```
+
+| Step | Result |
+| --- | --- |
+| Seed and readiness gate | The doctor's `--endpoint t3code` set passed with no Herdr check; the remote home was cloned and the isolated worker got its own launch agent label |
+| Launch | Thread at the home's root, recorded as the home's T3 host thread; the relay launch agent ran and owned the mate's watcher; the thread's settings env carried `FM_BACKEND=t3code` |
+| Request to the mate's own T3 worker to correlated answer | 2 min; the mate's scout launched on the same server without `--backend`, its report document was fetched, and the pending reply settled |
+| Steer | Durable record plus a T3 doorbell; the mate applied the change of plan in its answer |
+| Interrupt through the host | `cancel=confirmed`; a follow-up steer got the answer |
+| T3 server restart with the mate's scout mid-turn | The scout's run read `cancelled`; the relay's next wake reopened the mate with the session-start hint, the mate re-steered the scout once, and the answer settled |
+| Idle unload | T3 released the idle mate's Claude process 31 minutes after its last turn while the thread kept reading `completed` (alive); the next request's doorbell, preceded by the session-start hint, reopened it, its new scout reported, and the answer settled |
+| Release and relaunch | `release` archived the thread, removed the relay launch agent, the home's T3 launch environment, and its host record, and set the endpoint record aside; `fm-spawn.sh <id> --secondmate` then launched a new thread, fast-forwarded the home to the parent's commit, reinstalled the relay, and the mate answered |
+| Retirement | `fm-teardown.sh <id>` archived the thread, removed the home and its relay, and removed the route |
+
+The account's own remote-job worker kept the same process through every step.
+The Herdr-to-T3 move itself was not run against a live Herdr endpoint; `tests/fm-remote-secondmate-move.test.sh` covers it.
+
+### Quiet mode on a T3-hosted primary
+
+Quiet mode under the wake relay service was verified live on 2026-10-09 against `t3 v0.0.46-nightly.20261008.2849` on Linux 7.0 x86_64 (a user service bound to the host's tailnet address), with Claude Code 2.1.296, node 26.9.0, and bash 5.3.9.
+A scratch home and scratch code root ran a `claude-sonnet-5-5` primary thread through `bin/fm-t3-host.sh launch`, its relay through `bin/fm-t3-host.sh install`, and one scratch task whose status lines were appended by hand against an idle `claude-haiku-5-5` thread.
+
+```sh
+bin/fm-t3-host.sh launch --model claude-sonnet-5-5 --effort medium --title <title>
+bin/fm-t3-host.sh install --name <unit>
+/quiet                       # typed into the primary thread
+/quiet off                   # typed into the primary thread
+```
+
+```text
+fm-afk-launch: the T3 wake relay's service runs the daemon for this home within seconds; do not start bin/fm-afk-start.sh in this session
+fm-t3-host relay: running the quiet-mode daemon for <home>, aimed at mcp:<uuid>
+self-handle: check: rearm-resurface -> watcher recovery: queued wakes re-presented by this drain
+fm-t3-host relay: the away daemon exited (rc=0)
+```
+
+| Step | Result |
+| --- | --- |
+| Attended baseline | The relay posted a worker-started signal and an idle-worker stale wake into the thread within 75 s |
+| `/quiet` | The primary ran the quiet skill; `start-native` recorded `none - relay` and started nothing in the session; the relay ended its open watcher cycle and ran the daemon as its child |
+| Routine events | A `working:` update, a `paused:` declaration, heartbeats, two relay restarts, and the watcher's recovery wakes self-handled with no thread message |
+| Captain-relevant event | A `needs-decision:` line reached the thread as one record-backed doorbell about 2.5 minutes later, and the primary put the choice to the captain |
+| Idle unload | T3 released the idle primary's Claude process 30 minutes after its last turn; the relay, daemon, and watcher kept running, and a routine update while unloaded did not reopen it |
+| Reopen | A `blocked:` line reopened the unloaded session; the escalation carried the session-start hint, and the primary ran session start before relaying the login need |
+| `/quiet off` | The return stopped the hosted daemon and archived the record; the relay delivered the next routine wake as before |
+| Daemon T3 reads | About 52 thread reads a minute before the target check moved to the housekeeping cadence, 11 after |
+
 ### Portable regression coverage
 
 ```sh
@@ -2647,6 +2755,7 @@ The fake models the T3 protocol facts that hide defects when simplified: cursor 
 `tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, catalog-resolved selection, launch binding and configuration read-back with their uncertain and refused outcomes, send idempotency and the unconfirmed verdict for a lost reply, a JSON-RPC server error, T3's catch-all `orchestration_error`, or a tool error without a code (each of which also leaves a launch uncertain), capture and its 500-line bound, exact-run interrupt claims, pending questions and the per-approval signature, the bounded event wait and its re-armed slices, session close, the proven archive, and paged supervisor lookup.
 `tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment and the Codex trust warning, the Claude pull-request-tool version boundary, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort, including a secondmate home's environment removal, slot freshening before launch, isolation-rejected, dirty-slot, and uncertain-launch lease retention, tracked Codex configuration and tracked `CLAUDE.local.md` preservation, the exit and relaunch refusals, lost-reply resends through `fm-send.sh`, the push escalation of pending questions, including under a fractional poll interval, and `bin/fm-t3-answer.sh`, failed-run secondmate resume, the secondmate home shutdown barrier for pooled, standalone, and nested homes and its `lsof` refusal before any archive, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
 `tests/fm-backend-t3code.test.sh` also covers the refusal to replace a T3 secondmate whose thread cannot be proven closed, and `tests/fm-secondmate-liveness.test.sh` pins the unchanged best-effort close on tmux.
+`tests/fm-t3-mcp.test.sh` also covers `resume` and `pin`, and `tests/fm-backend-t3code.test.sh` covers exit by archive, a relaunch that resumes the same thread or rebinds across provider instances, restart reconciliation, Grok and Muse workers, and the T3-hosted remote second mate.
 `tests/fm-daemon.test.sh` covers discovery precedence and native busy state.
 
 The tracked Codex configuration guard is independent of the transport and passed on 2026-09-15 with `codex-cli 0.154.0` and Python 3.14.7.
@@ -2677,6 +2786,86 @@ FM_TASK_ID=[lab10] FM_TASK_INBOX=[<lab>/home/state/lab10.inbox] GIT_CONFIG_VALUE
 
 Codex's own `config/read` on a leased worktree, through `codex app-server` with an isolated `CODEX_HOME`, gives the same split: the project layer is listed either way, but its values apply only when the worktree, or the main checkout it belongs to, is trusted; a trusted parent directory does not count.
 Write order is not the cause: T3 starts a thread's Codex session with `thread/start` at the thread's first turn (`apps/server/src/orchestration-v2/ProviderTurnStartService.ts:656` calling `apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts:6571` at tag v0.1.0), after spawn has written the file.
+
+### Grok and Muse workers
+
+Verified live on 2026-10-13 against `t3 v0.0.46-nightly.20261011.2994` (native `@t3code/t3-linux-x64`) on Linux 7.0 x86_64, with grok 1.0.52 (`grok-4.6`, low effort) on provider instance `grok` and Muse Code 1.4.7 (`muse-spark-1.3`, low effort) on provider instance `muse`.
+The run used real `bin/fm-spawn.sh`, `bin/fm-send.sh`, `bin/fm-control.sh`, and `bin/fm-teardown.sh` in a scratch Firstmate home against a scratch project, one trivial scout per harness:
+
+```sh
+FM_HOME=<scratch> bin/fm-spawn.sh <id> <project> grok --scout --backend t3code --model grok-4.6 --effort low
+FM_HOME=<scratch> bin/fm-spawn.sh <id> <project> muse --scout --backend t3code --model muse-spark-1.3 --effort low
+FM_HOME=<scratch> bin/fm-send.sh <muse-id> "<steer>"
+FM_HOME=<scratch> bin/fm-control.sh <grok-id> interrupt
+FM_HOME=<scratch> bin/fm-control.sh <grok-id> exit
+FM_HOME=<scratch> bin/fm-teardown.sh <id>
+```
+
+```text
+interrupt-delivered <grok-id> harness=grok backend=t3code verified=agent-alive cancel=not-running
+stopped <grok-id> harness=grok backend=t3code endpoint=<thread> ...
+```
+
+| Check | Result |
+|---|---|
+| Launch | Each thread launched full-access on its own instance with the effort as `reasoningEffort`, followed the encoded launch brief, wrote its report, and appended its own `done:` status line. |
+| Environment | Each worker's shell had no `FM_TASK_ID`; the brief's absolute status, inbox, and report paths carried the protocol. |
+| Turn end | The adapter's push touched `state/<id>.turn-ended` 17 ms (Grok) and 10 ms (Muse, after a steer) after the run went terminal. |
+| Steer | The Muse worker read and acknowledged the `fm-send.sh` inbox message delivered by its T3 doorbell. |
+| Exit | Archiving ended `muse serve --trust-workspace --disable-sandbox` within one second. |
+| Teardown | Every thread read back `archived:true` with no active run before its slot returned. |
+
+T3 launches `grok agent --always-approve stdio` and `muse serve --trust-workspace --disable-sandbox` for these instances.
+With default user configuration, grok 1.0.52 did not apply an `env` block from a project's `.claude/settings.local.json` or a `.envrc`, and Muse Code 1.4.7 did not apply an `env` block from `.claude/settings.local.json` or `.muse/settings.json`, which is why the backend writes no environment for them.
+
+### WSL host driving Windows programs
+
+Verified on 2026-10-09 against `t3 v0.0.46-nightly.20261008.2849` (native `@t3code/t3-linux-x64`) in WSL2 Ubuntu 24.04 on Windows 10.0.26200, with Claude Code 2.1.295, codex-cli 0.161.0, node 26.8.2, and treehouse 2.3.0.
+Windows had Excel 16.0.20430.20146, Power BI Desktop 2.158.1304.0 (Store), and `@microsoft/powerbi-modeling-mcp` 0.5.0-beta.13 run through a WSL wrapper in both providers' user MCP configuration.
+The server ran as a systemd user service on `127.0.0.1` with `T3CODE_TELEMETRY_ENABLED=false` and the Windows directories on its `PATH`, published to the tailnet with `tailscale serve`.
+The run drove this backend through a scratch Firstmate home cloned from the branch, a scratch project with its own origin, a private `TREEHOUSE_ROOT`, and a scratch workbook under the Windows user profile.
+The `fm-control.sh interrupt` row was re-run the same day on a fresh Claude thread after [semantic supervision](#semantic-supervision) merged.
+
+```sh
+bin/fm-t3-mcp.mjs login --url http://127.0.0.1:<port> --access full-access --t3 <t3> --base-dir <t3-base-dir>
+FM_T3CODE_LIVE_E2E=1 bin/fm-test-run.sh tests/fm-backend-t3code-live-e2e.test.sh
+bin/fm-spawn.sh <id> projects/<scratch> --scout --harness claude --model claude-sonnet-5-5 --effort low
+bin/fm-send.sh <id> '<open a blank Power BI Desktop and read it through powerbi-modeling>'
+bin/fm-send.sh <id> '<run powershell.exe Start-Sleep -Seconds 90 in the foreground>'
+bin/fm-control.sh <id> interrupt
+bin/fm-teardown.sh <id>
+bin/fm-spawn.sh <id> projects/<scratch> --scout --harness codex --model gpt-6-luna --effort low
+```
+
+Bounded output:
+
+```text
+spawned <id> harness=claude kind=scout window=fm-<id> worktree=<pool slot>
+done [at=<epoch>]: Excel via WSL interop works; Pilot A1=FM-T3-PILOT B1=42; report at data/<id>/report.md
+working [at=<epoch>]: steer 1 handled, powerbi tables=0, closed=yes
+interrupt-delivered <id> harness=claude backend=t3code verified=agent-alive cancel=confirmed
+{"ok":true,...,"status":"interrupted","activeRunId":null,...}
+teardown <id> complete (window mcp:<uuid>, worktree <pool slot>)
+```
+
+| Step | Result |
+| --- | --- |
+| Spawn, including the Treehouse lease and idle-thread launch | 2.7 s |
+| Power BI steer send to the worker's status line and `handled/` acknowledgement | 65 s, including a blank Power BI Desktop launch, `ListLocalInstances`, connect, table list, and close |
+| `fm-control.sh interrupt` during a Windows `Start-Sleep -Seconds 90` | 1.8 s, `cancel=confirmed`; the run read back `interrupted`, and the WSL-side process and the Windows `powershell.exe` were both gone 3 s later |
+| Teardown, including the archive read-back and slot return | 4 s |
+
+Live facts the Windows guidance relies on:
+
+- Processes started by the systemd user service ran Windows programs in the signed-in desktop session (`SessionId` 1), but had no Windows directories on `PATH` until the service added them.
+- `SIGINT`, `SIGTERM`, and `SIGKILL` to a WSL-side `powershell.exe` process each ended its Windows process within 3 s.
+- Claude's tool moved a 240 s and a 600 s foreground command to a background task at 120 s and ended the turn; the 240 s command ran to completion, through an `fm-control.sh interrupt` sent after that turn ended, while teardown ended the 600 s one on both sides.
+- An interrupted Claude turn ends there, so the worker appends no status line about the interrupt until a later steer gives it a turn.
+- A Claude thread and a Codex thread both listed the user-configured `powerbi-modeling` MCP tools; the Codex thread's `ListLocalInstances` returned an empty list with no Desktop open.
+- A Claude worker interrupted mid-command treated the interrupt as a rejected tool call and asked before retrying.
+- Excel's COM process outlived `Quit()` by about 7 s before exiting on its own.
+- Windows git lists a WSL-created linked worktree under its Linux path (`/home/...`), and refuses the repository as dubious ownership without a `safe.directory` exception.
+- On Linux the telemetry probe reads the listener's NUL-separated `/proc/<pid>/environ`; `tests/fm-t3-mcp.test.sh` pins that parse.
 
 ## Codex App host tools
 

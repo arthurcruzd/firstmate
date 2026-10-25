@@ -81,10 +81,11 @@
 #            One bounded window covers a whole cycle's launches
 #            (FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS; docs/configuration.md).
 #            A launch that fails to confirm is also announced as a durable
-#            `check` wake, once per failure episode - keyed by the registration
-#            identity it ran under and ended by a later launch of that source
-#            confirming - because the supervision cycle discards the `failed=`
-#            count. The launch itself is retried every cycle exactly as before.
+#            `check` wake, once per failure episode - one per source across
+#            registration replacements, ended only when a runner of that source
+#            proves it collected - because the supervision cycle discards the
+#            `failed=` count. The launch itself is retried every cycle exactly
+#            as before.
 #            A source whose claim nothing may automatically displace is not
 #            relaunched at all; it is counted `uncertain` and announced once per
 #            stranded claim generation as a durable `check` wake, because the
@@ -176,7 +177,11 @@
 # adapter keeps the strict publish-before-apply order, because without a
 # declared downstream channel an applied-and-acknowledged result would otherwise
 # go silent. An unhandled result stays eligible for bounded re-announcement on
-# every reconcile in both modes, exactly as before.
+# every reconcile in both modes, exactly as before. While its runner is still
+# applying a capture, that runner's private record names it, and every other
+# publication - another source's sweep and reconcile alike - leaves the
+# capture to it; a record naming a process that is gone is not honored, so a
+# runner that dies mid-application leaves its capture to re-announcement.
 #
 # Polling again is adapter-owned through the same kind of seam. An adapter that
 # answers exit 0 to `bin/fm-procevent-<adapter>.sh relisten` keeps this runner
@@ -408,6 +413,33 @@ adapter_self_announcing() {  # <adapter>
   "$script" self-announcing >/dev/null 2>&1
 }
 
+# The record a self-announcing runner keeps while it applies its own capture
+# (header): its pid and process identity, written before the capture turns
+# durable and removed once application ends.
+applying_file() { printf '%s/.%s.applying\n' "$REG" "$1"; }
+
+mark_source_applying() {  # <source-id>
+  local identity tmp
+  identity=$(fm_pid_identity "$$" 2>/dev/null) || return 1
+  tmp=$(umask 077; mktemp "$REG/.applying.XXXXXX") || return 1
+  if printf '%s\t%s\n' "$$" "$identity" > "$tmp" && mv -f -- "$tmp" "$(applying_file "$1")"; then
+    return 0
+  fi
+  rm -f -- "$tmp"
+  return 1
+}
+
+# True only while a live runner other than this process is applying a capture
+# of the source, so a publication leaves that capture to it.
+source_applied_elsewhere() {  # <source-id>
+  local record pid identity
+  record=$(applying_file "$1")
+  [ -f "$record" ] && [ ! -L "$record" ] || return 1
+  IFS=$'\t' read -r pid identity < "$record" || return 1
+  [ -n "$pid" ] && [ "$pid" != "$$" ] || return 1
+  fm_procevent_pid_state "$pid" "$identity"
+}
+
 source_file()  { printf '%s/%s.source\n' "$REG" "$1"; }
 source_field() {  # <source-id> <field>
   sed -n "s/^$2=//p" "$(source_file "$1")" | head -1
@@ -429,6 +461,10 @@ runner_file()  { printf '%s/%s.runner\n' "$REG" "$1"; }
 staging_file() { printf '%s/.%s.%s.output\n' "$REG" "$1" "$2"; }
 stranded_file() { printf '%s/.%s.stranded\n' "$REG" "$1"; }
 launch_failed_file() { printf '%s/.%s.launch-failed\n' "$REG" "$1"; }
+launch_outage_file() { printf '%s/.%s.launch-outage\n' "$REG" "$1"; }
+# How long a second mate's reply source may go without collecting before its
+# open launch-failure episode is announced again (report_launch_outages).
+LAUNCH_OUTAGE_SECONDS=21600
 
 # Let the source's own adapter apply and acknowledge one captured result. See
 # the header for why this exists and what each exit means. An already
@@ -818,6 +854,10 @@ publish_result() {  # <result-file>
   line=$(fm_procevent_event_line "$adapter" "$id" "$seq") || return 1
   owner_task=$(fm_procevent_result_owner_task "$result" 2>/dev/null || true)
   fm_procevent_source_lock_acquire "$id" || return 1
+  if source_applied_elsewhere "$id"; then
+    fm_procevent_source_lock_release "$id"
+    return 1
+  fi
   if ! fm_procevent_is_handled "$STATE" "$id" "$seq"; then
     if [ -n "$owner_task" ]; then
       if adapter_result_is_terminal "$adapter" "$result"; then
@@ -1338,6 +1378,7 @@ EOF
       STAGED_OUTPUT=
     fi
     if { [ "$capture_state" = no-result ] || [ "$rc" -eq 75 ]; } && adopt_relisten; then
+      end_launch_failure_episode "$id"
       continue
     fi
     if [ "$extension_owner" -eq 0 ]; then
@@ -1349,6 +1390,13 @@ EOF
 
   if [ "$extension_owner" -eq 1 ]; then
     durable="./$durable"
+  fi
+
+  # A self-announcing capture is in flight from before it turns durable until
+  # its application ends (header), so no other publication announces it first.
+  if [ "$extension_owner" -eq 0 ] && adapter_self_announcing "$adapter"; then
+    self_announcing=1
+    mark_source_applying "$id" || true
   fi
 
   if [ "$extension_owner" -eq 1 ]; then
@@ -1364,6 +1412,7 @@ EOF
   fi
   [ "$extension_owner" -eq 1 ] || rm -f -- "$out"
   STAGED_OUTPUT=
+  end_launch_failure_episode "$id"
   [ "$truncated" -eq 1 ] && printf 'truncated: %s at %s bytes\n' "$id" "$MAX_OUTPUT_BYTES" >&2
 
   # Independent of publication and acknowledgement, so it runs once per capture
@@ -1381,9 +1430,7 @@ EOF
   # downstream channel, so publication waits until after application and covers
   # only what remains unhandled; every other adapter keeps the strict
   # publish-before-apply order (announcement-ownership note in the header).
-  if [ "$extension_owner" -eq 0 ] && adapter_self_announcing "$adapter"; then
-    self_announcing=1
-  else
+  if [ "$self_announcing" -eq 0 ]; then
     if publish_result "$durable"; then
       published_capture=1
     elif fm_procevent_is_handled "$STATE" "$id" "$(fm_procevent_result_sequence "$durable")"; then
@@ -1399,6 +1446,7 @@ EOF
     else
       printf 'not-autohandled: %s (left for the handler; still unacknowledged)\n' "$id" >&2
     fi
+    rm -f -- "$(applying_file "$id")"
     # publish_result's own handled guard keeps a fully autohandled capture
     # quiet here; anything the adapter left unhandled is announced exactly as
     # before, and a crash above leaves it to reconcile's re-announcement.
@@ -1628,28 +1676,78 @@ report_stranded_source() {  # <source-id> <claim-token> <why-and-recovery>
 # cycle and reported `failed=` to a stdout that cycle discards: armed in
 # appearance, a dead drop in fact, which is the incident with a different cause.
 # Confirmation observes only that no claim and no launch stamp appeared inside
-# the window, so this says exactly that and no more about why. An episode is
-# keyed by the registration identity the launch ran under and ends when a later
-# cycle finds the source owned or a launch confirms, so a second failure inside
-# one episode announces nothing, a slow runner that arms later closes its own
-# episode without a retraction, and a source that recovers and then fails again
-# announces a new one. Nothing here changes what reconcile does about the launch
-# itself: it keeps relaunching exactly as before, and this only says so once.
+# the window, so this says exactly that and no more about why. An episode
+# belongs to the source, not to one registration of it, and it is open for as
+# long as its marker exists: a second failure inside one episode announces
+# nothing, including after the source was re-registered under a new identity
+# (every session start re-arms a remote secondmate's source, so an offline host
+# would otherwise announce again after each one).
 #
-# The queue key carries a nonce beyond the episode: the watcher remembers every
-# key it has surfaced for good, so a key made of the registration identity alone
-# would be surfaced for the first episode only and every later episode of the
-# same registration would sit in the queue unannounced. The marker records the
-# episode and that nonce together, and the episode alone decides whether to
-# announce.
+# Only a runner proving the source collected ends an episode - its command
+# returned a result, or a clean empty window it relistens after
+# (end_launch_failure_episode). Seeing the source owned, or a launch confirm, is
+# not that proof: a runner for an unreachable remote host claims, blocks on ssh,
+# and then dies on the transport timeout with nothing read, so closing on that
+# sighting reopened the same outage as a new episode every few cycles. A slow
+# runner that arms later still closes its own episode without a retraction once
+# its source answers, and a source that recovers and then fails again announces
+# a new one. Nothing here changes what reconcile does about the launch itself:
+# it keeps relaunching exactly as before, and this only says so once.
+#
+# The queue key names the registration identity the episode began under and a
+# nonce beyond it: the watcher remembers every key it has surfaced for good, so
+# a key made of the registration identity alone would be surfaced for the first
+# episode only and every later episode of the same registration would sit in the
+# queue unannounced. The marker records that episode and nonce together.
 report_launch_failure() {  # <source-id> <registration-identity>
-  local id=$1 identity=$2 episode nonce
+  local id=$1 identity=$2 episode nonce marker
+  marker=$(launch_failed_file "$id")
+  [ ! -e "$marker" ] && [ ! -L "$marker" ] || return 1
   case "$identity" in ''|*[!0-9:]*) episode=unreadable ;; *) episode=${identity//:/-} ;; esac
   nonce="$RANDOM$RANDOM"
-  announce_source_once "$(launch_failed_file "$id")" "$episode" \
+  announce_source_once "$marker" "$episode" \
     "procevent:$id:launch-failed:$episode-$nonce" \
-    "check: process-event source $id is registered but its launch did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS, so nothing is confirmed to be collecting from it; reconcile reports that as failed= and keeps launching it every supervision cycle. If it stays that way, check the source command and the adapter binary the registration names, and run an attached bin/fm-procevent.sh start $id to reproduce a refusal on its stderr - the detached launch discards it, and a hand-run reconcile only counts it as failed=. A later cycle that finds the source owned ends this episode on its own, so a runner that was merely slow to claim needs nothing from you." \
+    "check: process-event source $id is registered but its launch did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS, so nothing is confirmed to be collecting from it; reconcile reports that as failed= and keeps launching it every supervision cycle. If it stays that way, check the source command and the adapter binary the registration names, and run an attached bin/fm-procevent.sh start $id to reproduce a refusal on its stderr - the detached launch discards it, and a hand-run reconcile only counts it as failed=. This is announced once per outage, not once per relaunch or re-registration: the episode ends on its own when a runner of this source returns a result or a clean empty window, so a runner that was merely slow to claim, or a host that comes back, needs nothing from you." \
     "$episode $nonce"
+}
+
+# End a source's launch-failure episode, called only by its runner once the
+# source command has proved it collected: a captured result, or a clean empty
+# window this runner relistens after. A read that failed - nonzero with nothing
+# on stdout, as ssh to an unreachable host ends - proves nothing and leaves the
+# episode open, so the next unconfirmed launch of the same outage stays quiet.
+end_launch_failure_episode() {  # <source-id>
+  rm -f -- "$(launch_failed_file "$1")"
+}
+
+# Announce a second mate's reply-source launch-failure episode once more when
+# it is still open LAUNCH_OUTAGE_SECONDS (six hours) after it began.
+#
+# A laptop that sleeps opens an episode every time it drops off, so the attended
+# supervision host keeps each first announcement off MAIN while that mate's
+# machine is unreachable (bin/fm-branch-prompt.sh). This is what still surfaces
+# a machine that never comes back: the key carries the episode's own suffix
+# plus "-outage", which the host's offer rule leaves to MAIN
+# (.pi/extensions/lib/fm-branch-dispatch.ts). It only reads the episode marker,
+# whose mtime is the episode's start, so the episode itself is untouched, and
+# its own marker names the episode it announced, so one episode announces it
+# at most once and a later outage announces again.
+report_launch_outages() {
+  local marker id record
+  for marker in "$REG"/.*.launch-failed; do
+    [ -f "$marker" ] && [ ! -L "$marker" ] || continue
+    id=${marker##*/}; id=${id#.}; id=${id%.launch-failed}
+    fm_procevent_source_id_valid "$id" || continue
+    [ "$(source_field "$id" adapter 2>/dev/null || true)" = remote-reply ] || continue
+    record=$(head -n 1 -- "$marker" 2>/dev/null) || continue
+    record=${record// /-}
+    case "$record" in ''|*[!A-Za-z0-9-]*) continue ;; esac
+    [ "$(fm_path_age "$marker")" -ge "$LAUNCH_OUTAGE_SECONDS" ] || continue
+    announce_source_once "$(launch_outage_file "$id")" "$record" \
+      "procevent:$id:launch-failed:$record-outage" \
+      "check: process-event source $id has collected nothing for more than $((LAUNCH_OUTAGE_SECONDS / 3600)) hours: no runner of it has returned a result or a clean empty window since its launch first failed to prove its claim. For a second mate's reply source this usually means that mate's machine has been asleep, off, or unreachable that whole time, so its replies are not reaching this home; check the machine and its route, then bin/fm-crew-state.sh for the mate. This is announced once per outage; the episode still ends on its own when the source collects again." \
+      || true
+  done
 }
 
 # Shared marker discipline for the announcements above: <marker> holds the
@@ -1657,7 +1755,8 @@ report_launch_failure() {  # <source-id> <registration-identity>
 # removed again if the wake does not land, so a failed announcement retries
 # instead of being marked delivered, and the same generation never announces
 # twice. A caller may store more after that field (the launch-failure nonce);
-# only the first field decides.
+# only the first field decides here, and a caller may refuse earlier on the
+# marker's mere presence (report_launch_failure).
 announce_source_once() {  # <marker> <generation> <key> <payload> [marker-record]
   local marker=$1 generation=$2 key=$3 payload=$4 record=${5:-$2} previous
   previous=$(cat -- "$marker" 2>/dev/null || true)
@@ -1815,11 +1914,9 @@ cmd_reconcile() {
             "$(stranded_leaderless_detail "$id")" || true
         elif [ "$claim_state" -eq 2 ]; then
           uncertain=$((uncertain + 1))
-        elif [ "$claim_state" -eq 0 ]; then
-          # A live owner is the same evidence confirmation reads, however the
-          # runner was started, so it ends any launch-failure episode here.
-          rm -f -- "$(launch_failed_file "$id")"
         fi
+        # A live owner deliberately leaves any launch-failure episode open: only
+        # its runner proving the source collected ends one (report_launch_failure).
       fi
       fm_procevent_source_lock_release "$id"
     done
@@ -1836,10 +1933,10 @@ cmd_reconcile() {
         report_launch_failure "$id" "$launch_identity" || true
       else
         started=$((started + 1))
-        rm -f -- "$(launch_failed_file "$id")"
       fi
     done
   fi
+  [ ! -d "$REG" ] || report_launch_outages
   printf 'reconciled: published=%s started=%s stopped=%s uncertain=%s failed=%s\n' \
     "$published" "$started" "$stopped" "$uncertain" "$failed"
   [ "$failed" -eq 0 ]
@@ -2238,6 +2335,7 @@ cmd_retire() {
   rm -f -- "$(runner_file "$id")"
   rm -f -- "$(stranded_file "$id")"
   rm -f -- "$(launch_failed_file "$id")"
+  rm -f -- "$(launch_outage_file "$id")"
   rm -f -- "$REG/.$id.reply."*
   fm_procevent_source_lock_release "$id"
   # A retired source produces no further answer, so drop any decision binding it

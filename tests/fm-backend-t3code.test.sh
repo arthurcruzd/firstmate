@@ -348,6 +348,18 @@ test_model_selection_table() {
     || fail "model default should take the project default and still apply effort, got '$out'"
   out=$(t3_run 'fm_backend_t3code_model_selection codex gpt-5.6-sol max proj-1' 2>&1) && fail "codex max must be refused"
   assert_contains "$out" "cannot pass effort 'max' to harness 'codex'" "the codex max refusal must name the harness and value"
+  out=$(t3_run 'fm_backend_t3code_model_selection grok grok-4.7 xhigh proj-1')
+  [ "$out" = '{"instanceId":"grok","model":"grok-4.7","options":[{"id":"reasoningEffort","value":"xhigh"}]}' ] \
+    || fail "grok effort should ride options id reasoningEffort on the grok instance, got '$out'"
+  out=$(t3_run 'fm_backend_t3code_model_selection grok grok-4.7 max proj-1' 2>&1) && fail "grok max must be refused"
+  assert_contains "$out" "cannot pass effort 'max' to harness 'grok'" "the grok max refusal must name the harness and value"
+  out=$(t3_run 'fm_backend_t3code_model_selection muse muse-spark-1.3 max proj-1')
+  [ "$out" = '{"instanceId":"muse","model":"muse-spark-1.3","options":[{"id":"reasoningEffort","value":"max"}]}' ] \
+    || fail "an explicit muse max should pass through as max, got '$out'"
+  out=$(t3_run 'fm_backend_t3code_model_selection muse muse-spark-1.3 default proj-1')
+  [ "$out" = '{"instanceId":"muse","model":"muse-spark-1.3"}' ] || fail "a muse default effort must omit options, got '$out'"
+  out=$(t3_run 'fm_backend_t3code_model_selection muse muse-spark-1.3 minimal proj-1' 2>&1) && fail "muse minimal must be refused"
+  assert_contains "$out" "cannot pass effort 'minimal' to harness 'muse'" "the muse refusal must name the harness and value"
   t3_world_set 'w.projects[0].defaultModelSelection = { instanceId: "codex", model: "gpt-5.6-sol", options: [{ id: "reasoningEffort", value: "low" }, { id: "serviceTier", value: "priority" }] }'
   printf 'codex=codex\n' > "$CONFIG/t3code-instances"
   out=$(t3_run 'fm_backend_t3code_model_selection codex default high proj-1')
@@ -359,7 +371,7 @@ test_model_selection_table() {
   rm -f "$CONFIG/t3code-instances"
   t3_world_set 'w.projects[0].defaultModelSelection = { instanceId: "claudeAgent", model: "claude-sonnet-5" }'
   out=$(t3_run 'fm_backend_t3code_model_selection pi x high proj-1' 2>&1) && fail "a non-T3 harness must be refused"
-  assert_contains "$out" "only the claude and codex harnesses" "the harness refusal must name the supported set"
+  assert_contains "$out" "only the claude, codex, grok, and muse harnesses" "the harness refusal must name the supported set"
   t3_world_set 'w.projects[0].defaultModelSelection = null'
   out=$(t3_run 'fm_backend_t3code_model_selection claude default default proj-1' 2>&1) && fail "model default with no project default must be refused"
   assert_contains "$out" "has no default model; pass --model" "the default-model refusal must name the fix"
@@ -370,6 +382,9 @@ test_model_selection_table() {
   assert_contains "$out" "pass --model explicitly" "mismatched default must name the remedy"
   out=$(t3_run 'fm_backend_t3code_model_selection claude claude-fable-5-1 default proj-1')
   [ "$out" = '{"instanceId":"claude-pool","model":"claude-fable-5-1"}' ] || fail "config/t3code-instances must override the instance id, got '$out'"
+  printf 'grok=grok-team\nmuse=muse-team\n' >> "$CONFIG/t3code-instances"
+  [ "$(t3_run 'fm_backend_t3code_instance_id grok'):$(t3_run 'fm_backend_t3code_instance_id muse')" = grok-team:muse-team ] \
+    || fail "config/t3code-instances must override the grok and muse instance ids"
   t3_world_set 'w.projects[0].defaultModelSelection.instanceId = "claude-pool"'
   out=$(t3_run 'fm_backend_t3code_model_selection claude default default proj-1')
   [ "$out" = '{"instanceId":"claude-pool","model":"claude-sonnet-5"}' ] || fail "matching default must use the configured instance, got '$out'"
@@ -543,8 +558,10 @@ test_status_table() {
   [ "$got" = idle:alive ] || fail "a thread waiting on a pending request is not busy progress, got $got"
   t3_world "$(t3_thread_json thread-live completed true)"
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
-  [ "$got" = unknown:missing ] || fail "an archived thread should classify unknown:missing, got $got"
-  t3_run 'fm_backend_t3code_target_exists thread-live' && fail "an archived thread must not exist"
+  # An archived thread is a stopped agent whose thread is kept: exit archives
+  # it and relaunch unarchives it, so it reads dead, never missing.
+  [ "$got" = idle:dead ] || fail "an archived thread should classify idle:dead, got $got"
+  t3_run 'fm_backend_t3code_target_exists thread-live' || fail "an archived thread's endpoint still exists"
   [ "$(t3_run 'fm_backend_t3code_composer_state thread-live')" = unknown ] || fail "an archived thread's composer is unknown"
   t3_world "$(t3_thread_json thread-live running true)"
   got="$(t3_run 'fm_backend_t3code_busy_state thread-live'):$(t3_run 'fm_backend_t3code_agent_state thread-live')"
@@ -562,7 +579,100 @@ test_status_table() {
   t3_world_set 'w.failTools = {}'
   t3_run 'fm_backend_t3code_target_exists thread-live' || fail "a live thread must exist"
   [ "$(t3_run 'fm_backend_t3code_composer_state thread-live')" = empty ] || fail "a live thread's composer is always empty"
-  pass "t3code status table: every V2 thread status, a pending request, archived, archived-but-draining, missing, unreachable, and unreadable rows"
+  pass "t3code status table: every V2 thread status, a pending request, archived (dead), archived-but-draining, missing, unreachable, and unreadable rows"
+}
+
+test_restart_reconcile_resteers_once() {
+  local state marker out rc send
+  t3_case restart-reconcile cancelled
+  state="$CASE_DIR/state"; mkdir -p "$state"
+  marker="$state/worker.t3code-restart"
+  out=$(t3_run 'fm_backend_t3code_restart_reconcile thread-live "$1" "continue please"' "$marker"); rc=$?
+  expect_code 0 "$rc" "a cancelled latest run is re-steered"
+  [ "$out" = run-1 ] || fail "reconcile prints the cancelled run, got '$out'"
+  [ "$(t3_dispatch_types)" = t3_thread_send ] || fail "reconcile sends one message, got '$(t3_dispatch_types)'"
+  send=$(t3_log_line_of 'r.tool === "t3_thread_send"')
+  [ "$(t3_request "$send" 'r.arguments.clientRequestId')" = fm-restart-run-1 ] || fail "the re-steer request id derives from the cancelled run"
+  [ "$(t3_request "$send" 'r.arguments.message')" = "continue please" ] || fail "the re-steer carries the given message"
+  [ "$(cat "$marker")" = run-1 ] || fail "the reconciled run is recorded"
+  t3_world "$(t3_thread_json thread-live cancelled false)"
+  : > "$LOG"
+  t3_run 'fm_backend_t3code_restart_reconcile thread-live "$1" "continue please"' "$marker" >/dev/null; rc=$?
+  expect_code 1 "$rc" "a reconciled run is never re-steered again"
+  [ -z "$(t3_dispatch_types)" ] || fail "a reconciled run sends nothing"
+  rm -f "$marker"
+  for status in interrupted completed running idle; do
+    t3_world "$(t3_thread_json thread-live "$status" false)"
+    t3_run 'fm_backend_t3code_restart_reconcile thread-live "$1" "continue please"' "$marker" >/dev/null; rc=$?
+    expect_code 1 "$rc" "a $status thread has nothing to reconcile"
+  done
+  t3_world "$(t3_thread_json thread-live cancelled true)"
+  t3_run 'fm_backend_t3code_restart_reconcile thread-live "$1" "continue please"' "$marker" >/dev/null; rc=$?
+  expect_code 1 "$rc" "an archived (exited) thread is not re-steered"
+  [ -z "$(t3_dispatch_types)" ] || fail "nothing is sent to a thread with nothing to reconcile"
+  t3_world "$(t3_thread_json thread-live cancelled false)"
+  t3_world_set 'w.failTools = { t3_thread_send: { code: "unavailable", message: "send failed" } }'
+  t3_run 'fm_backend_t3code_restart_reconcile thread-live "$1" "continue please"' "$marker" >/dev/null 2>&1; rc=$?
+  expect_code 2 "$rc" "a failed re-steer reports a retryable failure"
+  assert_absent "$marker" "a failed re-steer records nothing, so the next poll retries"
+  pass "t3code restart reconciliation: one idempotent re-steer per cancelled run, nothing for other states, retry after a failed send"
+}
+
+# The real watcher meets a thread a T3 restart cancelled, with a stale wedge
+# timer already expired: it re-steers the thread and reports no wedge.
+test_t3_watcher_reconciles_restart() {
+  local state fb out thread=mcp:5a0e1f2b-3c4d-4a5b-8c6d-0123456789ab key hash _
+  key=${thread//:/_}
+  t3_case watch-restart cancelled
+  t3_world "$(t3_thread_json "$thread" cancelled false)"
+  state="$CASE_DIR/state"; fb="$CASE_DIR/fakebin"; out="$CASE_DIR/watch.out"
+  mkdir -p "$state" "$fb" "$CASE_DIR/data"
+  fm_git_init_commit "$REPO"
+  git -C "$REPO" checkout -qb fm/worker
+  fm_write_meta "$state/worker.meta" "window=fm-worker" "backend=t3code" \
+    "t3_thread_id=$thread" "worktree=$REPO" "project=$REPO" "harness=codex" "kind=ship"
+  : > "$CASE_DIR/run.toon"
+  cat > "$fb/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'axi status'*) cat "$FM_T3_TEST_RUN" ;;
+  'daemon status') printf 'daemon running (pid 4242)\n' ;;
+esac
+SH
+  chmod +x "$fb/no-mistakes"
+  hash=$(t3_run 'fm_backend_capture t3code "$1" 40' "$thread")
+  hash=$(printf '%s' "$hash" | { if command -v md5 >/dev/null 2>&1; then md5 -q; else md5sum | cut -d' ' -f1; fi; })
+  printf '%s' "$hash" > "$state/.hash-$key"
+  printf '3\n' > "$state/.count-$key"
+  printf '1\n' > "$state/.stale-since-$key"
+  printf '2\n' > "$state/.wedge-escalations-$key"
+  # The restart also ended the provider process, whose own turn-end hook
+  # touched the task's notification.
+  touch "$state/worker.turn-ended"
+  PATH="$fb:$PATH" FM_T3_TEST_RUN="$CASE_DIR/run.toon" \
+    FM_CONFIG_OVERRIDE="$CONFIG" FM_HOME="$CASE_DIR" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$CASE_DIR/data" \
+    FM_POLL=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_STALE_ESCALATE_SECS=1 \
+    "$ROOT/bin/fm-watch.sh" > "$out" 2>&1 &
+  WATCH_PID=$!
+  for _ in $(seq 1 300); do
+    [ -n "$(t3_fake_calls t3_thread_send)" ] && break
+    kill -0 "$WATCH_PID" 2>/dev/null || break
+    sleep 0.1
+  done
+  [ -n "$(t3_fake_calls t3_thread_send)" ] || fail "the watcher never re-steered the cancelled thread: $(cat "$out")"
+  assert_contains "$(t3_fake_calls t3_thread_send)" '"clientRequestId":"fm-restart-run-1"' "the re-steer is bound to the cancelled run"
+  assert_contains "$(t3_fake_calls t3_thread_send)" "T3 Code server restarted" "the re-steer explains the restart"
+  assert_contains "$(t3_fake_calls t3_thread_send)" "$state/worker.inbox" "the re-steer names the steering inbox by its absolute path"
+  sleep 3
+  kill -0 "$WATCH_PID" 2>/dev/null || fail "a reconciled restart woke firstmate: $(cat "$out")"
+  assert_absent "$state/.wake-queue" "a reconciled restart queues no wake"
+  assert_absent "$state/.wedge-escalations-$key" "the restart's quiet leaves no wedge escalation behind"
+  assert_grep "re-steered after a T3 restart cancelled run run-1" "$state/.watch-triage.log" "the reconciliation is logged"
+  [ "$(t3_fake_calls t3_thread_send | wc -l | tr -d ' ')" = 1 ] || fail "the restart is re-steered exactly once"
+  kill "$WATCH_PID" 2>/dev/null || true
+  wait "$WATCH_PID" 2>/dev/null || true
+  WATCH_PID=
+  pass "T3 watcher: a run a server restart cancelled is re-steered once before signals are classified, so neither its turn-end notification nor a stale wedge wakes firstmate"
 }
 
 test_unreadable_thread_defers_like_busy() {
@@ -593,6 +703,52 @@ test_unreadable_thread_defers_like_busy() {
   [ "$got" = 3 ] || fail "the stale recheck must preserve uncertainty, got $got"
   [ -z "$(t3_dispatch_types)" ] || fail "an unreadable thread must not be sent a message"
   pass "t3code: a failed thread read reports unknown busy state, submits no away-mode injection, and keeps stale rechecks uncertain"
+}
+
+# T3 reopens an unloaded session on the daemon's message without its
+# SessionStart hooks, so while the session lock names a dead process the
+# escalation carries the hint to run session start first, in the typed envelope
+# and in a Claude primary's record alike; a live session gets none.
+test_away_injection_hints_session_start_after_unload() {
+  local state send got holder
+  t3_case inject-hint completed
+  state="$CASE_DIR/state"
+  mkdir -p "$state"
+  got=$(t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=codex
+    afk_enter "$1"
+    inject_msg "worker needs attention" "$1"; printf "%s" "$?"
+  ' "$state")
+  [ "$got" = 0 ] || fail "away injection into an idle T3 thread should submit, got $got"
+  send=$(t3_log_line_of 'r.tool === "t3_thread_send"')
+  assert_contains "$(t3_request "$send" 'r.arguments.message')" "worker needs attention" "the escalation must reach the thread"
+  assert_contains "$(t3_request "$send" 'r.arguments.message')" "run bin/fm-session-start.sh first" \
+    "an escalation that reopens an unloaded session must say to run session start"
+  sleep 60 &
+  holder=$!
+  printf '%s\n' "$holder" > "$state/.lock"
+  t3_world "$(t3_thread_json thread-live completed false)"
+  : > "$LOG"
+  t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=codex
+    inject_msg "worker done" "$1"
+  ' "$state" || fail "away injection with a live session should submit"
+  send=$(t3_log_line_of 'r.tool === "t3_thread_send"')
+  assert_not_contains "$(t3_request "$send" 'r.arguments.message')" "fm-session-start" \
+    "a live session must not be told to rerun session start"
+  kill "$holder" 2>/dev/null
+  wait "$holder" 2>/dev/null
+  t3_world "$(t3_thread_json thread-live completed false)"
+  t3_run '
+    . "$0/bin/fm-supervise-daemon.sh"
+    FM_SUPERVISOR_TARGET=thread-live FM_SUPERVISOR_BACKEND=t3code FM_DAEMON_PRIMARY_HARNESS=claude
+    inject_msg "reviewer finished" "$1"
+  ' "$state" || fail "away injection into a Claude primary should submit its doorbell"
+  grep -rl "reviewer finished" "$state/operational-inbox" | xargs grep -l "run bin/fm-session-start.sh first" >/dev/null \
+    || fail "a Claude primary's record must carry the session-start hint"
+  pass "t3code away injection: an escalation into an unloaded session says to run session start; a live session's does not"
 }
 
 # A digest whose T3 reply was lost may already be delivered. Its generation is
@@ -840,8 +996,10 @@ test_harness_admission_and_typing_refusals() {
   [ "$out" = 'error: backend=t3code has no pane to type into' ] || fail "the typing refusal changed: $out"
   [ ! -s "$LOG" ] || fail 'refused typing must not dispatch or read a thread'
   t3_run 'fm_backend_send_key t3code thread-live Enter' || fail 'runtime Enter remains a no-op'
-  t3_run 'fm_backend_validate_harness t3code claude; fm_backend_validate_harness t3code codex' || fail 'T3 supported harnesses changed'
-  for op in opencode pi pi-signed grok kimi cursor gemini muse rovo omp agy devin; do
+  for op in claude codex grok muse; do
+    t3_run 'fm_backend_validate_harness t3code "$1"' "$op" || fail "T3 must admit harness $op"
+  done
+  for op in opencode pi pi-signed kimi cursor gemini rovo omp agy devin; do
     if out=$(t3_run 'fm_backend_validate_harness t3code "$1"' "$op" 2>&1); then fail "T3 must refuse harness $op"; fi
     assert_contains "$out" "not '$op'" 'harness refusal must name the unsupported adapter'
   done
@@ -1176,11 +1334,11 @@ SH
 test_control_lib_tables() {
   bash -c '. "$0/bin/fm-control-lib.sh"; fm_control_backend_supports_key t3code Escape && fm_control_backend_supports_key t3code Enter && fm_control_backend_supports_key t3code C-c && ! fm_control_backend_supports_key t3code C-u && fm_control_backend_state_verified t3code' "$ROOT" \
     || fail "control-lib must accept Enter/Escape/C-c, refuse C-u, and treat t3code as state-verified"
-  bash -c '. "$0/bin/fm-control-lib.sh"; ! fm_control_backend_exit_supported t3code && fm_control_backend_exit_supported tmux && fm_control_backend_exit_supported herdr' "$ROOT" \
-    || fail "control-lib must refuse exit on t3code, and only on t3code"
-  bash -c '. "$0/bin/fm-control-lib.sh"; fm_control_backend_relaunch_supported tmux && fm_control_backend_relaunch_supported herdr && ! fm_control_backend_relaunch_supported t3code' "$ROOT" \
-    || fail "control-lib must keep replacement launches on tmux and herdr and refuse them on t3code"
-  pass "fm-control-lib: t3code key set, state-verified, no-exit, and no-replacement membership"
+  bash -c '. "$0/bin/fm-control-lib.sh"; fm_control_backend_native_exit t3code && ! fm_control_backend_native_exit tmux && ! fm_control_backend_native_exit herdr && ! fm_control_backend_native_exit zellij' "$ROOT" \
+    || fail "control-lib must stop t3code natively and keep the typed exit on every other backend"
+  bash -c '. "$0/bin/fm-control-lib.sh"; fm_control_backend_relaunch_supported tmux && fm_control_backend_relaunch_supported herdr && fm_control_backend_relaunch_supported rex && fm_control_backend_relaunch_supported t3code && ! fm_control_backend_relaunch_supported zellij && ! fm_control_backend_relaunch_supported orca && ! fm_control_backend_relaunch_supported cmux' "$ROOT" \
+    || fail "control-lib must host replacements on tmux, herdr, rex, and t3code only"
+  pass "fm-control-lib: t3code key set, state-verified, native exit, and replacement membership"
 }
 
 # A recorded t3code scout for the control plane: the fake thread in the given
@@ -1207,46 +1365,152 @@ run_t3_control() {  # <id> <verb> [args...]
     "$ROOT/bin/fm-control.sh" "$@" 2>&1
 }
 
-test_control_exit_refused_before_any_call() {
+test_control_exit_interrupts_then_archives() {
   local id out rc thread=mcp:7a1b2c3d-4e5f-4a6b-8c7d-0123456789ab
-  id=$(t3_uid t3exitz1)
+  id="t3exitz1"
   make_t3_control_task control-exit "$id" "$thread" running
-  out=$(run_t3_control "$id" exit); rc=$?
-  expect_code 1 "$rc" "exit on a t3code task must refuse"$'\n'"$out"
-  assert_contains "$out" "no session stop" "the refusal must name the missing session stop"
-  assert_contains "$out" "'interrupt' ends the running turn" "the refusal must name the verb that works"
-  [ -z "$(t3_dispatch_types)" ] || fail "a refused exit must send nothing to T3, not even an interrupt, got '$(t3_dispatch_types)'"
-  assert_present "$CTRL_STATE/$id.meta" "a refused exit preserves the task record"
-  [ "$(t3_run 'fm_backend_busy_state t3code "$1"' "$thread")" = busy ] || fail "the running turn must be untouched"
   out=$(run_t3_control "$id" interrupt); rc=$?
   expect_code 0 "$rc" "interrupt on a t3code task should succeed"$'\n'"$out"
-  case "$(t3_dispatch_types)" in t3_thread_interrupt*) ;; *) fail "interrupt must call t3_thread_interrupt, got '$(t3_dispatch_types)'" ;; esac
-  assert_contains "$out" "cancel=confirmed" "T3's own confirmation of the run's end must reach the interrupt verdict"
+  assert_contains "$out" "cancel=confirmed" "interrupt must report T3's own confirmed cancellation"
   [ "$(t3_run 'fm_backend_busy_state t3code "$1"' "$thread"):$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = idle:alive ] \
     || fail "an interrupted thread is idle and alive"
-  pass "fm-control.sh backend=t3code: exit refuses before any call (V2 has no session stop); interrupt ends the turn natively"
+  # T3 does not confirm: the run stays active and its wait times out.
+  t3_world "$(t3_thread_json "$thread" running false)"
+  t3_world_set 'w.waitTimesOut = true'
+  out=$(run_t3_control "$id" interrupt); rc=$?
+  expect_code 0 "$rc" "an unconfirmed interrupt is still a delivered interrupt"$'\n'"$out"
+  assert_contains "$out" "cancel=unconfirmed" "interrupt must not claim a cancellation T3 did not confirm"
+  assert_not_contains "$out" "cancel=confirmed" "an unconfirmed interrupt never reads confirmed"
+  t3_world "$(t3_thread_json "$thread" running false)"
+  : > "$LOG"
+  out=$(run_t3_control "$id" exit); rc=$?
+  expect_code 0 "$rc" "exit on a t3code task should stop its agent"$'\n'"$out"
+  assert_contains "$out" "stopped $id" "exit must report the agent stopped"
+  [ "$(t3_dispatch_types)" = "t3_thread_interrupt t3_thread_organize" ] \
+    || fail "exit must interrupt the running turn, then archive the thread, got '$(t3_dispatch_types)'"
+  [ "$(t3_request "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" 'r.arguments.action')" = archive ] || fail "exit archives, never deletes"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = dead ] || fail "an exited thread reads dead"
+  assert_present "$CTRL_STATE/$id.meta" "exit preserves the task record"
+  assert_grep "t3_thread_id=$thread" "$CTRL_STATE/$id.meta" "exit preserves the thread binding"
+  : > "$LOG"
+  out=$(run_t3_control "$id" exit); rc=$?
+  expect_code 0 "$rc" "a second exit is idempotent"$'\n'"$out"
+  assert_contains "$out" "already-stopped $id" "a second exit reports already-stopped"
+  [ -z "$(t3_dispatch_types)" ] || fail "an already-stopped thread must not be sent anything, got '$(t3_dispatch_types)'"
+  pass "fm-control.sh backend=t3code: interrupt reports cancel=confirmed only when T3's wait confirms it; exit interrupts, archives, reads dead, and is idempotent"
 }
 
-test_control_relaunch_refused_before_any_dispatch() {
-  local id out rc thread=mcp:8b2c3d4e-5f6a-4b7c-9d8e-123456789abc fb
-  id=$(t3_uid t3relaunchz1)
-  make_t3_control_task control-relaunch "$id" "$thread" running
-  out=$(run_t3_control "$id" relaunch --note "why"); rc=$?
-  expect_code 1 "$rc" "relaunch on a t3code task must refuse"$'\n'"$out"
-  assert_contains "$out" "keeps its conversation" "the refusal must name why no fresh agent can replace it"
-  [ -z "$(t3_dispatch_types)" ] || fail "a refused relaunch must send nothing to T3, got '$(t3_dispatch_types)'"
-  assert_present "$CTRL_STATE/$id.meta" "a refused relaunch preserves the task record"
-  assert_absent "$CTRL_STATE/$id.control-relaunch" "a refused relaunch opens no transaction journal"
-  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = alive ] || fail "the running agent must be untouched"
+# A real t3code scout spawn, exited, then relaunched through fm-control.
+t3_relaunch_fixture() {  # <case-name> <id> <thread-instance>
+  local out rc
+  t3_case "$1"
+  t3_worker_setup "$2"
+  out=$(t3_worker_spawn "$2" claude --model claude-sonnet-5); rc=$?
+  expect_code 0 "$rc" "the fixture spawn should succeed"$'\n'"$out"
+  RELAUNCH_THREAD=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$2.meta")
+  FM_T3_ID="$RELAUNCH_THREAD" FM_T3_INSTANCE="$3" t3_world_set '
+const t = w.threads[process.env.FM_T3_ID];
+t.providerInstanceId = process.env.FM_T3_INSTANCE;
+if (t.activeRunId) { t.runs[0].status = "completed"; t.runs[0].completedAt = new Date().toISOString(); t.activeRunId = null; t.status = "completed"; }'
+  out=$(t3_relaunch_control "$2" exit); rc=$?
+  expect_code 0 "$rc" "the fixture exit should succeed"$'\n'"$out"
+  : > "$LOG"
+}
+
+t3_relaunch_control() {  # <id> <verb> [args...]
+  local fb
   fb=$(make_treehouse_fakebin "$CASE_DIR")
-  out=$( HOME="$SPAWN_HOME" PATH="$fb:$PATH" FM_T3_TREEHOUSE_LOG="$LOG" FM_T3_TREEHOUSE_WT="$CTRL_WT" \
-    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$CTRL_STATE" FM_DATA_OVERRIDE="$CTRL_DATA" FM_CONFIG_OVERRIDE="$CONFIG" \
-    FM_PROJECTS_OVERRIDE="$CASE_DIR/unused-projects" FM_SPAWN_NO_GUARD=1 \
-    "$ROOT/bin/fm-spawn.sh" "$id" --relaunch 2>&1 ); rc=$?
-  expect_code 1 "$rc" "fm-spawn --relaunch on a t3code task must refuse on its own"$'\n'"$out"
-  assert_contains "$out" "cannot launch a replacement agent" "the launch owner's refusal must name the missing replacement"
-  [ -z "$(t3_dispatch_types)" ] || fail "the launch owner's refusal must send nothing to T3, got '$(t3_dispatch_types)'"
-  pass "fm-control.sh relaunch backend=t3code: refused before anything is stopped, by the control plane and by the launch owner"
+  HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' PATH="$fb:$PATH" FM_T3_TREEHOUSE_LOG="$LOG" FM_T3_TREEHOUSE_WT="$WORKER_WT" \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$CASE_DIR/state" FM_DATA_OVERRIDE="$CASE_DIR/data" \
+    FM_CONFIG_OVERRIDE="$CONFIG" FM_PROJECTS_OVERRIDE="$CASE_DIR/unused-projects" FM_SPAWN_NO_GUARD=1 \
+    FM_CONTROL_POLL=0.05 FM_CONTROL_EXIT_WAIT=3 FM_CONTROL_LAUNCH_WAIT=3 \
+    "$ROOT/bin/fm-control.sh" "$@" 2>&1
+}
+
+test_control_relaunch_resumes_the_same_thread() {
+  local id=t3relaunchz1 out rc send configure
+  t3_relaunch_fixture control-relaunch "$id" claudeAgent
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$RELAUNCH_THREAD")" = dead ] || fail "the fixture thread must be exited"
+  out=$(t3_relaunch_control "$id" relaunch --model claude-haiku-5-5 --note "pick up after the restart"); rc=$?
+  expect_code 0 "$rc" "relaunch on a t3code task should resume its thread"$'\n'"$out"
+  assert_contains "$out" "relaunched $id harness=claude" "relaunch must report the replacement"
+  assert_contains "$out" "endpoint=$RELAUNCH_THREAD" "relaunch must keep the same thread"
+  [ "$(t3_dispatch_types)" = "t3_thread_organize t3_thread_configure t3_thread_send" ] \
+    || fail "relaunch must unarchive, configure, then send the relaunch brief, got '$(t3_dispatch_types)'"
+  [ "$(t3_request "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" 'r.arguments.action')" = unarchive ] || fail "relaunch must unarchive the thread"
+  configure=$(t3_log_line_of 'r.tool === "t3_thread_configure"')
+  [ "$(t3_request "$configure" 'r.arguments.modelSelection.model')" = claude-haiku-5-5 ] || fail "relaunch must apply the chosen model"
+  send=$(t3_log_line_of 'r.tool === "t3_thread_send"')
+  [ "$(t3_request "$send" 'r.arguments.threadId')" = "$RELAUNCH_THREAD" ] || fail "the relaunch brief must go to the same thread"
+  assert_contains "$(t3_request "$send" 'r.arguments.message')" "pick up after the restart" "the relaunch brief must carry the progress note"
+  assert_contains "$(t3_request "$send" 'r.arguments.message')" "FIRSTMATE_OP: v1 launch-brief:" "the relaunch message must be the encoded launch brief"
+  assert_grep "t3_thread_id=$RELAUNCH_THREAD" "$CASE_DIR/state/$id.meta" "the record keeps the same thread"
+  assert_grep "model=claude-haiku-5-5" "$CASE_DIR/state/$id.meta" "the record carries the new model"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$RELAUNCH_THREAD")" = alive ] || fail "the resumed thread reads alive"
+  assert_present "$WORKER_WT/CLAUDE.local.md" "the relaunch re-installs the Claude channel statement"
+  [ "$(t3_log_line_of 'r.tool === "treehouse"')" -eq 0 ] || fail "a relaunch must not lease another slot"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-control.sh relaunch backend=t3code: unarchives and reconfigures the same thread and sends the relaunch brief"
+}
+
+# Review finding 8 (C2): a relaunch onto a launch T3 cannot run refuses before
+# it stops the running agent, not after.
+test_control_relaunch_refuses_t3_inadmissible_before_stop() {
+  local id=t3relaunchz3 out rc thread
+  t3_case control-relaunch-admit
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 0 "$rc" "the fixture spawn should succeed"$'\n'"$out"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$id.meta")
+  FM_T3_ID="$thread" t3_world_set '
+const t = w.threads[process.env.FM_T3_ID];
+if (t.activeRunId) { t.runs[0].status = "completed"; t.runs[0].completedAt = new Date().toISOString(); t.activeRunId = null; t.status = "completed"; }'
+  : > "$LOG"
+  out=$(t3_relaunch_control "$id" relaunch --harness opencode --note "switching runtime"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch onto a harness T3 cannot run must be refused"$'\n'"$out"
+  assert_contains "$out" "backend=t3code runs only the claude, codex, grok, and muse harnesses" "the refusal must name the T3 harness rule"
+  printf 'auto\n' > "$CONFIG/claude-permission-mode"
+  out=$(t3_relaunch_control "$id" relaunch --note "same runtime"); rc=$?
+  rm -f "$CONFIG/claude-permission-mode"
+  [ "$rc" -ne 0 ] || fail "a relaunch under a permission mode T3 cannot honor must be refused"$'\n'"$out"
+  assert_contains "$out" "cannot honor config/claude-permission-mode=auto" "the refusal must name the permission rule"
+  [ -z "$(t3_dispatch_types)" ] || fail "a refused relaunch must not stop or touch the thread, got '$(t3_dispatch_types)'"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = alive ] || fail "the running worker must stay alive after a refused relaunch"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-control.sh relaunch backend=t3code: a replacement T3 cannot run is refused before the running agent is stopped"
+}
+
+# Review finding 8 (C3, A8): a relaunch whose resume fails after T3 unarchived
+# the thread leaves it archived and keeps the previous channel statement.
+test_control_relaunch_failed_resume_keeps_thread_archived_and_wiring() {
+  local id=t3relaunchz4 out rc
+  t3_relaunch_fixture control-relaunch-failed-resume "$id" claudeAgent
+  assert_present "$WORKER_WT/CLAUDE.local.md" "the fixture worker has its channel statement"
+  t3_world_set 'w.failTools = { t3_thread_configure: { code: "invalid_request", message: "configure refused" } }'
+  out=$(t3_relaunch_control "$id" relaunch --note "pick up after the restart"); rc=$?
+  t3_world_set 'w.failTools = {}'
+  [ "$rc" -ne 0 ] || fail "a relaunch whose configure fails must fail"$'\n'"$out"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$RELAUNCH_THREAD")" = dead ] || fail "a failed resume must leave the thread archived"
+  assert_present "$WORKER_WT/CLAUDE.local.md" "a failed resume must keep the previous channel statement"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-control.sh relaunch backend=t3code: a resume that fails after unarchiving leaves the thread archived and its wiring in place"
+}
+
+test_control_relaunch_rebinds_across_provider_instances() {
+  local id=t3relaunchz2 out rc thread launch
+  t3_relaunch_fixture control-relaunch-rebind "$id" codex
+  out=$(t3_relaunch_control "$id" relaunch --note "switching runtime"); rc=$?
+  expect_code 0 "$rc" "relaunch onto another provider instance should launch a new thread"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = "t3_thread_launch t3_thread_send" ] \
+    || fail "a thread bound to another instance must be left archived and a new one launched, got '$(t3_dispatch_types)'"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$id.meta")
+  [ -n "$thread" ] && [ "$thread" != "$RELAUNCH_THREAD" ] || fail "the record must rebind to the new thread, got '$thread'"
+  launch=$(t3_log_line_of 'r.tool === "t3_thread_launch"')
+  [ "$(t3_request "$launch" 'r.arguments.workspaceStrategy.worktreePath')" = "$WORKER_WT" ] || fail "the new thread must bind the same worktree"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$RELAUNCH_THREAD")" = dead ] || fail "the old thread stays archived"
+  [ "$(t3_log_line_of 'r.tool === "treehouse"')" -eq 0 ] || fail "a relaunch must not lease another slot"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-control.sh relaunch backend=t3code: a thread bound to another provider instance is replaced by a new thread in the same worktree"
 }
 
 test_spawn_codex_refuses_tracked_codex_config() {
@@ -1765,6 +2029,142 @@ test_spawn_secondmate_runs_thread_in_home_with_env() {
   pass "fm-spawn.sh --backend t3code --secondmate: project on the home, root-strategy thread, charter message, launch prefix as settings env"
 }
 
+# A remote host launches a T3-hosted mate with the home's OWN config as the
+# launching config (bin/fm-remote-secondmate-control.sh): the home's credential
+# must survive the launch, and the mate's own workers go to the same server.
+test_spawn_remote_host_secondmate_keeps_home_credential() {
+  local id home out settings
+  id="t3smz3"
+  t3_case spawn-secondmate-remote-host
+  home="$CASE_DIR/sm-home-remote"
+  make_t3_secondmate_home "$home" "$id"
+  mkdir -p "$home/config"
+  cp "$CONFIG/t3code-token" "$home/config/t3code-token"
+  chmod 600 "$home/config/t3code-token"
+  CONFIG="$home/config"
+  out=$(FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code spawn_t3_secondmate "$id" "$home" claude claude-sonnet-5)
+  expect_code 0 $? "a host-local T3 mate launch from the home's own config should succeed"$'\n'"$out"
+  [ -f "$home/config/t3code-token" ] && [ ! -L "$home/config/t3code-token" ] \
+    || fail "the launch replaced the home's own credential with a link to itself"
+  node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$home/config/t3code-token" \
+    || fail "the home's own credential no longer reads back"
+  settings="$home/.claude/settings.local.json"
+  [ "$(t3_json_field "$settings" 'd.env.FM_BACKEND')" = t3code ] \
+    || fail "a T3-hosted remote mate must send its own workers to T3, got '$(t3_json_field "$settings" 'd.env.FM_BACKEND')'"
+  if FM_SPAWN_SECONDMATE_CREW_BACKEND=herdr spawn_t3_secondmate "${id}b" "$home" claude claude-sonnet-5 >/dev/null; then
+    fail "an unsupported crew backend must be refused"
+  fi
+  rm -rf "/tmp/fm-$id" "/tmp/fm-${id}b"
+  pass "fm-spawn.sh --backend t3code --secondmate on its own host: keeps the home's credential and sends its crew to T3"
+}
+
+# Releasing a host-local T3 mate for a move (bin/fm-remote-secondmate-control.sh
+# release) archives its thread, removes the home's relay service, and strips the
+# launch environment from the home, so an agent later launched there on Herdr
+# never reads FM_BACKEND=t3code or a dead thread as its supervisor.
+test_remote_host_release_removes_t3_env() {
+  local id=t3smz4 home out meta thread svc
+  t3_case remote-release
+  home="$CASE_DIR/sm-home-release"
+  make_t3_secondmate_home "$home" "$id"
+  mkdir -p "$home/config" "$home/state/parent-route" "$home/data/.parent-route"
+  cp "$CONFIG/t3code-token" "$home/config/t3code-token"
+  chmod 600 "$home/config/t3code-token"
+  touch "$CASE_DIR/home/state/.last-watcher-beat" 2>/dev/null || true
+  # Review finding 10 (C9/F07): the operator's own env entries survive both
+  # the install and the release of the T3 launch environment.
+  mkdir -p "$home/.claude"
+  printf '{"env":{"CAPTAIN_OWN":"keep-me","FM_BACKEND":"stale"}}\n' > "$home/.claude/settings.local.json"
+  out=$(HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$ROOT" FM_STATE_OVERRIDE="$home/state/parent-route" FM_DATA_OVERRIDE="$home/data/.parent-route" \
+    FM_CONFIG_OVERRIDE="$home/config" FM_SKIP_SECONDMATE_INHERIT=1 FM_SKIP_SECONDMATE_SYNC=1 FM_SPAWN_NO_GUARD=1 \
+    "$ROOT/bin/fm-spawn.sh" "$id" "$home" claude --model claude-sonnet-5 --backend t3code --secondmate 2>&1)
+  expect_code 0 $? "a host-local T3 mate launch should succeed"$'\n'"$out"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env.CAPTAIN_OWN')" = keep-me ] || fail "the install must keep the operator's own env entries"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env.FM_BACKEND')" = t3code ] || fail "the install must replace a stale value under a name Firstmate owns"
+  meta="$home/state/parent-route/$id.meta"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$meta")
+  FM_T3_ID="$thread" t3_fake_set 'w.threads[process.env.FM_T3_ID].status = "idle"; w.threads[process.env.FM_T3_ID].activeRunId = null;'
+  node -e 'const fs=require("fs"),f=process.argv[1],d=JSON.parse(fs.readFileSync(f,"utf8"));d.permissions={allow:["Bash(ls)"]};d.env.LATER_OWN="added-while-active";fs.writeFileSync(f,JSON.stringify(d))' "$home/.claude/settings.local.json"
+  printf 'thread=%s\n' "$thread" > "$home/state/.t3-host"
+  svc="$CASE_DIR/svc.log"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$svc" > "$FAKEBIN/systemctl"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n' "$svc" > "$FAKEBIN/launchctl"
+  chmod +x "$FAKEBIN/systemctl" "$FAKEBIN/launchctl"
+  out=$(HOME="$SPAWN_HOME" FM_HOME="$home" "$ROOT/bin/fm-remote-secondmate-control.sh" release "$id" 2>&1)
+  expect_code 0 $? "releasing an idle T3 mate should succeed"$'\n'"$out"
+  rm -f "$FAKEBIN/systemctl" "$FAKEBIN/launchctl"
+  assert_contains "$out" "released: $id backend=t3code target=$thread" "release must name the closed endpoint"
+  [ "$(t3_json_field "$T3_FAKE_WORLD" "d.threads[\"$thread\"].archived")" = true ] || fail "release must archive the mate's thread"
+  assert_absent "$meta" "release must set the endpoint record aside"
+  ls "$meta".released-* >/dev/null 2>&1 || fail "release must keep the endpoint record as a released-<stamp> file"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'Object.keys(d.env).sort().join(" ")')" = "CAPTAIN_OWN LATER_OWN" ] \
+    || fail "release must strip exactly the T3 launch environment from the home, got env '$(t3_json_field "$home/.claude/settings.local.json" 'JSON.stringify(d.env)')'"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.permissions.allow[0]')" = 'Bash(ls)' ] || fail "release must keep the home's other local settings"
+  assert_absent "$home/state/.t3-host" "release must drop the home's T3 host record"
+  # The relay service is a systemd user unit on Linux and an Aqua launch agent
+  # on macOS (bin/fm-t3-host.sh uninstall).
+  if [ "$(uname -s)" = Darwin ]; then
+    assert_grep "bootout gui/$(id -u)/dev.firstmate.t3-relay.sm-home-release" "$svc" "release must remove the home's relay service"
+  else
+    assert_grep "disable --now fm-t3-relay-sm-home-release.service" "$svc" "release must remove the home's relay service"
+  fi
+  rm -rf "/tmp/fm-$id"
+  pass "fm-remote-secondmate-control.sh release: archives the T3 mate, removes its relay, and strips its launch environment from the home"
+}
+
+# Review findings 4 and 5 (F02, F08): a host-local T3 mate relaunch must keep
+# its workers on this T3 server (FM_BACKEND=t3code in the mate's environment)
+# and leave the home's relay aimed at the endpoint the route reports, and an
+# initial-launch retry that finds the endpoint alive must converge the relay
+# binding a failed attach left out.
+test_remote_host_relaunch_keeps_crew_backend_and_relay_target() {
+  local id=t3smz5 home out meta thread hostlog
+  t3_case remote-relaunch
+  home="$CASE_DIR/sm-home-relaunch"
+  make_t3_secondmate_home "$home" "$id"
+  mkdir -p "$home/config" "$home/state/parent-route" "$home/data/.parent-route"
+  cp "$CONFIG/t3code-token" "$home/config/t3code-token"
+  chmod 600 "$home/config/t3code-token"
+  printf 'herdr\n' > "$home/config/backend"
+  hostlog="$CASE_DIR/t3-host.log"
+  # The home's own relay entry point, stubbed: it records the binding calls.
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n[ "$1" != adopt ] || { mkdir -p "$FM_HOME/state"; printf "thread=%%s\\n" "$3" > "$FM_HOME/state/.t3-host"; }\n' "$hostlog" > "$home/bin/fm-t3-host.sh"
+  chmod +x "$home/bin/fm-t3-host.sh"
+  touch "$CASE_DIR/home/state/.last-watcher-beat" 2>/dev/null || true
+  out=$(HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' FM_SPAWN_SECONDMATE_CREW_BACKEND=t3code \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$ROOT" FM_STATE_OVERRIDE="$home/state/parent-route" FM_DATA_OVERRIDE="$home/data/.parent-route" \
+    FM_CONFIG_OVERRIDE="$home/config" FM_SKIP_SECONDMATE_INHERIT=1 FM_SKIP_SECONDMATE_SYNC=1 FM_SPAWN_NO_GUARD=1 \
+    "$ROOT/bin/fm-spawn.sh" "$id" "$home" claude --model claude-sonnet-5 --backend t3code --secondmate 2>&1)
+  expect_code 0 $? "a host-local T3 mate launch should succeed"$'\n'"$out"
+  meta="$home/state/parent-route/$id.meta"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$meta")
+  FM_T3_ID="$thread" t3_fake_set 'w.threads[process.env.FM_T3_ID].status = "idle"; w.threads[process.env.FM_T3_ID].activeRunId = null;'
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env.FM_BACKEND')" = t3code ] || fail "the launch must give the mate's workers the t3code backend"
+
+  # The launch's attach failed before it recorded the thread: a retry that
+  # finds the endpoint alive converges the binding.
+  out=$(HOME="$SPAWN_HOME" FM_HOME="$home" "$ROOT/bin/fm-remote-secondmate-control.sh" launch "$id" claude claude-sonnet-5 - t3code 2>&1)
+  expect_code 0 $? "a launch retry on an alive endpoint should succeed"$'\n'"$out"
+  assert_grep "adopt --thread $thread" "$hostlog" "a launch retry must record the alive thread as the home's T3 host thread"
+  assert_grep "install" "$hostlog" "a launch retry must install the relay a failed attach left out"
+
+  # The relay still names an older thread; a relaunch moves it and keeps the
+  # crew backend.
+  printf 'thread=mcp:old\n' > "$home/state/.t3-host"
+  : > "$hostlog"
+  out=$(HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' FM_SPAWN_NO_GUARD=1 FM_HOME="$home" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" relaunch "$id" claude claude-sonnet-5 - 2>&1)
+  expect_code 0 $? "a host-local T3 mate relaunch should succeed"$'\n'"$out"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$meta")
+  assert_contains "$out" "target=$thread" "the relaunch must report the endpoint it produced"
+  [ "$(sed -n 's/^thread=//p' "$home/state/.t3-host")" = "$thread" ] || fail "the relaunch must aim the home's relay at $thread, got '$(cat "$home/state/.t3-host")'"
+  [ "$(t3_json_field "$home/.claude/settings.local.json" 'd.env.FM_BACKEND')" = t3code ] \
+    || fail "a relaunch must keep the mate's workers on the t3code backend, got env '$(t3_json_field "$home/.claude/settings.local.json" 'JSON.stringify(d.env)')'"
+  rm -rf "/tmp/fm-$id"
+  pass "fm-remote-secondmate-control.sh: a T3 mate's relaunch keeps its crew backend and relay target, and a launch retry converges the relay binding"
+}
+
 test_spawn_codex_secondmate_writes_toml_env() {
   local id home out thread toml
   t3_require_tomllib test_spawn_codex_secondmate_writes_toml_env || return 0
@@ -1832,6 +2232,105 @@ t3_worker_spawn() {
     FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$CASE_DIR/state" FM_DATA_OVERRIDE="$CASE_DIR/data" FM_CONFIG_OVERRIDE="$CONFIG" \
     FM_PROJECTS_OVERRIDE="$CASE_DIR/unused-projects" FM_SPAWN_NO_GUARD=1 \
     "$ROOT/bin/fm-spawn.sh" "$id" "$WORKER_PROJ" "$harness" --scout --backend t3code "$@" 2>&1
+}
+
+# A grok or muse worker on T3: the same thread lifecycle as claude and codex,
+# with no per-directory environment because neither CLI reads one. Muse's spawn
+# preflight needs a muse binary and a stored credential, so the case gives it
+# a stub and an isolated XDG home.
+test_grok_muse_worker_lifecycle_on_t3() {  # <harness> <model> <effort> <other-harness>
+  local harness=$1 model=$2 effort=$3 other=$4 id out rc thread launch neutral fb new_thread
+  id="t3${harness}z1"
+  t3_case "lifecycle-$harness"
+  local -x XDG_CONFIG_HOME="$CASE_DIR/xdg-config" XDG_DATA_HOME="$CASE_DIR/xdg-data" PATH="$CASE_DIR/musebin:$PATH"
+  mkdir -p "$XDG_CONFIG_HOME/muse" "$XDG_DATA_HOME" "$CASE_DIR/musebin"
+  printf '{"stub":true}\n' > "$XDG_CONFIG_HOME/muse/auth.json"
+  fm_fake_exit0 "$CASE_DIR/musebin" muse
+  t3_worker_setup "$id"
+  out=$(t3_worker_spawn "$id" "$harness" --model "$model" --effort "$effort"); rc=$?
+  expect_code 0 "$rc" "a $harness scout on t3code should spawn against the fake T3 server"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = "t3_thread_launch t3_thread_send" ] || fail "$harness spawn must launch then send the brief, got '$(t3_dispatch_types)'"
+  launch=$(t3_log_line_of 'r.tool === "t3_thread_launch"')
+  [ "$(t3_request "$launch" 'r.arguments.modelSelection')" = "{\"instanceId\":\"$harness\",\"model\":\"$model\",\"options\":[{\"id\":\"reasoningEffort\",\"value\":\"$effort\"}]}" ] \
+    || fail "$harness must launch on its own instance with reasoningEffort, got '$(t3_request "$launch" 'r.arguments.modelSelection')'"
+  [ "$(t3_request "$launch" 'r.arguments.runtimeMode')" = full-access ] || fail "$harness must launch full-access"
+  assert_contains "$(t3_request "$(t3_log_line_of 'r.tool === "t3_thread_send"')" 'r.arguments.message')" "FIRSTMATE_OP: v1 launch-brief:" "the $harness thread's first message must be the launch brief"
+  assert_absent "$WORKER_WT/.claude/settings.local.json" "$harness reads no Claude settings environment, so none is written"
+  assert_absent "$WORKER_WT/.codex/config.toml" "$harness reads no Codex config, so none is written"
+  assert_absent "$WORKER_WT/CLAUDE.local.md" "$harness gets no Claude channel statement"
+  thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$id.meta")
+  out=$(FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$CASE_DIR/state" FM_CONFIG_OVERRIDE="$CONFIG" "$ROOT/bin/fm-crew-state.sh" "$id" 2>&1)
+  assert_contains "$out" "t3code-native" "a $harness thread's busy state must come from T3's native status"
+  : > "$LOG"
+  out=$(t3_relaunch_control "$id" interrupt); rc=$?
+  expect_code 0 "$rc" "interrupt on a $harness T3 thread should succeed"$'\n'"$out"
+  assert_contains "$out" "cancel=confirmed" "a $harness interrupt is T3's own confirmed cancellation"
+  [ "$(t3_dispatch_types)" = t3_thread_interrupt ] || fail "a $harness interrupt is one t3_thread_interrupt, got '$(t3_dispatch_types)'"
+  : > "$LOG"
+  out=$(t3_relaunch_control "$id" exit); rc=$?
+  expect_code 0 "$rc" "exit on a $harness T3 thread should stop it"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = t3_thread_organize ] || fail "exiting an idle $harness thread archives it, got '$(t3_dispatch_types)'"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = dead ] || fail "an exited $harness thread reads dead"
+  : > "$LOG"
+  out=$(t3_relaunch_control "$id" relaunch --harness "$other" --model "$other-model" --note "switch runtime"); rc=$?
+  expect_code 0 "$rc" "relaunching a $harness thread onto $other should launch a new thread"$'\n'"$out"
+  [ "$(t3_dispatch_types)" = "t3_thread_launch t3_thread_send" ] \
+    || fail "a relaunch onto another provider instance must launch a new thread, got '$(t3_dispatch_types)'"
+  launch=$(t3_log_line_of 'r.tool === "t3_thread_launch"')
+  [ "$(t3_request "$launch" 'r.arguments.modelSelection.instanceId')" = "$other" ] || fail "the replacement thread must run on the $other instance"
+  [ "$(t3_request "$launch" 'r.arguments.workspaceStrategy.worktreePath')" = "$WORKER_WT" ] || fail "the replacement thread must bind the same worktree"
+  new_thread=$(bash -c '. "$1"; fm_meta_get "$2" t3_thread_id' _ "$ROOT/bin/fm-backend.sh" "$CASE_DIR/state/$id.meta")
+  [ -n "$new_thread" ] && [ "$new_thread" != "$thread" ] || fail "the record must rebind to the new thread, got '$new_thread'"
+  printf 'report\n' > "$CASE_DIR/data/$id/report.md"
+  printf 'decisions_reviewed=1\ndecision_keys=\n' >> "$CASE_DIR/state/$id.meta"
+  : > "$LOG"
+  fb=$(make_treehouse_fakebin "$CASE_DIR")
+  neutral=$(neutral_fm_root "$CASE_DIR/neutral")
+  out=$( HOME="$SPAWN_HOME" PATH="$fb:$PATH" FM_T3_TREEHOUSE_LOG="$LOG" FM_T3_TREEHOUSE_WT="$WORKER_WT" \
+    FM_ROOT_OVERRIDE="$neutral" FM_HOME="$CASE_DIR/home" FM_STATE_OVERRIDE="$CASE_DIR/state" FM_DATA_OVERRIDE="$CASE_DIR/data" FM_CONFIG_OVERRIDE="$CONFIG" \
+    "$ROOT/bin/fm-teardown.sh" "$id" 2>&1 ); rc=$?
+  expect_code 0 "$rc" "teardown of the relaunched task should succeed"$'\n'"$out"
+  [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$new_thread")" = dead ] || fail "teardown must archive the live thread"
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt 0 ] || fail "teardown must return the slot"
+  assert_absent "$WORKER_WT/.fm-grok-turnend" "teardown must remove any grok turn-end pointer"
+  assert_absent "$CASE_DIR/state/$id.meta" "teardown should remove task metadata"
+  rm -rf "/tmp/fm-$id"
+  pass "backend=t3code $harness: launches on its own instance with reasoningEffort and no env files, reads native busy state, interrupts, exits, relaunches onto $other in a new thread, and tears down"
+}
+
+test_spawn_refuses_t3_grok_and_muse_secondmates() {
+  local harness id home out rc
+  for harness in grok muse; do
+    id="t3sm${harness}z1"
+    t3_case "spawn-secondmate-$harness"
+    home="$CASE_DIR/sm-home"
+    make_t3_secondmate_home "$home" "$id"
+    out=$(spawn_t3_secondmate "$id" "$home" "$harness" "$harness-model"); rc=$?
+    expect_code 1 "$rc" "a $harness secondmate on t3code must be refused"$'\n'"$out"
+    case "$harness" in
+      grok) assert_contains "$out" "runs a secondmate only on the claude or codex harness, not 'grok'" "the grok refusal must name the T3 secondmate harnesses" ;;
+      muse) assert_contains "$out" "muse is a verified crewmate/scout adapter only" "muse keeps its crewmate/scout-only refusal" ;;
+    esac
+    [ -z "$(t3_dispatch_types)" ] || fail "a refused $harness secondmate must not reach T3, got '$(t3_dispatch_types)'"
+    assert_absent "$CASE_DIR/home/state/$id.meta" "a refused secondmate records nothing"
+  done
+  pass "fm-spawn.sh --backend t3code --secondmate: grok and muse are refused before any T3 mutation"
+}
+
+test_spawn_refuses_slot_of_another_clone() {
+  local id=t3foreignslot out rc other
+  t3_case spawn-foreign-slot
+  t3_worker_setup "$id"
+  other="$CASE_DIR/other-home-clone"
+  fm_git_worktree "$other" "$CASE_DIR/other-wt" "fm/other"
+  WORKER_WT="$CASE_DIR/other-wt"
+  out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
+  expect_code 1 "$rc" "a leased slot that belongs to another clone must be refused"$'\n'"$out"
+  assert_contains "$out" "belongs to $(cd "$other" && pwd -P), not" "the refusal names the clone that owns the slot"
+  case " $(t3_dispatch_types) " in *" t3_thread_launch "*) fail "no thread may be created for another clone's slot" ;; esac
+  [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -gt 0 ] || fail "the foreign slot's lease must be handed back"
+  assert_absent "$CASE_DIR/state/$id.meta" "a refused slot leaves no task record"
+  pass "fm-spawn.sh --backend t3code: refuses a leased slot that belongs to another home's clone and returns it"
 }
 
 test_spawn_refuses_launch_settings_t3_cannot_honor() {  # <config-file> <content> <expected-error> [harness]
@@ -2725,6 +3224,7 @@ test_housekeeping_preserves_unknown_stale_recheck
 test_reported_unknown_stall_is_not_escalated_again_when_idle
 test_t3_stale_watcher failed dead codex fresh
 test_unreadable_thread_defers_like_busy
+test_away_injection_hints_session_start_after_unload
 test_stale_classifier_resolves_t3_thread
 test_t3_stale_watcher running absorb
 test_t3_stale_watcher running absorb claude
@@ -2749,6 +3249,8 @@ test_lost_send_reply_is_unconfirmed_and_resend_is_idempotent
 test_held_send_local_failure_stays_unconfirmed
 test_lost_send_reply_to_secondmate_names_armed_correlation
 test_status_table
+test_restart_reconcile_resteers_once
+test_t3_watcher_reconciles_restart
 test_push_wait_escalates_pending_question_once
 test_answer_script_reads_and_answers_questions
 test_failed_t3_secondmate_is_resumed_in_place
@@ -2763,8 +3265,14 @@ test_dispatcher_routes_and_validates_t3code_meta
 test_harness_admission_and_typing_refusals
 test_busy_classify_trusts_native_idle_and_busy
 test_control_lib_tables
-test_control_exit_refused_before_any_call
-test_control_relaunch_refused_before_any_dispatch
+test_control_exit_interrupts_then_archives
+test_control_relaunch_resumes_the_same_thread
+test_control_relaunch_rebinds_across_provider_instances
+test_control_relaunch_failed_resume_keeps_thread_archived_and_wiring
+test_control_relaunch_refuses_t3_inadmissible_before_stop
+test_grok_muse_worker_lifecycle_on_t3 grok grok-4.7 xhigh muse
+test_grok_muse_worker_lifecycle_on_t3 muse muse-spark-1.3 max grok
+test_spawn_refuses_t3_grok_and_muse_secondmates
 test_spawn_leases_slot_creates_thread_and_starts_launch_turn
 test_claude_pr_tool_clause_version_boundary
 test_spawn_codex_preserves_tracked_codex_config
@@ -2778,8 +3286,12 @@ test_codex_worker_ignores_untracked_config_in_main_checkout
 test_spawn_codex_scout_writes_toml_env_with_traceparent
 test_spawn_codex_warns_unless_codex_trusts_the_project
 test_spawn_secondmate_runs_thread_in_home_with_env
+test_spawn_remote_host_secondmate_keeps_home_credential
+test_remote_host_release_removes_t3_env
+test_remote_host_relaunch_keeps_crew_backend_and_relay_target
 test_spawn_codex_secondmate_writes_toml_env
 test_spawn_refuses_t3code_when_token_rejected
+test_spawn_refuses_slot_of_another_clone
 test_scout_teardown_stops_and_archives_before_slot_return
 test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete
 test_secondmate_teardown_archives_thread_before_home_removal_without_project_delete codex

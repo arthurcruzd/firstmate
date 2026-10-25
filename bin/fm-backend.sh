@@ -1061,6 +1061,24 @@ fm_backend_kill() {  # <backend> <target>
   esac
 }
 
+# fm_backend_agent_stop: stop the agent and keep its endpoint, on a backend
+# whose agent is stopped through the backend itself rather than through the
+# harness's exit command typed into a composer (bin/fm-control-lib.sh's
+# fm_control_backend_native_exit names them). T3 has no composer and its
+# `/mcp` tools no session stop, so its stop is interrupt-then-archive with a
+# read-back proof (bin/backends/t3code.sh). Every other backend refuses here:
+# its exit is the typed command the control plane owns.
+fm_backend_agent_stop() {  # <backend> <target>
+  local backend=$1
+  shift
+  [ -n "${1:-}" ] || { echo "error: refusing empty backend agent-stop target" >&2; return 1; }
+  fm_backend_source "$backend" || return 1
+  case "$backend" in
+    t3code) fm_backend_t3code_agent_stop "$1" ;;
+    *) echo "error: backend '$backend' stops an agent through its harness exit command, not a native stop" >&2; return 1 ;;
+  esac
+}
+
 fm_backend_remove_worktree() {  # <backend> <worktree-id>
   local backend=$1
   shift

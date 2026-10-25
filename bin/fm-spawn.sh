@@ -75,11 +75,14 @@
 #   model, and effort may change, which is what makes a harness switch one
 #   ordinary relaunch. It refuses unless the recorded endpoint is positively
 #   agent-free on a backend with both a recovery-grade agent-state classifier
-#   and replacement-agent support (tmux or herdr), and clears the previous
-#   harness's per-task wiring before arming the new incarnation. T3 Code has
-#   the classifier but refuses relaunch because a thread keeps its conversation
-#   across turns and provider changes. Two verdicts are agent-free: a `dead`
-#   endpoint is ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
+#   and replacement-agent support (tmux, herdr, or t3code), and clears the
+#   previous harness's per-task wiring before arming the new incarnation. On
+#   t3code the adopted endpoint is the archived thread: it is unarchived, set
+#   to the chosen model, and given the relaunch brief as its next turn, unless
+#   it is bound to another T3 provider instance, in which case a new thread is
+#   launched in the same worktree and the record rebinds to it, the old thread
+#   staying archived. Two verdicts are agent-free: a `dead` endpoint is
+#   ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
 #   merely unreachable from here - and it is only available on HERDR, which must
@@ -137,9 +140,10 @@
 #   t3code is experimental (docs/t3code-backend.md): T3 Code
 #   owns the agent session, so the spawn leases a treehouse slot durably,
 #   launches a T3 thread on it, and sends the launch brief over T3's /mcp
-#   endpoint instead of typing into a pane; only claude and codex harnesses.
-#   The exports a pane would receive before launch travel as per-directory
-#   harness config instead (spawn_t3code_env_install).
+#   endpoint instead of typing into a pane; claude, codex, grok, and muse
+#   workers, and claude or codex secondmates. The exports a pane would receive
+#   before launch travel as per-directory harness config instead, for the
+#   harnesses that read one (spawn_t3code_env_install).
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
@@ -1228,7 +1232,7 @@ fi
 
 spawn_remote_secondmate() {
   local id=$1 remote host root home harness positional model effort backend out rc meta tmp
-  local remote_backend remote_target remote_harness remote_herdr_session registry_lock remote_lock remote_generation
+  local remote_backend remote_target remote_harness remote_herdr_session registry_lock remote_lock remote_generation endpoint
   local remote_traceparent remote_recorded_traceparent sm_primary_head sync_out sync_rc account_config
   local -a launch_args
   id=${POS[0]:-}
@@ -1306,19 +1310,33 @@ spawn_remote_secondmate() {
       [ -n "$effort" ] || effort=-
     fi
   fi
-  # A remote second mate always runs on Herdr: its server belongs to the host's
-  # own GUI login session, so the endpoint outlives every SSH connection that
-  # supervises it. bin/fm-remote-doctor.sh gates that host on the same
-  # requirement, and the remote home's config/backend never overrides it.
+  # The route's registry endpoint names the runtime hosting the second-mate
+  # agent on its host: Herdr's fm-remote session (the default) or that host's
+  # own T3 server. Either outlives every SSH connection that supervises it,
+  # bin/fm-remote-doctor.sh gates the host on the matching readiness set, and
+  # the remote home's config/backend never overrides it. An explicit --backend
+  # must agree with the route; moving a mate is bin/fm-remote-secondmate-move.sh.
+  endpoint=$(secondmate_registry_field "$DATA/secondmates.md" "$id" endpoint)
   case "${BACKEND_ARG:--}" in
-  - | herdr) backend=herdr ;;
+  - | "$endpoint") backend=$endpoint ;;
   *)
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
-    echo "error: a remote secondmate runs only on the herdr backend, not '$BACKEND_ARG'" >&2
+    echo "error: remote secondmate $id runs on its route's '$endpoint' endpoint, not '$BACKEND_ARG'; move it with bin/fm-remote-secondmate-move.sh" >&2
     return 1
     ;;
   esac
+  if [ "$backend" = t3code ]; then
+    case "$harness" in
+    claude | codex) ;;
+    *)
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: remote secondmate $id runs on its host's T3 server, which runs only the claude and codex harnesses, not '$harness'" >&2
+      return 1
+      ;;
+    esac
+  fi
   case "$effort" in
   - | low | medium | high | xhigh | max | ultra) ;;
   *)
@@ -1444,11 +1462,11 @@ spawn_remote_secondmate() {
   remote_target=$(printf '%s\n' "$out" | sed -n 's/^target=//p' | tail -1)
   remote_harness=$(printf '%s\n' "$out" | sed -n 's/^harness=//p' | tail -1)
   remote_herdr_session=$(printf '%s\n' "$out" | sed -n 's/^herdr_session=//p' | tail -1)
-  if [ "$remote_backend" != herdr ]; then
+  if [ "$remote_backend" != "$backend" ]; then
     fm_lock_release "$remote_lock" || true
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
-    echo "error: remote launch returned backend '${remote_backend:-missing}', expected herdr; preserving the remote route for reconciliation" >&2
+    echo "error: remote launch returned backend '${remote_backend:-missing}', expected $backend; preserving the remote route for reconciliation" >&2
     return 1
   fi
   [ -n "$remote_target" ] && [ "$remote_harness" = "$harness" ] || {
@@ -1458,7 +1476,18 @@ spawn_remote_secondmate() {
     echo "error: remote launch returned malformed route metadata; preserving the remote route for reconciliation" >&2
     return 1
   }
-  if [ "$remote_herdr_session" != fm-remote ] || [ "${remote_target%%:*}" != "$remote_herdr_session" ]; then
+  if [ "$backend" = t3code ]; then
+    case "$remote_target" in
+    mcp:?*) ;;
+    *)
+      fm_lock_release "$remote_lock" || true
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: remote launch returned T3 target '$remote_target', which is not a thread id; preserving the remote route for reconciliation" >&2
+      return 1
+      ;;
+    esac
+  elif [ "$remote_herdr_session" != fm-remote ] || [ "${remote_target%%:*}" != "$remote_herdr_session" ]; then
     fm_lock_release "$remote_lock" || true
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
@@ -1491,7 +1520,7 @@ spawn_remote_secondmate() {
     echo "remote_host=$host"
     echo "remote_root=$root"
     echo "remote_backend=$remote_backend"
-    echo "remote_herdr_session=$remote_herdr_session"
+    [ -z "$remote_herdr_session" ] || echo "remote_herdr_session=$remote_herdr_session"
     echo "remote_target=$remote_target"
     [ -z "$remote_recorded_traceparent" ] || echo "traceparent=$remote_recorded_traceparent"
   } >"$tmp"
@@ -2289,11 +2318,9 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint" >&2
     exit 1
   }
-  # The same table refuses a backend that cannot host a REPLACEMENT at all:
-  # a T3 thread keeps its conversation, so a turn or a provider change on it
-  # continues the same agent instead of launching a new one.
+  # The same table refuses a backend that cannot host a REPLACEMENT at all.
   fm_control_backend_relaunch_supported "$BACKEND" || {
-    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint (a T3 thread keeps its conversation, so a turn or a provider change on it continues the same agent); refusing to relaunch $ID" >&2
+    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint; refusing to relaunch $ID" >&2
     exit 1
   }
   # Two states are agent-free, and both license a relaunch:
@@ -3138,6 +3165,12 @@ WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT_ROOT%%$'\t'*}
 # account and environment, so a launch setting only a Firstmate-built command
 # line can apply refuses here instead of being silently widened or dropped.
 if [ "$BACKEND" = t3code ]; then
+  # Grok and Muse run T3 ship and scout workers only: a secondmate needs the
+  # supervision path verified for claude and codex threads.
+  if [ "$KIND" = secondmate ] && [ "$HARNESS" != claude ] && [ "$HARNESS" != codex ]; then
+    echo "error: backend=t3code runs a secondmate only on the claude or codex harness, not '$HARNESS'" >&2
+    exit 1
+  fi
   if [ "$RAW_LAUNCH" = 1 ]; then
     echo "error: backend=t3code cannot run a raw launch command because T3 starts the agent itself; pass a harness name or choose another backend" >&2
     exit 1
@@ -4461,6 +4494,49 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
   exit 1
 fi
 
+# spawn_t3code_relaunch_prepare: the T3 project and model selection a t3code
+# relaunch resumes or launches with, read from the task's own record and the
+# relaunch profile.
+spawn_t3code_relaunch_prepare() {
+  T3CODE_PROJECT_ID=$(fm_meta_get "$RELAUNCH_META" t3_project_id)
+  [ -n "$T3CODE_PROJECT_ID" ] || {
+    echo "error: task $ID's record has no t3_project_id; refusing to relaunch it on t3code" >&2
+    exit 1
+  }
+  T3CODE_MODEL_SELECTION=$(fm_backend_t3code_model_selection "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$T3CODE_PROJECT_ID") || exit 1
+}
+
+# spawn_t3code_relaunch_clear_channel: the removal of the previous
+# incarnation's per-directory channel files, which the install below writes
+# afresh (a fresh spawn refuses them as foreign, and only a Firstmate spawn put
+# them there). It runs only once the thread is resumed or replaced, so a
+# relaunch that fails before that leaves the old wiring in place.
+spawn_t3code_relaunch_clear_channel() {
+  "$SCRIPT_DIR/fm-t3code-codex-env.sh" cleanup "$WT" || {
+    echo "error: could not remove the previous Codex environment overlay from $WT before relaunching $ID" >&2
+    exit 1
+  }
+  if [ "$KIND" != secondmate ] && ! git -C "$WT" ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1; then
+    rm -f "$WT/CLAUDE.local.md"
+  fi
+}
+
+# spawn_t3code_relaunch_launch: a new thread in the task's own worktree (or a
+# secondmate's home root) for a relaunch that cannot resume the recorded one.
+# The task keeps its lease, so an abort archives only the new thread.
+spawn_t3code_relaunch_launch() {
+  local wt_arg=$WT
+  [ "$KIND" != secondmate ] || wt_arg=
+  T3CODE_CREATE_UNCERTAIN=1
+  T=$(fm_backend_t3code_thread_create "$T3CODE_PROJECT_ID" "$W" \
+    "$(git -C "$WT" branch --show-current 2>/dev/null || true)" "$wt_arg" "$T3CODE_MODEL_SELECTION") || {
+      [ "$?" -eq 1 ] || T3CODE_CREATE_UNCERTAIN=0
+      exit 1
+    }
+  T3CODE_CREATE_UNCERTAIN=0
+  T3CODE_ABORT_CLEANUP=1
+}
+
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
   # A secondmate's home already resolved WT above through the same validation a
@@ -4477,6 +4553,26 @@ if [ "$RELAUNCH" -eq 1 ]; then
     T=$RELAUNCH_TARGET
     WT_TARGET=$T
     SES=${T%%:*}
+    if [ "$BACKEND" = t3code ]; then
+      # The adopted endpoint is the archived thread `exit` left. Resume it on
+      # the chosen model so the replacement continues its transcript, or, when
+      # it is bound to another provider instance, launch a new thread in the
+      # same worktree. Either way an abort before the record is republished
+      # archives the thread again, and the task keeps its lease.
+      spawn_t3code_relaunch_prepare
+      t3code_resume_wt=$WT
+      [ "$KIND" != secondmate ] || t3code_resume_wt=
+      case "$(fm_backend_t3code_thread_resume "$T" "$T3CODE_MODEL_SELECTION" "$t3code_resume_wt")" in
+        resumed) T3CODE_ABORT_CLEANUP=1 ;;
+        rebind) spawn_t3code_relaunch_launch ;;
+        *)
+          echo "error: T3 thread $T for $ID could not be resumed for the relaunch; see the reason above" >&2
+          exit 1
+          ;;
+      esac
+      spawn_t3code_relaunch_clear_channel
+      WT_TARGET=$T
+    fi
   elif [ "$BACKEND" = rex ]; then
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the
@@ -4519,6 +4615,14 @@ EOF
     T=$(fm_backend_rex_target "$FM_REX_TASK_SESSION_ID" "$FM_REX_TASK_BLOCK_ID")
     SES=${T%%:*}
     WT_TARGET=$T
+  elif [ "$BACKEND" = t3code ]; then
+    # The verified server answered that it has no such thread, so there is
+    # nothing to resume: launch one new thread in the recorded worktree and
+    # rebind the record to it, as herdr re-creates a pane.
+    spawn_t3code_relaunch_prepare
+    spawn_t3code_relaunch_launch
+    spawn_t3code_relaunch_clear_channel
+    WT_TARGET=$T
   else
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the
@@ -4529,7 +4633,8 @@ EOF
     # Herdr reaches here only on a PROVEN-gone pane: its every read is scoped to
     # the session the record names (fm_control_endpoint_absence_verdict owns
     # that argument). tmux and every secondmate were already refused, and rex
-    # took the branch above, so there is no dispatch left to make.
+    # and t3code took their branches above, so there is no dispatch left to
+    # make.
     #
     # This deliberately uses the FLAT container shape rather than Herdr's
     # presentation projection: projection is a presentation-only layout that is
@@ -4904,8 +5009,11 @@ EOF
       # The home's own daemon and crew call the same server, so they read the
       # primary's credential through a link rather than a copy of the secret.
       T3CODE_HOME_ENV=1
-      if ! { mkdir -p "$PROJ_ABS/config" &&
-        ln -sfn "$(cd "$CONFIG" && pwd -P)/t3code-token" "$PROJ_ABS/config/t3code-token"; }; then
+      # A remote host's launch reads the home's OWN config (bin/fm-remote-
+      # secondmate-control.sh), whose credential is already that file: linking
+      # it to itself would replace the secret with a dangling self-link.
+      if [ "$(cd "$CONFIG" && pwd -P)" != "$(mkdir -p "$PROJ_ABS/config" && cd "$PROJ_ABS/config" && pwd -P)" ] &&
+        ! ln -sfn "$(cd "$CONFIG" && pwd -P)/t3code-token" "$PROJ_ABS/config/t3code-token"; then
         echo "error: could not link the T3 credential into $PROJ_ABS/config for $ID" >&2
         exit 1
       fi
@@ -4929,6 +5037,15 @@ EOF
       [ -n "$WT" ] || { echo "error: treehouse get --lease did not report a worktree for $ID" >&2; exit 1; }
       validate_spawn_worktree "treehouse get --lease" "$WT (leased to $ID; once inspected, release it with 'treehouse return --force $WT' from $PROJ_ABS)"
       T3CODE_LEASED=1
+      # T3 binds a thread only to a linked worktree of the project root it was
+      # registered with. Treehouse keys pools by repository identity, so two
+      # homes cloning the same remote can share one pool whose slots belong to
+      # the other home's clone; never bind this task to another home's clone.
+      T3CODE_SLOT_ROOT=$(git -C "$WT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+      if [ -z "$T3CODE_SLOT_ROOT" ] || [ "$(cd "$T3CODE_SLOT_ROOT" 2>/dev/null && pwd -P)" != "$(cd "$PROJ_ABS" && pwd -P)" ]; then
+        echo "error: Treehouse slot $WT belongs to ${T3CODE_SLOT_ROOT:-an unknown repository}, not $PROJ_ABS; T3 would refuse it, and it may be another home's pool. Give this home's clone its own pool root (root= in a git-excluded treehouse.toml, docs/t3code-backend.md)" >&2
+        exit 1
+      fi
       freshen_spawn_worktree_base "$WT" "$BASE_BRANCH" || {
         if [ "$?" -eq 2 ]; then
           T3CODE_LEASED=0
@@ -5481,6 +5598,11 @@ polytoken_spawn_fail() {  # <detail>
 
 if [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = orca ]; then
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
+elif [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = t3code ]; then
+  # A T3 thread has no shell to drift: its worktree binding was read back from
+  # T3 when the relaunch resumed it (fm_backend_t3code_thread_resume) or
+  # launched its replacement, so there is no pane location to prove here.
+  :
 elif [ "$RELAUNCH" -eq 1 ]; then
   # No worktree is acquired: the recorded one is reused as-is. What must be
   # proven instead is that the adopted endpoint's shell is actually sitting in
@@ -5718,6 +5840,12 @@ exclude_path() {
 # `[shell_environment_policy] set` table (TOML basic strings). Both files are
 # git-excluded when untracked; tracked Codex overlays are owned by
 # fm-t3code-codex-env.sh, including their Git protection and exact restoration.
+# Grok and Muse read no per-directory environment (verified, grok 1.0.52: a
+# project's .grok/config.toml cannot set shell_environment_policy, and neither
+# .claude/settings.local.json `env` nor .envrc reached its shell; Muse Code
+# 1.4.7: neither .claude/settings.local.json nor .muse/settings.json `env`
+# did), so nothing is written for them and their brief's absolute status,
+# inbox, and home paths carry the protocol (docs/t3code-backend.md).
 # spawn_t3code_claude_channel_install - the t3code carrier for the Claude
 # task-worker channel statement (spawn_claude_task_channel_statement). T3 owns
 # the system prompt, and its Claude sessions read the launch directory's
@@ -5790,6 +5918,7 @@ require("fs").writeFileSync(file, `# Generated by Firstmate T3 Code\n[shell_envi
 ' "$WT/.codex/config.toml" "$@" || return 1
       exclude_path '.codex/config.toml'
       ;;
+    grok|muse) ;;
     *)
       echo "error: backend=t3code has no environment channel for harness '$harness'" >&2
       return 1
@@ -7079,6 +7208,16 @@ if [ "$BACKEND" = t3code ]; then
     T3CODE_ENV+=(FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= \
       "FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$FM_HOME" "FM_HOME=$PROJ_ABS" "FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE" \
       "FM_SUPERVISION_MODEL=$supervision_model" FM_SUPERVISOR_BACKEND=t3code "FM_SUPERVISOR_TARGET=$T")
+    # A remote host's launch of a T3-hosted mate sends that mate's own workers
+    # to the same server (bin/fm-remote-secondmate-control.sh).
+    case "${FM_SPAWN_SECONDMATE_CREW_BACKEND:-}" in
+    '') ;;
+    t3code) T3CODE_ENV+=(FM_BACKEND=t3code) ;;
+    *)
+      echo "error: unsupported FM_SPAWN_SECONDMATE_CREW_BACKEND '$FM_SPAWN_SECONDMATE_CREW_BACKEND'" >&2
+      exit 1
+      ;;
+    esac
   fi
   spawn_t3code_env_install "$HARNESS" "${T3CODE_ENV[@]}" || {
     echo "error: could not write the $HARNESS environment config for $ID into $WT" >&2

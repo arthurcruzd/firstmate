@@ -134,8 +134,9 @@
 #                          the confirm window, so nothing is confirmed to be
 #                          collecting for it and every cycle will relaunch it
 #                          (bin/fm-procevent.sh reconcile queues it once per
-#                          failure episode, and a later cycle that finds the
-#                          source owned closes that episode); the queued
+#                          failure episode, which spans relaunches and
+#                          re-registrations and closes once a runner of that
+#                          source collects); the queued
 #                          payload names what to check. These three kinds are
 #                          joined with `;` when more than one surfaces in a cycle
 #   check: rejected unauthenticated state checks: <paths>
@@ -2232,7 +2233,7 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
 }
 
 # wedge_defer_t3code_running: the T3 Code consult of the wedge ladder. A T3
-# window's capture is the thread's messages plus a session line, so it stays
+# window's capture is the thread's activity plus a status line, so it stays
 # byte-identical through a long tool call where a pane would keep repainting;
 # a still-running session is therefore read from the server itself before the
 # quiet transcript is reported. Only the adapter's `running` word defers,
@@ -2254,6 +2255,43 @@ wedge_defer_t3code_running() {  # <window> <since-file> <triage-label> <idle-age
   date +%s > "$since_file"
   triage_log "absorbed $label (T3 session still running, turn ${turn_age}s, idle ${age}s), timer reset: $win"
   return 0
+}
+
+# t3code_restart_check: restart reconciliation for a T3 worker. A T3 server
+# restart terminalizes every in-flight run as `cancelled` and resumes none of
+# them, so the worker's turn ended without its own status line and would
+# otherwise surface as an unexplained stale pane. The adapter re-steers the
+# thread once per cancelled run (fm_backend_t3code_restart_reconcile owns the
+# detection and the idempotent send); the stale and wedge bookkeeping for the
+# window is then cleared, so the quiet the restart caused is never reported as
+# a wedge. A read or send failure leaves everything for the next poll.
+t3code_restart_check() {  # <window> <task>
+  local w=$1 task=$2 run msg
+  fm_backend_source t3code || return 0
+  msg="Firstmate notice: your previous turn was cancelled because the T3 Code server restarted, so any command it was running was stopped. Re-read your instructions and the tail of your status file, then check your steering inbox: list '$STATE/$task.inbox'/*.msg, act on each in numeric order, and mv each into its handled/. Continue the task from where it stopped. If the task was already finished, stay idle without appending a new status line."
+  run=$(fm_backend_t3code_restart_reconcile "$w" "$STATE/$task.t3code-restart" "$msg") || return 0
+  clear_stale_hash_tracking "$(window_key "$w")"
+  triage_log "re-steered after a T3 restart cancelled run $run: $w"
+}
+
+# t3code_restart_pass: t3code_restart_check for every recorded T3 ship or
+# scout thread, run at the top of each cycle before signals are classified.
+# A restart also ends the provider process, so a harness turn-end hook may
+# touch the task's turn-ended notification; re-steering first lets that
+# signal meet a thread that is provably working again and be absorbed.
+# Only task records naming backend=t3code are read, so a home with no T3 task
+# pays one grep per cycle.
+t3code_restart_pass() {
+  local meta task w
+  while IFS= read -r meta; do
+    [ -n "$meta" ] || continue
+    [ "$(fm_meta_get "$meta" kind)" != secondmate ] || continue
+    task=${meta##*/}
+    task=${task%.meta}
+    w=$(fm_backend_target_of_meta "$meta")
+    [ -n "$w" ] || continue
+    t3code_restart_check "$w" "$task"
+  done < <(grep -l '^backend=t3code$' "$STATE"/*.meta 2>/dev/null)
 }
 
 # busy_turn_over_age: 0 iff the last completed turn or explicit native-harness
@@ -3760,6 +3798,9 @@ EOF
   # hook land seconds apart, and reporting them as separate actionable wakes
   # costs a full firstmate turn each. The re-scan also picks up a newer
   # signature for an already-pending file (last write wins below).
+  # A T3 run a server restart cancelled is re-steered before any signal its
+  # restart caused is classified (t3code_restart_pass).
+  t3code_restart_pass
   pending=$(scan_signals)
   if [ -n "$pending" ]; then
     sleep "$SIGNAL_GRACE"

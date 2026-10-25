@@ -5238,7 +5238,7 @@ test_branch_dispatch_routes_secondmate_signal_by_new_span() {
   cp "$ROOT/.pi/extensions/lib/fm-branch-model-picker.ts" "$repo/.pi/extensions/lib/fm-branch-model-picker.ts"
   printf 'project=%s/projects/approved\nwindow=mate-window\nkind=secondmate\n' "$home" > "$home/state/mate.meta"
   printf 'project=%s/projects/approved\nwindow=crew-window\nkind=ship\n' "$home" > "$home/state/crew.meta"
-  LIB="$repo/.pi/extensions/lib/fm-branch-dispatch.ts" FM_HOME="$home" CLASSIFY_LIB="$ROOT/bin/fm-classify-lib.sh" \
+  LIB="$repo/.pi/extensions/lib/fm-branch-dispatch.ts" FM_HOME="$home" CLASSIFY_LIB="$ROOT/bin/fm-classify-lib.sh" FM_ROOT="$ROOT" \
     node --input-type=module > "$TMP_ROOT/node-output" 2>&1 <<'EOF'
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -5249,14 +5249,16 @@ const state = `${process.env.FM_HOME}/state`;
 const signalRow = (task) => `1\t1\tsignal\t${task}.status\tsignal: ${task}.status`;
 
 // Write the already-presented history, commit the presentation cursor at its
-// end through the real writer, then append the unread span a new wake covers.
-function stage(task, presented, span) {
+// end through the real writer (in the writer's own timezone when given), then
+// append the unread span a new wake covers.
+function stage(task, presented, span, writerZone) {
   const path = `${state}/${task}.status`;
   writeFileSync(path, presented);
   execFileSync("bash", ["-c",
     'set -e; . "$1"; ident=$(_fm_open_decisions_file_ident "$2/$3.status"); ' +
     'status_commit_presentation_snapshot "$2" "$(printf "%s\\t%s\\t%s" "$3" "$4" "$ident")"',
-    "_", process.env.CLASSIFY_LIB, state, task, String(Buffer.byteLength(presented))]);
+    "_", process.env.CLASSIFY_LIB, state, task, String(Buffer.byteLength(presented))],
+    writerZone ? { env: { ...process.env, TZ: writerZone } } : undefined);
   appendFileSync(path, span);
   writeFileSync(`${state}/.wake-queue`, signalRow(task));
 }
@@ -5297,10 +5299,87 @@ expectRoute("resolution after a bare resolved word left the unkeyed decision ope
   "needs-decision: choose\nresolved\n", "resolved: answered\n", false);
 expectRoute("captain-held declaration", "working: history\n", "captain-held [key=parked]: deferred to Monday\n", false);
 
+// Lines that only echo what main already holds stay off main: a hold the mate
+// re-recorded unchanged, its reply to the restart persist request, and the
+// mate's own echo of a decision main answered. A changed hold, a new decision
+// beside them, or a resolution main did not write still reaches main.
+const openHold = "needs-decision [at=1790000000] [key=captain-hold-plan-1]: captain hold plan: pick a vendor\n";
+expectRoute("hold re-recorded unchanged", openHold,
+  "needs-decision [at=1790000500] [key=captain-hold-plan-1]: captain hold plan: pick a vendor\n", true);
+expectRoute("hold re-recorded with a changed note", openHold,
+  "needs-decision [at=1790000500] [key=captain-hold-plan-1]: captain hold plan: pick a vendor by Friday\n", false);
+expectRoute("unchanged re-record beside a new decision", openHold,
+  "needs-decision [key=captain-hold-plan-1]: captain hold plan: pick a vendor\nneeds-decision [key=new-call]: pick\n", false);
+expectRoute("re-record of a hold that is not open", "working: history\n",
+  "needs-decision [key=captain-hold-plan-1]: captain hold plan: pick a vendor\n", false);
+expectRoute("reply to the restart persist request", openHold,
+  "done [corr=0c7f6635b68d10a7] [at=1790000600]: Done. Open records persisted; nothing left only in conversation.\n", true);
+expectRoute("persist reply with its unchanged re-recorded hold", openHold,
+  "needs-decision [key=captain-hold-plan-1]: captain hold plan: pick a vendor\n" +
+  "done [corr=0c7f6635b68d10a7]: Done. Open records persisted.\n", true);
+expectRoute("echo that closes an already-answered decision", "needs-decision [key=plan]: pick\nresolved [key=plan]: answered: (a)\n",
+  "resolved [key=plan]: captain hold plan: answered\n", true);
+
+// Main's own --resolve-key close is recorded in the home-appends ledger by the
+// real writer; that resolution, and the mate's echo after it, stay off main.
+function appendAsHome(task, line) {
+  execFileSync("bash", ["-c",
+    'set -e; . "$2/bin/fm-wake-lib.sh"; . "$2/bin/fm-classify-lib.sh"; ' +
+    'rc=0; fm_wake_status_append_self_announced "$1/state" "$1/state/$3.status" "$4" || rc=$?; [ "$rc" -ne 2 ]',
+    "_", process.env.FM_HOME, process.env.FM_ROOT, task, line]);
+}
+for (const [label, echo] of [["main's own resolution", ""], ["main's resolution and the mate's echo", "resolved [key=plan]: captain hold plan: answered\n"]]) {
+  stage("mate", "needs-decision [key=plan]: pick\n", "");
+  appendAsHome("mate", "resolved [key=plan]: answered: option (a)");
+  appendFileSync(`${state}/mate.status`, echo);
+  const [pi, host] = verdicts();
+  if (!pi || !host) throw new Error(`${label}: expected branch, got pi=${pi} host=${host}`);
+}
+rmSync(`${state}/.mate.home-appends`);
+stage("mate", "needs-decision [key=plan]: pick\n", "resolved [key=plan]: answered: option (a)\n");
+if (verdicts().some(Boolean)) throw new Error("a resolution main did not write left main");
+
+// The watcher marks a re-recorded hold as a surfaced decision; the span may
+// explain that mark away only when the presentation cursor bounds it.
+const markedRow = (task) => `1\t1\tsignal\t${task}.status\tneeds-decision:signal: ${task}.status`;
+stage("mate", openHold, "needs-decision [key=captain-hold-plan-1]: captain hold plan: pick a vendor\n");
+writeFileSync(`${state}/.wake-queue`, markedRow("mate"));
+if (!verdicts().every(Boolean)) throw new Error("a marked unchanged re-record stayed on main");
+if (!branchOfferForWake(state, `signal: ${state}/mate.status`, false, true).eligible) {
+  throw new Error("the attended-host offer kept a marked unchanged re-record on main");
+}
+stage("mate", openHold, "needs-decision [key=captain-hold-plan-1]: captain hold plan: a new question\n");
+writeFileSync(`${state}/.wake-queue`, markedRow("mate"));
+if (verdicts().some(Boolean)) throw new Error("a marked changed hold left main");
+stage("mate", openHold, "done: routine follow-up\n");
+writeFileSync(`${state}/.wake-queue`, markedRow("mate"));
+if (verdicts().some(Boolean)) throw new Error("a marked row whose span explains nothing left main");
+stage("mate", openHold, "needs-decision [key=captain-hold-plan-1]: captain hold plan: pick a vendor\n");
+rmSync(`${state}/.status-presentation-cursor`);
+writeFileSync(`${state}/.wake-queue`, markedRow("mate"));
+if (verdicts().some(Boolean)) throw new Error("a marked re-record without a presentation cursor left main");
+
 // The host decides the whole close through the offer rule, which must agree.
 stage("mate", hold, "done: sample-c PR merged\n");
 if (!branchOfferForWake(state, `signal: ${state}/mate.status`, false, true).eligible) {
   throw new Error("the attended-host offer kept a routine second-mate close on main behind an unrelated hold");
+}
+
+// Main's session and the relay-run host can run in different timezones; the
+// cursor main wrote must still bound the span the host judges, both ways.
+// BRT3 and UTC0 are POSIX zones, so no zone database is needed.
+const readerZone = process.env.TZ;
+for (const [writer, reader] of [["BRT3", "UTC0"], ["UTC0", "BRT3"]]) {
+  stage("mate", hold, "done: sample-tz PR merged\n", writer);
+  process.env.TZ = reader;
+  const [pi, host] = verdicts();
+  if (!pi || !host) {
+    throw new Error(`a cursor written in ${writer} did not bound the span read in ${reader}: pi=${pi} host=${host}`);
+  }
+  stage("mate", hold, "blocked: cannot reach the forge\n", writer);
+  if (verdicts().some(Boolean)) throw new Error(`a blocker read across timezones (${writer} to ${reader}) left main`);
+  if (readerZone === undefined) delete process.env.TZ;
+  else process.env.TZ = readerZone;
 }
 
 // Without a readable cursor the whole log is the span, so routing falls back

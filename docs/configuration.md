@@ -472,7 +472,7 @@ Paseo stays explicit-only because its runtime markers leak into every descendant
 ### Accepted backends and secondmate limits
 
 Any value other than `tmux`, `herdr`, `zellij`, `orca`, `cmux`, `paseo`, `rex`, or `t3code` is rejected until another adapter is implemented and verified.
-`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, `cmux`, `paseo`, `rex`, and `t3code` for ship and scout tasks; `backend=orca`, `backend=cmux`, and `backend=paseo` all still refuse `--secondmate` until secondmate launch semantics are designed for each, while `backend=t3code` supports secondmates and runs only the `claude` and `codex` harnesses.
+`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, `cmux`, `paseo`, `rex`, and `t3code` for ship and scout tasks; `backend=orca`, `backend=cmux`, and `backend=paseo` all still refuse `--secondmate` until secondmate launch semantics are designed for each, while `backend=t3code` supports secondmates on the `claude` and `codex` harnesses and also runs `grok` and `muse` ship and scout workers.
 
 `codex-app` is not an accepted runtime backend yet; [`docs/codex-app-backend.md`](codex-app-backend.md) owns the Codex App boundary.
 
@@ -2612,7 +2612,7 @@ The built-in `bin/fm-procevent-<adapter>.sh self-announcing` command declares an
 
 | Response | Runner behavior |
 | --- | --- |
-| Exit 0 | The adapter declares that every result its autohandle fully applies is announced through its own durable downstream channel; the runner applies first, then publishes a `check` wake only for results still unhandled. |
+| Exit 0 | The adapter declares that every result its autohandle fully applies is announced through its own durable downstream channel; the runner applies first, then publishes a `check` wake only for results still unhandled. While that runner is still applying a capture, no other publication (another source's runner or reconcile) announces it; a capture whose runner died mid-application is re-announced as before. |
 | Any other response | Keep strict publish-before-apply ordering; autohandle runs only after this capture's own wake was successfully appended to the durable queue. |
 
 The remote-secondmate reply adapter declares itself self-announcing: a captured reply reaches its local status mirror and settles its correlated pending-reply expectation without any handler step, the mirrored status bytes are the single wake for one remote note through the same signal classification a local secondmate's append gets, and only a capture the adapter could not fully apply is published as a `check` wake, whose adapter handling remains idempotent.
@@ -2775,7 +2775,8 @@ The generation's first launch is immediate, later launches share its monotonic p
 
 - Starting a runner is detached and its errors are not visible to the caller, so `reconcile` reports a start only after the source is observed owned or its launch-pacing stamp has advanced or appeared, and reports every unconfirmed launch as `failed=` and a non-zero exit instead.
 - Both signals are durable evidence a runner claimed: ownership is the only evidence a runner still blocked on its source ever shows, and the stamp - written after the claim and before the source command runs, and removed only by registration replacement - covers a runner that claimed, ran and exited between two polls.
-- A healthy launch therefore confirms on the first poll and the window only bounds a launch that has not yet proved itself - one that died before claiming, or one merely too slow to claim inside the window; confirmation cannot tell those apart, and a launch that proves itself on a later cycle closes its failure episode without a retraction wake.
+- A healthy launch therefore confirms on the first poll and the window only bounds a launch that has not yet proved itself - one that died before claiming, or one merely too slow to claim inside the window; confirmation cannot tell those apart.
+  Failure-episode recovery is described under **Report launch failures** below.
 - All of a cycle's launches share one window, so a home full of sources that cannot start costs the same bounded wait as one.
 
 **Keep confirmation below the watcher interval**
@@ -2789,8 +2790,8 @@ Raising the confirm window lengthens every supervision cycle and delays wake del
 
 A source that can never start is reported as `failed=` with a non-zero exit on every `reconcile`, rather than counted as `started` and retried silently as though it were healthy, so a wedged source stays visible instead of presenting as armed.
 The `failed=` count reaches only the command's caller because `bin/fm-watch.sh` discards `reconcile` output and exit status.
-For that reason, `reconcile` also publishes a durable `check` wake once per failure episode, with key `procevent:<id>:launch-failed:<registration-identity>-<episode-nonce>`.
-Later cycles stay silent for that episode until a launch confirms.
+For that reason, `reconcile` also publishes a durable `check` wake once per failure episode, with key `procevent:<id>:launch-failed:<registration-identity>-<episode-nonce>`, naming the registration the episode began under.
+An episode belongs to the source: later cycles stay silent for it across relaunches and re-registrations, and seeing the source owned or a launch confirm does not end it, because a runner that claims and then fails its read, as one does for an unreachable remote host, has not proved the source collects.
 A later fresh failure gets a fresh key, because the watcher never re-surfaces a key it has already surfaced.
 
 - The announcement changes nothing about the launch: `reconcile` keeps relaunching the source every cycle exactly as before, and nothing is retried differently, throttled, or recovered from that signal.
@@ -2798,8 +2799,9 @@ A later fresh failure gets a fresh key, because the watcher never re-surfaces a 
 - If the failure persists, inspect the source command and adapter binary named in the registration.
   The wake names both, along with the attached `bin/fm-procevent.sh start <source-id>` command that reproduces the refusal on stderr.
   The detached launch discards that output.
-- A later cycle that finds the source owned ends the episode automatically.
-  A runner that was merely slow to claim needs no operator action.
+- The episode ends automatically once a runner of that source returns a result or a clean empty window it relistens after.
+  A runner that was merely slow to claim, or a host that comes back, needs no operator action.
+- A second mate's reply source whose episode is still open six hours after it began is announced once more, keyed by the episode's own key plus `-outage`, because the attended supervision host keeps a reply source's first announcement off main while that mate's machine is unreachable ([offer rule](pi-supervision-branch.md#wake-dispatch)).
 - A source stranded on a claim nothing may automatically displace is announced the same way, once per stranded claim generation, as described above.
 - `bin/fm-watch.sh` surfaces both under their own headlines - `process-event source stranded` and `process-event source failed to start` - rather than as a captured result.
 
