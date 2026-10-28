@@ -243,7 +243,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
       FM_SM_LIVE_STATUS=relaunchable
       # Only a failed run is resumed in place; an archived thread (an exit
       # read dead) is closed again and replaced like a missing one.
-      if [ "$agent_state" = dead ] && [ "$backend" = t3code ] \
+      if [ "$agent_state" = dead ] && [ "$backend" = t3code ] && fm_backend_source t3code \
         && [ "$(fm_backend_t3code_probe "$target" 2>/dev/null)" = error ]; then
         FM_SM_LIVE_RESUME=1
         FM_SM_LIVE_CAUSE="a failed run on its still-readable T3 thread, resumed in place"
