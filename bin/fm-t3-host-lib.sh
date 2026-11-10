@@ -47,8 +47,8 @@ fm_t3_relay_lstart() {  # <pid> [tz]
 # fm_t3_relay_owns_home <state-dir>
 # Exit 0 exactly when a live, identity-matched wake relay owns this home.
 fm_t3_relay_owns_home() {
-  local state=$1 record pid started cmd
-  record="$state/.t3-relay"
+  local state_dir=$1 record pid started cmd
+  record="$state_dir/.t3-relay"
   [ -f "$record" ] || return 1
   pid=$(sed -n 's/^pid=//p' "$record" 2>/dev/null | head -1)
   started=$(sed -n 's/^started=//p' "$record" 2>/dev/null | head -1)

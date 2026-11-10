@@ -627,7 +627,7 @@ test_restart_reconcile_resteers_once() {
 # timer already expired: it re-steers the thread and reports no wedge.
 test_t3_watcher_reconciles_restart() {
   local state fb out thread=mcp:5a0e1f2b-3c4d-4a5b-8c6d-0123456789ab key hash _
-  key=${thread//:/_}
+  key=$(window_key "$thread")
   t3_case watch-restart cancelled
   t3_world "$(t3_thread_json "$thread" cancelled false)"
   state="$CASE_DIR/state"; fb="$CASE_DIR/fakebin"; out="$CASE_DIR/watch.out"
