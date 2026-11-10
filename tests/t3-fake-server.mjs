@@ -26,6 +26,11 @@
 // one JSON line to <case-dir>/requests.jsonl, so a test can switch cases and
 // edit the world between calls. World keys (all optional):
 //   tokens (accepted bearers; sign-in appends), environmentId, serverVersion,
+//   standardScopesOnly (as T3 0.1.2 does, a full-access decision refuses a
+//   pairing code without T3's standard scope set, PAIR-OK-STD from the fake
+//   CLI), rejectSendDispatch (that many t3_thread_send calls fail at
+//   dispatch, and, as T3 does, each such request id is answered "was
+//   previously rejected" from then on),
 //   tools (array of names; default all), revoked (every /mcp call is 401),
 //   sse (SSE replies), expiresIn (seconds), bindWorktree, bindInstance,
 //   bindRuntimeMode, bindModel, bindOptions (override what a launch binds),
@@ -61,7 +66,7 @@ for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].slice(2)] 
 
 const ALL_TOOLS = [
   "t3_thread_launch", "t3_thread_send", "t3_thread_read", "t3_thread_wait", "t3_thread_interrupt",
-  "t3_thread_organize", "t3_thread_list", "t3_thread_configuration", "t3_project_list", "t3_project_create",
+  "t3_thread_organize", "t3_thread_list", "t3_thread_configuration", "t3_thread_configure", "t3_project_list", "t3_project_create",
   "t3_pending_request_list", "t3_pending_request_read", "t3_pending_request_respond",
   "orchestrator_capabilities", "t3_environment_read",
 ];
@@ -80,6 +85,14 @@ const FAKE_PROVIDERS = [
     models: ["gpt-5.6-sol", "gpt-6-luna"].map((id) => ({
       id, label: id, options: [select("reasoningEffort", ["low", "medium", "high", "xhigh"]), select("serviceTier", ["default", "priority"])],
     })),
+  },
+  {
+    providerInstanceId: "grok", driverKind: "grok", displayName: "Grok", constraints: [],
+    models: ["grok-4.7", "grok-model"].map((id) => ({ id, label: id, options: [select("reasoningEffort", ["low", "medium", "high", "xhigh"])] })),
+  },
+  {
+    providerInstanceId: "muse", driverKind: "muse", displayName: "Muse", constraints: [],
+    models: ["muse-spark-1.3", "muse-model"].map((id) => ({ id, label: id, options: [select("reasoningEffort", ["low", "medium", "high", "xhigh", "max"])] })),
   },
 ];
 
@@ -228,7 +241,17 @@ async function callTool(w, name, a) {
       if (!t) return [notFound(a.threadId), false];
       if (t.archived) return [err("thread_not_sendable", `Thread ${a.threadId} is archived and cannot receive messages.`), false];
       w.requestIds = w.requestIds ?? {};
+      w.rejectedRequestIds = w.rejectedRequestIds ?? {};
       const key = `${a.threadId}|${a.clientRequestId}`;
+      const dispatchFailure = "Failed to dispatch orchestration command message.dispatch";
+      if (a.clientRequestId && w.rejectedRequestIds[key]) {
+        return [err("command_rejected", `Command ${a.clientRequestId} was previously rejected: ${w.rejectedRequestIds[key]}`), false];
+      }
+      if ((w.rejectSendDispatch ?? 0) > 0) {
+        w.rejectSendDispatch -= 1;
+        if (a.clientRequestId) w.rejectedRequestIds[key] = dispatchFailure;
+        return [err("dispatch_failed", dispatchFailure), true];
+      }
       if (a.clientRequestId && w.requestIds[key]) return [ok(w.requestIds[key]), false];
       let delivery = "steered";
       if (t.activeRunId) t.items.push({ type: "user_message", status: "completed", text: a.message });
@@ -265,6 +288,17 @@ async function callTool(w, name, a) {
       const modelSelection = t.modelSelection ?? { instanceId: t.providerInstanceId, model: t.model };
       return [ok({ threadId: t.threadId, modelSelection, runtimeMode: t.runtimeMode, interactionMode: t.interactionMode ?? "default" }), false];
     }
+    case "t3_thread_configure": {
+      if (!t) return [notFound(a.threadId), false];
+      const sel = a.modelSelection ?? {};
+      if ((t.runs ?? []).length && sel.instanceId && sel.instanceId !== t.providerInstanceId) {
+        return [err("invalid_request", `Thread ${a.threadId} is bound to driver '${t.providerInstanceId}' and cannot switch to '${sel.instanceId}'.`), false];
+      }
+      if (sel.instanceId) t.providerInstanceId = sel.instanceId;
+      t.model = sel.model;
+      if (t.modelSelection) t.modelSelection = sel;
+      return [ok({ sequence: 1 }), true];
+    }
     case "t3_thread_wait":
       return [await waitRun(a), false];
     case "t3_thread_interrupt": {
@@ -294,6 +328,7 @@ async function callTool(w, name, a) {
           t.status = "interrupted";
         }
       }
+      if (a.action === "unarchive") t.archived = false;
       return [ok({ threadId: t.threadId, action: a.action }), true];
     }
     case "t3_pending_request_list": {
@@ -426,10 +461,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/oauth/mcp/decision") {
       const b = JSON.parse(await body(req));
-      log(loadWorld(), { path: url.pathname, tag: b.decision?._tag, access: b.decision?.access });
-      if (b.decision?.code !== "PAIR-OK") return json(res, 400, { error: "invalid_pairing" });
+      const w = loadWorld();
+      const standard = b.decision?.code === "PAIR-OK-STD";
+      log(w, { path: url.pathname, tag: b.decision?._tag, access: b.decision?.access, standard });
+      if (b.decision?.code !== "PAIR-OK" && !standard) return json(res, 400, { error: "invalid_pairing" });
+      if (w.standardScopesOnly && b.decision.access === "full-access" && !standard) {
+        return json(res, 400, { error: "invalid_request", error_description: "That pairing code cannot grant this access, and it is now used up. Create one with the standard scopes, or choose Read only with a new code." });
+      }
       const code = randomBytes(8).toString("hex");
-      codes.set(code, { challenge: b.authorization.code_challenge, access: b.decision.access });
+      codes.set(code, { challenge: b.authorization.code_challenge, access: b.decision.access, standard });
       const to = new URL(b.authorization.redirect_uri);
       to.searchParams.set("code", code);
       to.searchParams.set("state", b.authorization.state);
@@ -445,7 +485,7 @@ const server = http.createServer(async (req, res) => {
       const token = `tok-${randomBytes(12).toString("hex")}`;
       w.tokens = [...(w.tokens ?? []), token];
       saveWorld(w);
-      return json(res, 200, { access_token: token, token_type: "Bearer", expires_in: w.expiresIn ?? 2592000, scope: "orchestration:read orchestration:operate" });
+      return json(res, 200, { access_token: token, token_type: "Bearer", expires_in: w.expiresIn ?? 2592000, scope: entry.standard ? "orchestration:read orchestration:operate standard:fake" : "orchestration:read orchestration:operate" });
     }
     json(res, 404, { error: "not_found" });
   } catch (e) {

@@ -202,7 +202,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
           fi
           remote_backend=$(printf '%s\n' "$route_out" | sed -n 's/^backend=//p' | tail -1)
           case "$remote_backend" in
-            herdr | rex) ;;
+            herdr | rex | t3code) ;;
             *)
               FM_SM_LIVE_REASON="alive remote endpoint is recorded on backend '${remote_backend:-missing}'; migrate or retire it explicitly"
               return 0
@@ -250,16 +250,19 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
       ;;
     dead|missing)
       FM_SM_LIVE_STATUS=relaunchable
-      if [ "$agent_state" = dead ] && [ "$backend" = t3code ]; then
+      # Only a failed run is resumed in place; an archived thread (an exit
+      # read dead) is closed again and replaced like a missing one.
+      if [ "$agent_state" = dead ] && [ "$backend" = t3code ] && fm_backend_source t3code \
+        && [ "$(fm_backend_t3code_probe "$target" 2>/dev/null)" = error ]; then
         FM_SM_LIVE_RESUME=1
         FM_SM_LIVE_CAUSE="a failed run on its still-readable T3 thread, resumed in place"
       elif [ "$agent_state" = dead ]; then
         FM_SM_LIVE_KILL=1
         FM_SM_LIVE_CAUSE="confirmed agent absence on existing endpoint"
       else
-        # A T3 thread reads missing once archived, which T3 may still be
-        # finishing; its idempotent kill re-proves the close before a
-        # replacement thread is launched.
+        # A T3 thread the verified server no longer has reads missing; its
+        # idempotent kill re-proves the close before a replacement thread is
+        # launched.
         [ "$backend" != t3code ] || FM_SM_LIVE_KILL=1
         FM_SM_LIVE_CAUSE="recorded endpoint confidently missing"
       fi

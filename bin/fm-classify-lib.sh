@@ -757,17 +757,18 @@ _fm_key_before_colon() {  # <status-line>
 # the line has no colon or no complete token there; slug charset validity is
 # the caller's check via _fm_decision_slug_ok, exactly as for the before-colon
 # position.
-_fm_key_at_note_head() {  # <status-line> -> raw slug
-  local rest
+_fm_key_at_note_head() {  # <status-line> [<out-var>] -> raw slug
+  local __fm_kanh_rest
   case "$1" in
-    *:*) rest=${1#*:} ;;
+    *:*) __fm_kanh_rest=${1#*:} ;;
     *) return 1 ;;
   esac
-  rest=${rest#"${rest%%[![:space:]]*}"}
-  case "$rest" in
-    \[key=*\]*) rest=${rest#\[key=}; printf '%s' "${rest%%\]*}" ;;
+  __fm_kanh_rest=${__fm_kanh_rest#"${__fm_kanh_rest%%[![:space:]]*}"}
+  case "$__fm_kanh_rest" in
+    \[key=*\]*) __fm_kanh_rest=${__fm_kanh_rest#\[key=}; __fm_kanh_rest=${__fm_kanh_rest%%\]*} ;;
     *) return 1 ;;
   esac
+  if [ "$#" -gt 1 ]; then printf -v "$2" '%s' "$__fm_kanh_rest"; else printf '%s' "$__fm_kanh_rest"; fi
 }
 # 0 when a stated key slug is well-formed: nonempty, A-Za-z0-9._- only.
 _fm_decision_slug_ok() {  # <slug>
@@ -780,50 +781,72 @@ _fm_decision_slug_ok() {  # <slug>
 # worker-written stamp cannot move it: a readable time like [at=10:30] carries
 # colons that would otherwise end the head mid-tag and hand the caller a note
 # and a key sliced out of the timestamp. The line's own bytes are never altered.
-status_line_note() {  # <status-line> -> text after the first colon, trimmed
-  local n k unstamped
-  _fm_status_unstamped "$1" unstamped
-  case "$unstamped" in
-    *:*) n=${unstamped#*:}; n=${n#"${n%%[![:space:]]*}"} ;;
-    *) printf '%s' "$unstamped"; return 0 ;;
+# Like status_line_verb, each reader assigns to an optional trailing <out-var>
+# instead of printing, so the per-line decision fold forks nothing; its locals
+# carry a function prefix so a caller's <out-var> name cannot be shadowed.
+status_line_note() {  # <status-line> [<out-var>] -> text after the first colon, trimmed
+  local __fm_sln_n __fm_sln_k __fm_sln_unstamped
+  _fm_status_unstamped "$1" __fm_sln_unstamped
+  case "$__fm_sln_unstamped" in
+    *:*)
+      __fm_sln_n=${__fm_sln_unstamped#*:}
+      __fm_sln_n=${__fm_sln_n#"${__fm_sln_n%%[![:space:]]*}"}
+      # A note-head token that states this line's key (no before-colon token,
+      # valid slug) is key metadata, not note text: strip it so both stated-key
+      # positions yield the same note.
+      if ! _fm_key_before_colon "$__fm_sln_unstamped" \
+        && _fm_key_at_note_head "$__fm_sln_unstamped" __fm_sln_k \
+        && _fm_decision_slug_ok "$__fm_sln_k"; then
+        __fm_sln_n=${__fm_sln_n#"[key=$__fm_sln_k]"}
+        __fm_sln_n=${__fm_sln_n#"${__fm_sln_n%%[![:space:]]*}"}
+      fi
+      ;;
+    *) __fm_sln_n=$__fm_sln_unstamped ;;
   esac
-  # A note-head token that states this line's key (no before-colon token, valid
-  # slug) is key metadata, not note text: strip it so both stated-key positions
-  # yield the same note.
-  if ! _fm_key_before_colon "$unstamped" && k=$(_fm_key_at_note_head "$unstamped") \
-    && _fm_decision_slug_ok "$k"; then
-    n=${n#"[key=$k]"}
-    n=${n#"${n%%[![:space:]]*}"}
-  fi
-  printf '%s' "$n"
+  if [ "$#" -gt 1 ]; then printf -v "$2" '%s' "$__fm_sln_n"; else printf '%s' "$__fm_sln_n"; fi
 }
-_fm_decision_key() {  # <status-line> [<keyless>] -> key slug, or <keyless> (default "default") when no token
-  local k unstamped
-  _fm_status_unstamped "$1" unstamped
-  if _fm_key_before_colon "$unstamped"; then
-    k=${unstamped%%:*}
-    k=${k#*\[key=}
-    k=${k%%\]*}
+_fm_decision_key() {  # <status-line> [<keyless>] [<out-var>] -> key slug, or <keyless> (default "default") when no token
+  local __fm_dk_k __fm_dk_unstamped
+  _fm_status_unstamped "$1" __fm_dk_unstamped
+  if _fm_key_before_colon "$__fm_dk_unstamped"; then
+    __fm_dk_k=${__fm_dk_unstamped%%:*}
+    __fm_dk_k=${__fm_dk_k#*\[key=}
+    __fm_dk_k=${__fm_dk_k%%\]*}
+    _fm_decision_slug_ok "$__fm_dk_k" || return 1
+  elif ! _fm_key_at_note_head "$__fm_dk_unstamped" __fm_dk_k; then
+    __fm_dk_k=${2-default}
   else
-    k=$(_fm_key_at_note_head "$unstamped") || { printf '%s' "${2-default}"; return 0; }
+    _fm_decision_slug_ok "$__fm_dk_k" || return 1
   fi
-  _fm_decision_slug_ok "$k" || return 1
-  printf '%s' "$k"
+  if [ "$#" -gt 2 ]; then printf -v "$3" '%s' "$__fm_dk_k"; else printf '%s' "$__fm_dk_k"; fi
 }
 # Drop the record for <key> from a newline-terminated "<key>\t<verb>\t<note>" set.
 # Portable (no associative arrays) so the fold runs on bash 3.2 as well as 4+.
-_fm_decision_drop() {  # <open-set> <key>
-  local set=$1 key=$2 line out=''
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    case "$line" in
-      "$key"$'\t'*) : ;;
-      *) out="${out}${line}"$'\n' ;;
+_fm_decision_drop() {  # <open-set> <key> [<out-var>]
+  # One newline split into an array rather than a here-document read loop,
+  # which feeds the read builtin one byte per system call and dominated the
+  # fold on a long secondmate stream with many open records. Newline is IFS
+  # whitespace, so the split also skips empty lines as that loop did. The byte
+  # locale keeps the split and the key-and-tab prefix test from decoding long
+  # multibyte notes; newline and tab never occur inside a UTF-8 sequence.
+  local LC_ALL=C
+  local __fm_dd_key=$2 __fm_dd_out='' __fm_dd_nl=$'\n' __fm_dd_noglob=0 __fm_dd_i
+  local -a __fm_dd_lines
+  local IFS=$__fm_dd_nl
+  case $- in *f*) __fm_dd_noglob=1 ;; esac
+  set -f
+  # shellcheck disable=SC2206 # Deliberate newline split with globbing off.
+  __fm_dd_lines=($1)
+  [ "$__fm_dd_noglob" = 1 ] || set +f
+  __fm_dd_i=0
+  while [ "$__fm_dd_i" -lt "${#__fm_dd_lines[@]}" ]; do
+    case "${__fm_dd_lines[__fm_dd_i]}" in
+      "$__fm_dd_key"$'\t'*) : ;;
+      *) __fm_dd_out="${__fm_dd_out}${__fm_dd_lines[__fm_dd_i]}${__fm_dd_nl}" ;;
     esac
-  done <<EOF
-$set
-EOF
-  printf '%s' "$out"
+    __fm_dd_i=$((__fm_dd_i + 1))
+  done
+  if [ "$#" -gt 2 ]; then printf -v "$3" '%s' "$__fm_dd_out"; else printf '%s' "$__fm_dd_out"; fi
 }
 # Fold ONE status line into an existing "<key>\t<verb>\t<note>\n"-per-line open
 # set, applying the same needs-decision/blocked-opens, resolved/captain-held-closes
@@ -888,9 +911,15 @@ _fm_status_kind() {
   case "$kind" in ship|scout|secondmate) printf '%s' "$kind" ;; *) printf unknown ;; esac
 }
 
-_fm_decision_fold_line() {  # <open-set> <status-line> <resolve-verb> <held-verb> <kind> [timed]
-  local open=$1 line=$2 resolve=$3 held=$4 kind=$5 verb key note unstamped
-  local timed=${6:-} epoch until old_key old_verb old_epoch old_note
+_fm_decision_fold_line() {  # <open-set> <status-line> <resolve-verb> <held-verb> <kind> [timed] [<out-var>]
+  # The result is printed, or assigned to <out-var> when one is given (with an
+  # empty or `timed` sixth argument) so a whole stream folds without one command
+  # substitution per line. Every local carries this function's prefix so a
+  # caller's <out-var> (typically `open`) is never shadowed under bash's dynamic
+  # scope.
+  local __fm_fl_open=$1 __fm_fl_line=$2 __fm_fl_resolve=$3 __fm_fl_held=$4 __fm_fl_kind=$5
+  local __fm_fl_timed=${6:-} __fm_fl_verb __fm_fl_key __fm_fl_note __fm_fl_unstamped
+  local __fm_fl_epoch __fm_fl_until __fm_fl_stated __fm_fl_old_key __fm_fl_old_verb __fm_fl_old_epoch __fm_fl_old_note
   # Both colon tests below ask where the head ends, the same question the note
   # and key readers ask, so they read the same unstamped copy those readers do.
   # A worker-written time tag must never decide whether a decision opens or
@@ -898,7 +927,7 @@ _fm_decision_fold_line() {  # <open-set> <status-line> <resolve-verb> <held-verb
   # prose look like a transition, or make a keyless line open a phantom
   # decision no later line could close. The stored and surfaced bytes stay the
   # caller's own.
-  _fm_status_unstamped "$line" unstamped
+  _fm_status_unstamped "$__fm_fl_line" __fm_fl_unstamped
   # Declaration guard. A transition's verb ends at a colon, or - in the colonless
   # form _fm_decision_key still accepts below - at a complete "[key=...]" token.
   # A line holding neither is continuation prose, a bare word, or blank, and can
@@ -906,60 +935,68 @@ _fm_decision_fold_line() {  # <open-set> <status-line> <resolve-verb> <held-verb
   # equivalent parameter expansion costs tens of milliseconds per line under bash
   # 3.2's global bracket-class substitution, which is the whole per-line cost of
   # both folds on a status log of ordinary width. Same verdict, bounded cost.
-  case "$unstamped" in
-    *:*|*\[key=*\]*) ;;
-    *) printf '%s' "$open"; return 0 ;;
-  esac
-  status_line_verb "$line" verb
-  case "$unstamped" in
-    *:*) case "$verb:$kind" in done:ship|done:scout|failed:ship|failed:scout) return 0 ;; esac ;;
-  esac
-  case "$verb" in
-    needs-decision|blocked|"$resolve"|"$held") ;;
-    *) printf '%s' "$open"; return 0 ;;
-  esac
-  key=$(_fm_decision_key "$line") || { printf '%s' "$open"; return 0; }
-  _fm_decision_key_transition_allowed "$key" "$(status_line_note "$line")" \
-    || { printf '%s' "$open"; return 0; }
-  case "$verb" in
-    needs-decision|blocked)
-      note=$(status_line_note "$line")
-      if [ "$timed" = timed ]; then
-        # The timed view adds emission-time and deferral-date columns, without
-        # changing any open/closed rule. Keyless or unstamped events have
-        # unknown age. A republish of a still-open key with the same verb and
-        # note keeps the open row's earlier time, so its age and reminder
-        # schedule survive; a resolution has already dropped the key, so a
-        # reopen takes its own time. The deferral column always comes from the
-        # newest line; it is `-` when absent and `?` when malformed, never
-        # empty, so a TAB-split read cannot collapse it.
-        epoch=unknown
-        if [ -n "$(_fm_decision_key "$line" '')" ]; then
-          _fm_status_at_epoch "$line" epoch || epoch=unknown
-        fi
-        _fm_status_until_date "$line" until || case $? in 1) until=- ;; *) until='?' ;; esac
-        while IFS=$'\t' read -r old_key old_verb old_epoch _ old_note; do
-          [ "$old_key" = "$key" ] || continue
-          case "$old_epoch" in
-            ''|unknown|*[!0-9]*) ;;
-            *) [ "$old_verb" = "$verb" ] && [ "$old_note" = "$note" ] && epoch=$old_epoch ;;
+  case "$__fm_fl_unstamped" in
+    *:*|*\[key=*\]*)
+      status_line_verb "$__fm_fl_line" __fm_fl_verb
+      case "$__fm_fl_unstamped" in
+        *:*)
+          case "$__fm_fl_verb:$__fm_fl_kind" in
+            done:ship|done:scout|failed:ship|failed:scout) __fm_fl_open= ;;
           esac
-          break
-        done <<EOF
-$open
+          ;;
+      esac
+      case "$__fm_fl_verb" in
+        needs-decision|blocked|"$__fm_fl_resolve"|"$__fm_fl_held")
+          if _fm_decision_key "$__fm_fl_line" default __fm_fl_key; then
+            status_line_note "$__fm_fl_line" __fm_fl_note
+            if _fm_decision_key_transition_allowed "$__fm_fl_key" "$__fm_fl_note"; then
+              case "$__fm_fl_verb" in
+                needs-decision|blocked)
+                  if [ "$__fm_fl_timed" = timed ]; then
+                    # The timed view adds emission-time and deferral-date
+                    # columns, without changing any open/closed rule. Keyless
+                    # or unstamped events have unknown age. A republish of a
+                    # still-open key with the same verb and note keeps the open
+                    # row's earlier time, so its age and reminder schedule
+                    # survive; a resolution has already dropped the key, so a
+                    # reopen takes its own time. The deferral column always
+                    # comes from the newest line; it is `-` when absent and `?`
+                    # when malformed, never empty, so a TAB-split read cannot
+                    # collapse it.
+                    __fm_fl_epoch=unknown
+                    if _fm_decision_key "$__fm_fl_line" '' __fm_fl_stated && [ -n "$__fm_fl_stated" ]; then
+                      _fm_status_at_epoch "$__fm_fl_line" __fm_fl_epoch || __fm_fl_epoch=unknown
+                    fi
+                    _fm_status_until_date "$__fm_fl_line" __fm_fl_until \
+                      || case $? in 1) __fm_fl_until=- ;; *) __fm_fl_until='?' ;; esac
+                    while IFS=$'\t' read -r __fm_fl_old_key __fm_fl_old_verb __fm_fl_old_epoch _ __fm_fl_old_note; do
+                      [ "$__fm_fl_old_key" = "$__fm_fl_key" ] || continue
+                      case "$__fm_fl_old_epoch" in
+                        ''|unknown|*[!0-9]*) ;;
+                        *)
+                          [ "$__fm_fl_old_verb" = "$__fm_fl_verb" ] && [ "$__fm_fl_old_note" = "$__fm_fl_note" ] \
+                            && __fm_fl_epoch=$__fm_fl_old_epoch
+                          ;;
+                      esac
+                      break
+                    done <<EOF
+$__fm_fl_open
 EOF
-        note="$epoch"$'\t'"$until"$'\t'"$note"
-      fi
-      open=$(_fm_decision_drop "$open" "$key")
-      [ -n "$open" ] && open="${open}"$'\n'
-      open="${open}${key}"$'\t'"${verb}"$'\t'"${note}"$'\n'
-      ;;
-    "$resolve"|"$held")
-      open=$(_fm_decision_drop "$open" "$key")
-      [ -n "$open" ] && open="${open}"$'\n'
+                    __fm_fl_note="$__fm_fl_epoch"$'\t'"$__fm_fl_until"$'\t'"$__fm_fl_note"
+                  fi
+                  # The drop leaves every kept record newline-terminated.
+                  _fm_decision_drop "$__fm_fl_open" "$__fm_fl_key" __fm_fl_open
+                  __fm_fl_open="${__fm_fl_open}${__fm_fl_key}"$'\t'"${__fm_fl_verb}"$'\t'"${__fm_fl_note}"$'\n'
+                  ;;
+                *) _fm_decision_drop "$__fm_fl_open" "$__fm_fl_key" __fm_fl_open ;;
+              esac
+            fi
+          fi
+          ;;
+      esac
       ;;
   esac
-  printf '%s' "$open"
+  if [ "$#" -gt 6 ]; then printf -v "$7" '%s' "$__fm_fl_open"; else printf '%s' "$__fm_fl_open"; fi
 }
 
 # Fold the WHOLE status stream into the set of decisions still open. Prints one
@@ -977,7 +1014,7 @@ EOF
 # subprocess read, which exists for that function's much narrower payload-driven
 # path resolution rather than this directory-local glob.
 status_open_decisions() {  # <status-file> [<kind>]
-  local f=$1 kind=${2:-} line resolve held open='' verb
+  local f=$1 kind=${2:-} line resolve held open='' verb nl=$'\n'
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   kind=$(_fm_status_kind "$f" "$kind")
   resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
@@ -986,10 +1023,14 @@ status_open_decisions() {  # <status-file> [<kind>]
     status_line_verb "$line" verb
     case "$verb" in
       needs-decision|blocked|done|failed|"$resolve"|"$held")
-        open=$(_fm_decision_fold_line "$open" "$line" "$resolve" "$held" "$kind")
+        _fm_decision_fold_line "$open" "$line" "$resolve" "$held" "$kind" '' open
         ;;
     esac
   done < "$f"
+  # Same bytes the per-line command substitution used to yield: no trailing newline.
+  while :; do
+    case "$open" in *"$nl") open=${open%"$nl"} ;; *) break ;; esac
+  done
   printf '%s' "$open"
 }
 
@@ -1321,13 +1362,17 @@ _fm_open_decisions_file_ident() {  # <file> -> strongest available identity
 
 # One stat exec sets _FM_STAT_IDENTITY and _FM_STAT_SIZE for <file>, because
 # the drain reads identity and size of every status file several times and
-# each exec is slow on a loaded host.
+# each exec is slow on a loaded host. Linux renders the birth time as local
+# time, so TZ is cleared: every actor on the machine, whatever TZ its own
+# environment carries, renders the machine's own zone, which is also what an
+# actor without a TZ override recorded before this rule, so an upgrade keeps
+# existing identities.
 _fm_status_stat_fields() {  # <file>
   local out dev_ino epoch birth rest
   if [ "$_FM_CLASSIFY_UNAME_S" = Darwin ]; then
     out=$(LC_ALL=C /usr/bin/stat -f '%d:%i%t%z%t%B%t%FB' "$1" 2>/dev/null) || return 1
   else
-    out=$(LC_ALL=C stat -c $'%d:%i\t%s\t%W\t%w' "$1" 2>/dev/null) || return 1
+    out=$(unset TZ; LC_ALL=C stat -c $'%d:%i\t%s\t%W\t%w' "$1" 2>/dev/null) || return 1
   fi
   dev_ino=${out%%$'\t'*}; rest=${out#*$'\t'}
   _FM_STAT_SIZE=${rest%%$'\t'*}; rest=${rest#*$'\t'}

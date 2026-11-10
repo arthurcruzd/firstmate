@@ -2,7 +2,7 @@
 # Check, and optionally repair, one remote account's second-mate readiness.
 #
 # Usage:
-#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix [--automatic]] [--backend herdr|rex|any]
+#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix [--automatic]] [--backend herdr|rex|any | --endpoint herdr|t3code]
 #
 # Run it through fm-on.sh so the fixed entrypoint invokes this readiness owner
 # over its plain SSH bootstrap. The command reports the same filesystem-composed
@@ -40,8 +40,25 @@
 # session, so a host with no GUI login is a human gap rather than something
 # --fix attempts to bypass.
 #
+# `--endpoint t3code` checks the readiness set for a route whose registry record
+# names `endpoint: t3code` instead: the second-mate agent is a thread on this
+# host's own T3 Code server, so herdr, its Aqua agent, and the fm-remote server
+# are neither required nor inspected nor repaired, node joins the required
+# tools, only the claude and codex harnesses count, and two more checks apply:
+# t3-credential (the home's own config/t3code-token passes the T3 capability
+# gate; minting it is the operator's sign-in, never a repair) and relay-manager
+# (the user service manager that keeps the home's wake relay running, an Aqua
+# login session on darwin or a reachable systemd user manager on Linux).
+# docs/remote-secondmates.md "T3 Code endpoint" owns the operator contract.
+#
+# A run whose FM_REMOTE_JOB_STATE_ROOT is overridden serves an isolated code
+# root beside the account's own (bin/fm-remote-job-lib.sh), whose fixed
+# ~/.local/bin entrypoint link belongs to that other root, so the
+# entrypoint-link check is skipped there.
+#
 # Line protocol, one fact per line, stable for script consumers:
 #   mode=check|fix
+#   endpoint=herdr|t3code
 #   path=<the child PATH this command inherited>
 #   entrypoint=yes|no
 #   platform=darwin|linux|<uname -s>|unknown
@@ -102,9 +119,10 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(CDPATH='' cd "$SCRIPT_DIR/.." && pwd -P)}"
 # The shared remote toolchain plus the selected backend's CLI; the backend slot
 # is filled once the backend is resolved below, keeping the probe's six-fact
 # shape (five tools plus the at-least-one harness) for explicit and resolved
-# selections alike.
+# selections alike. A t3code endpoint fills that slot with node.
 REQUIRED_TOOLS=()
 HARNESS_TOOLS=(claude codex opencode pi pi-signed grok kimi omp)
+ENDPOINT=herdr
 OPTIONAL_TOOLS=(tmux no-mistakes gh)
 # The server API revision Firstmate's rex adapter is verified against
 # (bin/backends/rex.sh's FM_BACKEND_REX_MIN_API).
@@ -138,6 +156,10 @@ while [ "$#" -gt 0 ]; do
     --backend=*)
       case "${1#--backend=}" in herdr | rex | any) DOCTOR_BACKEND=${1#--backend=} ;; *) usage ;; esac
       ;;
+    --endpoint)
+      shift
+      case "${1:-}" in herdr | t3code) ENDPOINT=$1 ;; *) usage ;; esac
+      ;;
     --worker-tool-probe)
       [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ] || { printf 'error: worker tool probe requires the remote job worker\n' >&2; exit 64; }
       MODE='worker-tool-probe'
@@ -147,13 +169,18 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 [ "$AUTOMATIC" -eq 0 ] || [ "$MODE" = fix ] || usage
+# A t3code endpoint has no session-provider backend to select.
+[ "$ENDPOINT" = herdr ] || [ "$DOCTOR_BACKEND" = any ] || usage
 
 # Resolve which backend this run is responsible for before any check or tool
-# list is derived: an explicit --backend wins, and `any` picks herdr when its
-# CLI resolves (the default backend), then rex, so a host offering both is
-# verified for the default. `none` means no supported backend CLI resolves and
-# is reported as one backend gap rather than two tool gaps.
-if [ "$DOCTOR_BACKEND" = any ]; then
+# list is derived: a t3code endpoint is its own selection, an explicit
+# --backend wins, and `any` picks herdr when its CLI resolves (the default
+# backend), then rex, so a host offering both is verified for the default.
+# `none` means no supported backend CLI resolves and is reported as one backend
+# gap rather than two tool gaps.
+if [ "$ENDPOINT" = t3code ]; then
+  DOCTOR_BACKEND=t3code
+elif [ "$DOCTOR_BACKEND" = any ]; then
   if command -v herdr >/dev/null 2>&1; then
     DOCTOR_BACKEND=herdr
   elif command -v rex >/dev/null 2>&1; then
@@ -164,6 +191,10 @@ if [ "$DOCTOR_BACKEND" = any ]; then
 fi
 case "$DOCTOR_BACKEND" in
   herdr | rex) REQUIRED_TOOLS=(git jq "$DOCTOR_BACKEND" tasks-axi treehouse) ;;
+  t3code)
+    REQUIRED_TOOLS=(git jq node tasks-axi treehouse)
+    HARNESS_TOOLS=(claude codex)
+    ;;
   *) REQUIRED_TOOLS=(git jq backend tasks-axi treehouse) ;;
 esac
 if [ "$DOCTOR_BACKEND" = herdr ] && [ "$MODE" != worker-tool-probe ]; then
@@ -604,6 +635,7 @@ report_required_tools_from_worker() {
   local -a probe_args=(--worker-tool-probe)
   case "$DOCTOR_BACKEND" in
     herdr | rex) probe_args+=(--backend "$DOCTOR_BACKEND") ;;
+    t3code) probe_args+=(--endpoint t3code) ;;
   esac
   if ! job_id=$(fm_remote_job_stage "${HOME:-}" "$FM_ROOT" "${FM_HOME:-}" \
     fm-remote-doctor.sh "${probe_args[@]}" </dev/null); then
@@ -628,7 +660,7 @@ report_required_tools_from_worker() {
     fact=${line#required }
     name=${fact%%=*}
     value=${fact#*=}
-    case "$name" in git | jq | herdr | rex | backend | tasks-axi | treehouse | harness) ;; *) valid=0; continue ;; esac
+    case "$name" in git | jq | herdr | rex | backend | node | tasks-axi | treehouse | harness) ;; *) valid=0; continue ;; esac
     case "$seen" in *" $name "*) valid=0; continue ;; esac
     seen="$seen$name "
     count=$((count + 1))
@@ -1034,6 +1066,10 @@ check_entrypoint_link() {
     record entrypoint-link "skip: this run did not come through the fixed remote entrypoint"
     return 0
   fi
+  if [ -n "${FM_REMOTE_JOB_STATE_ROOT:-}" ]; then
+    record entrypoint-link "skip: an isolated job state root is reached by its absolute entrypoint, and $ENTRYPOINT_LINK belongs to the account's own code root"
+    return 0
+  fi
   want="$FM_ROOT_OVERRIDE/bin/fm-remote-entrypoint.sh"
   if [ -L "$ENTRYPOINT_LINK" ] && [ "$(readlink "$ENTRYPOINT_LINK")" = "$want" ]; then
     record entrypoint-link "ok: $ENTRYPOINT_LINK"
@@ -1055,6 +1091,60 @@ check_entrypoint_link() {
     "rerun this command with --fix to create it"
 }
 
+# The second-mate agent is a thread on this host's own T3 server, so its home
+# must hold a credential that passes the capability gate there. A home that is
+# not provisioned yet has nothing to sign in, which the seed's preflight meets.
+check_t3_credential() {
+  local home=${FM_HOME:-} token out
+  if [ -z "$home" ] || [ ! -d "$home" ] || [ ! -f "$home/.fm-secondmate-home" ]; then
+    record t3-credential "skip: no seeded secondmate home at ${home:-<unset>} yet"
+    return 0
+  fi
+  token="$home/config/t3code-token"
+  if [ ! -e "$token" ]; then
+    record t3-credential "human: $home has no T3 credential for this host's T3 server" \
+      "sign the home in on this host: FM_HOME=$home $FM_ROOT/bin/fm-t3-mcp.mjs login --access full-access --url <this host's T3 origin> [--t3 <t3 binary>] [--base-dir <server base dir>]"
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    record t3-credential "human: node does not resolve, so the T3 credential cannot be checked" \
+      "install node where it resolves on the reported PATH"
+    return 0
+  fi
+  if out=$(node "$FM_ROOT/bin/fm-t3-mcp.mjs" status --token-file "$token" 2>&1 >/dev/null); then
+    record t3-credential "ok: $token passes the T3 capability gate"
+    return 0
+  fi
+  record t3-credential "human: $token does not pass the T3 capability gate: $(printf '%s' "$out" | tail -1)" \
+    "start this host's T3 server, or sign the home in again: FM_HOME=$home $FM_ROOT/bin/fm-t3-mcp.mjs login --access full-access --url <this host's T3 origin>"
+}
+
+# The home's wake relay (bin/fm-t3-host.sh relay) must outlive T3 unloading an
+# idle mate session, so it runs under the user service manager: a launch agent
+# in the Aqua login session on darwin, a systemd user unit on Linux.
+check_relay_manager() {
+  if [ "$PLATFORM" = darwin ]; then
+    if check_is_ok gui-session; then
+      record relay-manager "ok: launch agents load into gui/$UID_NUM"
+    else
+      record relay-manager "human: the wake relay launch agent needs an Aqua login session" \
+        "close the gui-session gap first"
+    fi
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    record relay-manager "human: systemctl does not resolve, so the wake relay has no service manager" \
+      "run '$FM_ROOT/bin/fm-t3-host.sh relay' for the home under this machine's own service manager"
+    return 0
+  fi
+  if XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID_NUM}" systemctl --user show-environment >/dev/null 2>&1; then
+    record relay-manager "ok: the systemd user manager is reachable"
+    return 0
+  fi
+  record relay-manager "human: the systemd user manager is not reachable without a login session" \
+    "enable lingering for this account once: loginctl enable-linger \$USER"
+}
+
 run_checks() { # <resolved-login-shell>
   local shell=$1
   CHECK_NAMES=()
@@ -1063,19 +1153,25 @@ run_checks() { # <resolved-login-shell>
   case "$DOCTOR_BACKEND" in
     herdr) check_herdr ;;
     rex) check_rex ;;
+    t3code) ;;
     *) check_backend ;;
   esac
   check_gui_session
   check_remote_job_worker
   # Backend infrastructure is checked only for the selected backend: herdr
   # needs the Aqua-owned fm-remote server, rex needs a persistent personal rex
-  # server, and the no-backend gap has nothing further to prove.
+  # server, a t3code endpoint needs the home's T3 credential and the relay's
+  # service manager, and the no-backend gap has nothing further to prove.
   case "$DOCTOR_BACKEND" in
     herdr)
       check_launch_agent "$shell"
       check_herdr_server
       ;;
     rex) check_rex_server ;;
+    t3code)
+      check_t3_credential
+      check_relay_manager
+      ;;
   esac
   check_entrypoint_link
 }
@@ -1350,6 +1446,7 @@ if [ "$MODE" = worker-tool-probe ]; then
 fi
 
 printf 'mode=%s\n' "$MODE"
+printf 'endpoint=%s\n' "$ENDPOINT"
 printf 'path=%s\n' "${PATH:-}"
 if [ -n "${FM_ROOT_OVERRIDE:-}" ] && [ "${PATH%%:*}" = "$FM_ROOT_OVERRIDE/bin" ]; then
   printf 'entrypoint=yes\n'

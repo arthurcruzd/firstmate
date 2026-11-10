@@ -504,6 +504,9 @@ SH
   : > "$home/slow-render"
   echo 0 > "$home/park-clock"
   park_after_stop "$home"
+  host_exited "$home" && fail "an idle downtime resurface reached main: $(cat "$home/host.out")"
+  assert_re '	no-op	nothing for the branch to claim	check: rearm-resurface$' "$home/state/.supervision-host.log" \
+    "an idle downtime resurface was not kept as a no-op"
   append_status "$home" 'reaches the boundary'
   wait_until 400 host_exited "$home" || fail "mirror boundary: the host did not end its park"
   assert_re '^supervision-host: cycle boundary - ' "$home/host.out" "fixture: the second host did not exit at its boundary"
@@ -532,9 +535,12 @@ SH
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the host did not stop mid-turn on TERM"
   echo handle > "$home/stub-mode"
+  # The stopped turn's row is still queued, and the branch may claim it, so
+  # the resurface itself is the turn after the stop.
   park_after_stop "$home"
-  append_status "$home" 'handled after the stop'
   wait_until 250 handled_at_least "$home" 3 || fail "mirror boundary: the wake after the stop was not handled: $(cat "$home/state/.supervision-host.log")"
+  assert_re '	handled	.*	check: rearm-resurface$' "$home/state/.supervision-host.log" \
+    "the resurface over the stopped turn's row was not handled on the engine"
   third="$home/engine-call.4"
   assert_re '^arg=--resume$' "$third" "fixture: the turn after the stop did not resume the conversation"
   assert_re '^\[captain\] third ask, turn stopped$' "$third" "dialog of a turn stopped before its report must reach the next turn"

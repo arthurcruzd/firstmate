@@ -15,15 +15,16 @@ Firstmate does not support placing an individual worker remotely or failing a re
 | Check whether a host is ready, or repair it | [Readiness, repair, and the human steps](#readiness-repair-and-the-human-steps) |
 | Create the route and the remote home | [Provision a route](#provision-a-route) |
 | Launch, recover, message, and read a remote second mate | [Normal operation](#normal-operation) |
+| Host the mate as a thread on its machine's T3 Code server, or move it back | [T3 Code endpoint](#t3-code-endpoint) |
 | Move queued work to the remote home | [Backlog handoff](#backlog-handoff) |
 | Push configuration, relaunch, update, or retire | [Sync, update, and retirement](#sync-update-and-retirement) |
 | Run the tests or a real-host smoke test | [Verification](#verification) |
 
 ## Where the remote agent runs
 
-The remote second-mate agent runs on one of two session-provider backends, selected per launch.
+The remote second-mate agent runs on one of two session-provider backends, selected per launch, or as a thread on the host's own T3 Code server when its route's registry record names `endpoint: t3code` ([T3 Code endpoint](#t3-code-endpoint)).
 [Launch selection and placement](#launch-or-recover) define the backend contract.
-Provisioning checks any available supported backend; launch checks the selected one.
+Provisioning checks any available supported backend, or the T3 readiness set for a `t3code` route; launch checks the selected one.
 
 - The code root's Herdr remote session is reserved for remote fleet work and must not be used for personal work; [launch placement](#launch-or-recover) identifies that session.
 - The user's interactive Herdr session remains `default` and is not a remote-secondmate prerequisite.
@@ -33,7 +34,7 @@ Provisioning checks any available supported backend; launch checks the selected 
   An ephemeral `rex server run --exit-empty` server exits when its last session or control connection disappears, so it can never satisfy remote readiness.
 - [Rex's server-stop limits](rex-backend.md#active-limits) explain session restoration and agent recovery.
 - Local second mates are unaffected and keep their ordinary backend and session selection.
-  So do the workers a remote second mate supervises inside its own home.
+  So do the workers a Herdr-hosted remote second mate supervises inside its own home.
 
 ## Prerequisites
 
@@ -89,6 +90,7 @@ Linux uses the same queue and worker protocol without the Aqua-session requireme
 Linux ownership records use the clock-stable `/proc` starttime when it is available, because `ps` start times can drift on hosts such as WSL2 and would otherwise make a healthy worker look dead.
 A pre-update worker whose lock still records bare `ps` lstart still verifies against that legacy rendering, so ensure does not treat the live owner as dead and pile another supervisor beside it; when the configured code root's identity is stale, the ordinary code-identity path stops that one worker and replaces it once.
 [`bin/fm-remote-job-lib.sh`](../bin/fm-remote-job-lib.sh) owns the start identity format and the legacy comparison.
+A caller that overrides `FM_REMOTE_JOB_STATE_ROOT`, such as a test or a second Firstmate code root on the same account, gets an isolated worker whose launch agent label is derived from that state root, so it never rewrites or reloads the account's own worker; the doctor then skips the `~/.local/bin` entrypoint-link check, because that link belongs to the account's own code root.
 The [`fm-remote-job-worker.sh` header](../bin/fm-remote-job-worker.sh) owns dispatch cadence and the quiet-scan latency for work arriving after its post-activity burst.
 Active-command and result waits use a separate sampling interval; the [`fm-remote-job-lib.sh` header](../bin/fm-remote-job-lib.sh) owns its defaults, overrides, and completion, cancellation, and timeout latency contract.
 
@@ -343,17 +345,20 @@ A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own sym
 | At least one of | `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, `kimi`, or `omp` |
 | Additionally required on macOS | `lsof`, so the doctor and guard can prove which process owns the session socket |
 
+A `t3code` endpoint replaces `herdr` with `node`, accepts only `claude` or `codex` as the harness, and drops the macOS `lsof` requirement; [T3 Code endpoint](#t3-code-endpoint) lists its extra checks.
+
 ## Provision a route
 
 1. Create and fill the normal secondmate charter first.
 2. Then run:
 
 ```sh
-bin/fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> {<project>[=<origin-url>]...|--no-projects}
+bin/fm-remote-home-seed.sh [--endpoint herdr|t3code] <id> <ssh-alias> <remote-root> <remote-home> {<project>[=<origin-url>]...|--no-projects}
 ```
 
 | Argument | Meaning |
 | --- | --- |
+| `--endpoint` | Where the agent will run; recorded as the route's registry endpoint (default `herdr`, or the existing route's). |
 | `<remote-root>` | The remote Firstmate code clone that supplies tracked scripts. |
 | `<remote-home>` | A separate absolute path for the persistent secondmate home that must not overlap the code root. |
 
@@ -439,22 +444,25 @@ bin/fm-spawn.sh <id> --secondmate
 The primary then takes these steps:
 
 1. It resolves the verified secondmate harness and optional model and effort.
-2. It runs the same readiness gate the seed runs, gated on the selected backend.
+2. It runs the same readiness gate the seed runs, gated on the selected backend or the route's `t3code` endpoint.
 3. It transfers the inherited-material allowlist.
-4. It asks the remote host to launch on that backend.
+4. It asks the remote host to launch on that backend, or for a `t3code` route on that host's T3 server.
 
-A new route defaults to Herdr; pass `--backend rex` to select Rex.
+A route's registry endpoint chooses T3 Code: a route with `endpoint: t3code` always launches as a thread on its host's T3 server.
+On every other route a new launch defaults to Herdr; pass `--backend rex` to select Rex.
 Without an explicit backend, a later launch or liveness recovery preserves the parent's recorded `remote_backend`; legacy records without that field use Herdr.
 An existing endpoint on a different backend is refused rather than migrated.
 Placement is per backend:
 
 - Herdr: all remote secondmates of one code root on a host share that root's remote session, `fm-remote` for the account's primary root, and retain separate `2ndmate-<id>` workspaces inside it.
 - Rex: each remote secondmate home gets its own `2ndmate-<id>-<hash>` session on the host's persistent personal rex server, the same placement rule a local secondmate home uses.
+- T3 Code: each remote secondmate is one thread on its host's T3 server, signed in with its home's own credential ([T3 Code endpoint](#t3-code-endpoint)).
 
 ### Refused and unsupported launches
 
-- An explicit request for any backend other than herdr or rex is refused rather than honored, and the remote host refuses one too.
-- An existing remote endpoint recorded outside its backend's contract - a Herdr session other than its code root's remote session, or a Rex route whose recorded server is not a local `unix://` endpoint - is classified as unverified and left untouched.
+- An explicit request for any backend other than herdr, rex, or the route's `t3code` endpoint is refused rather than honored, and the remote host refuses one too.
+- A route whose registry endpoint is `t3code` launches only there, and a `herdr` route never launches on T3; [moving a mate](#move-a-mate-between-endpoints) is the one path between them.
+- An existing remote endpoint recorded outside its backend's contract - a Herdr session other than its code root's remote session, a Rex route whose recorded server is not a local `unix://` endpoint, or a T3 record whose target is not a thread id - is classified as unverified and left untouched.
   Launch, liveness recovery, control, and retirement refuse it until an operator explicitly migrates it, instead of attempting a live cutover.
 - A launch after a host has drifted out of readiness fails with the doctor's own gap text instead of leaving a half-created endpoint.
 - Raw launch commands are not accepted for remote secondmates.
@@ -632,6 +640,61 @@ Semantic callers preserve the route or pending request:
 
 An unavailable remote home is projected as unknown and is never replaced by a local second mate.
 
+## T3 Code endpoint
+
+A route whose registry record names `endpoint: t3code` runs the second-mate agent as a thread on its host's own [T3 Code](t3code-backend.md) server instead of in `fm-remote`.
+The captain then sees and talks to that mate in T3's UI, on any device paired with that server, while the primary keeps routing and supervising it exactly as it does a Herdr-hosted mate.
+The record form is `(host: ...; root: ...; endpoint: t3code; home: ...; ...)`; an absent field means `herdr`, and any other value makes the record malformed.
+
+### Host prerequisites
+
+- A T3 Code server on that host that passes the [capability gate](t3code-backend.md#capability-gate), with telemetry off, running as a user service so it outlives every SSH connection: an Aqua launch agent on macOS, where the agents it starts can read the login keychain, or a systemd user unit with lingering enabled on Linux.
+- The home's own credential at `config/t3code-token`, minted on that host by the operator's sign-in, never by the parent:
+
+```sh
+FM_HOME=<remote-home> <remote-home>/bin/fm-t3-mcp.mjs login --access full-access --url <host T3 origin> [--t3 <t3 binary>] [--base-dir <server base dir>]
+```
+
+`bin/fm-remote-doctor.sh --endpoint t3code` is the readiness set the seed, every launch, and liveness recovery run for such a route.
+It requires `node` instead of `herdr`, counts only `claude` and `codex` as the harness, never inspects or repairs Herdr or its launch agent, and adds two checks: `t3-credential`, which passes when the home's credential passes the gate (minting it is a human step), and `relay-manager`, which passes when the user service manager the wake relay needs is reachable.
+
+### What launch does on the host
+
+The host-local launch starts the thread at the home's root with the parent's harness, model, and effort, then records it as the home's T3 host thread (`state/.t3-host`) and installs the home's wake relay with `bin/fm-t3-host.sh install`.
+The relay owns the mate's watcher outside the T3 session, so supervision survives T3 unloading an idle mate after 30 minutes, and it sends each actionable wake to the mate thread, which also reopens an unloaded session.
+The mate thread's environment carries `FM_BACKEND=t3code`, so the mate's own workers are T3 threads on the same server whatever runtime default the parent's inherited `config/backend` names.
+Inherited `config/t3code-instances` still selects their provider instances.
+
+### Operating a T3-hosted mate
+
+Routed requests, replies, the parent channel, peeks, state probes, and liveness recovery work exactly as for a Herdr-hosted mate.
+The steer's doorbell is a T3 message instead of a typed line; when the home's session lock names a dead process, which is how a session T3 reopened after an idle unload looks, the doorbell is preceded by a message telling the mate to run session start.
+Interrupt the mate through its host, which runs the ordinary [control plane](agent-control.md) there and prints its verdict, including T3's own `cancel=` claim:
+
+```sh
+bin/fm-on.sh <id> fm-remote-secondmate-control.sh interrupt <id>
+```
+
+`relaunch` is refused on this endpoint, as for every T3 thread, so `/updatefirstmate` falls back to its re-read nudge for such a mate.
+A T3 server restart ends the mate's session and cancels any running worker turn; the relay's next wake reopens the mate, and a cancelled worker needs one steer.
+
+### Move a mate between endpoints
+
+```sh
+bin/fm-remote-secondmate-move.sh <id> <herdr|t3code> [--harness <h>] [--model <m>] [--effort <e>]
+```
+
+The move checks the host's readiness for the target endpoint before changing anything, rewrites only the route's endpoint field, asks the host to release the old endpoint, and launches through the ordinary `bin/fm-spawn.sh <id> --secondmate` path.
+The host releases only an idle endpoint, so a busy mate refuses the move with the registry restored and the old endpoint still running.
+The move holds the mate's liveness lock, so ordinary recovery cannot relaunch the old endpoint in between.
+Only the agent moves: the home, its backlog, projects, workers, parent channel, and steering inbox stay put, so a waiting steer is read by the new endpoint and its workers keep the backend their records name.
+Moving back is the same command with the other endpoint.
+The [script header](../bin/fm-remote-secondmate-move.sh) owns the SSH exit 255 handling.
+
+### Retirement
+
+Retirement archives the mate's thread through the ordinary teardown on the host and then removes the home's relay service.
+
 ## Backlog handoff
 
 Move already-judged queued work with the normal command:
@@ -751,6 +814,7 @@ bin/fm-test-run.sh tests/fm-remote-backlog-handoff.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-lifecycle-e2e.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-omp.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-trace-context.test.sh
+bin/fm-test-run.sh tests/fm-remote-secondmate-move.test.sh
 ```
 
 ### What the portable tests cannot prove

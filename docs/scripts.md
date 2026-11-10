@@ -69,6 +69,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-home-seed.sh`        | Transactionally provision a local secondmate home and maintain `data/secondmates.md` |
 | `fm-remote-home-seed.sh` | Register and provision a whole secondmate home on an SSH-reachable host              |
 | `fm-remote-readiness-lib.sh` | Shared remote second-mate readiness gate: check and, when needed, repair then re-check through `fm-remote-doctor.sh` |
+| `fm-remote-secondmate-move.sh` | Move a remote second mate's agent between its host's Herdr session and that host's T3 Code server, and back |
 | [`fm-project-origin-lib.sh`](../bin/fm-project-origin-lib.sh) | Accepted origin-form owner shared by both remote provisioning boundaries |
 | `fm-spawn.sh`            | Spawn crewmates, scouts, `id=repo` batches, and secondmates on the resolved harness and runtime backend |
 | [`fm-approval-failover.sh`](../bin/fm-approval-failover.sh) | Save a captain-approved managed-approval fallback and recover a worker after observed defeated bypass |
@@ -101,6 +102,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-t3-mcp.mjs`          | T3 Code `/mcp` client: captain-run sign-in, capability gate, and the thread verbs the t3code adapter calls (docs/t3code-backend.md) |
 | `fm-t3-answer.sh`        | Read or answer a recorded T3 worker's pending questions                              |
 | `fm-t3code-codex-env.sh` | Manage the T3 environment overlay on tracked Codex project configuration              |
+| `fm-t3-host.sh`          | Run a home's own primary, or a T3-hosted remote second mate, as a T3 Code thread, with the host-level wake relay that owns its watcher |
 | `fm-extension.sh`        | Expose extension binding commands through the tracked shell and remote-home command boundary |
 | `fm-procevent.sh`        | Register, supervise, capture, classify, acknowledge, and safely retire built-in or explicitly bound process-event sources |
 | `fm-procevent-remote-reply.sh` | Relay the remote-secondmate status stream through non-destructive process-event deltas |

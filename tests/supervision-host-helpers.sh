@@ -189,8 +189,8 @@ unset FM_SUPERVISION_ACTOR FM_BRANCH_REPORT_TURN FM_LEASE_HOLDER_PID PI_CODING_A
 # Homes are registered in a file: make_home runs in a command substitution,
 # whose variables never reach this shell.
 HOMES_FILE="$TMP_ROOT/homes"
-# Stop whatever a case left running, by the exact pids its home recorded.
-stop_home_processes() {  # <home>
+# Stop the host, its arms, and the watcher a home's records name.
+stop_home_host() {  # <home>
   local home=$1 pid arms='' i=0
   pid=$(cut -f1 "$home/state/.supervision-handoff-owner" 2>/dev/null || true)
   [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
@@ -208,9 +208,34 @@ stop_home_processes() {  # <home>
   done
   pid=$(cat "$home/state/.watch.lock/pid" 2>/dev/null || true)
   [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
+}
+
+# A session told to stop leaves its loop once its Stop hook returns. Its hook
+# would start another host when the host dies, and that host keeps the
+# downtime resurface the stop causes off main when nothing queued is main's
+# (bin/fm-branch-dispatch.mjs offer) and parks, so the hook never returns by
+# itself. As Claude does when a session ends, the hook is
+# stopped first, then the host and watcher it left; a session still alive at
+# the bound is stopped itself.
+stop_session() {  # <home> <session-pid>
+  local home=$1 pid=$2 i=0
+  pkill -TERM -P "$pid" 2>/dev/null || true
+  stop_home_host "$home"
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+# Stop whatever a case left running, by the exact pids its home recorded.
+stop_home_processes() {  # <home>
+  local home=$1 pid
+  stop_home_host "$home"
   while IFS= read -r pid; do
     if [ -e "$home/session.stop" ]; then
-      wait "$pid" 2>/dev/null || true
+      stop_session "$home" "$pid"
     else
       kill -TERM "$pid" 2>/dev/null || true
     fi
@@ -753,10 +778,8 @@ mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 
 # Park again after a host was stopped mid-park: the new cycle's first close is
-# the watcher's downtime resurface, which main drains before the next park.
-# That close can end the park before its cycle is ever seen live, so this
-# waits for the exit itself.
-# The resurface pass-through leaves its successor running. Stop that watcher
+# the watcher's downtime resurface (park_after_stop below).
+# A resurface pass-through leaves its successor running. Stop that watcher
 # and acknowledge the downtime its exit records, so the next park starts a
 # watcher it owns. Attaching instead would not observe the exit until the
 # beacon went stale, and this fixture's turn budget would already be gone.
@@ -783,10 +806,24 @@ quiet_pass_through_successor() {  # <home>
 }
 
 
+# The resurfaces the host kept: a no-op over an empty queue, or an engine
+# turn over rows the branch may claim.
+resurface_kept() {  # <home>
+  local n
+  n=$(grep -cE '	(no-op	nothing for the branch to claim|handled	.*)	check: rearm-resurface$' "$1/state/.supervision-host.log" 2>/dev/null)
+  printf '%s\n' "${n:-0}"
+}
+resurface_settled() { host_exited "$1" || { [ "$(resurface_kept "$1")" -gt "$2" ] && watcher_live "$1"; }; }
+
 park_after_stop() {  # <home>
+  local before
+  before=$(resurface_kept "$1")
   rm -f "$1/host.rc"
   : > "$1/park.go"
-  wait_until_deadline 60 host_exited "$1" || fail "the watcher's downtime resurface did not reach main: $(cat "$1/host.out")"
+  wait_until_deadline 60 resurface_settled "$1" "$before" \
+    || fail "the watcher's downtime resurface was neither kept nor delivered: $(cat "$1/host.out"; tail -n 5 "$1/state/.supervision-host.log" 2>/dev/null)"
+  host_exited "$1" || return 0
+  # A queue holding a row main owns still sends the resurface to main.
   assert_re '^check: rearm-resurface' "$1/host.out" "fixture: the first close after the watcher stopped was not its resurface"
   main_drain_and_ack "$1"
   quiet_pass_through_successor "$1"

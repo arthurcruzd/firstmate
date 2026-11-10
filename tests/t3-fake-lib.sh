@@ -64,14 +64,16 @@ fs.renameSync(tmp, file);
 }
 
 # t3_fake_t3_cli <dir>: a fake `t3` CLI whose pairing create prints the code
-# the fake server accepts and logs its arguments to <dir>/t3-cli.log.
+# the fake server accepts (PAIR-OK when scoped, PAIR-OK-STD for T3's standard
+# scope set) and logs its arguments to <dir>/t3-cli.log.
 t3_fake_t3_cli() {
   local dir=$1
   mkdir -p "$dir"
   cat > "$dir/t3" <<SH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> '$dir/t3-cli.log'
-printf '{"credential":"PAIR-OK","expiresAt":"later"}\n'
+case " \$* " in *" --scope "*) code=PAIR-OK ;; *) code=PAIR-OK-STD ;; esac
+printf '{"credential":"%s","expiresAt":"later"}\n' "\$code"
 SH
   chmod +x "$dir/t3"
   printf '%s\n' "$dir/t3"
@@ -108,7 +110,7 @@ for (const line of require("fs").readFileSync(process.argv[2], "utf8").split("\n
 # the gate, and dropped calls excluded).
 t3_fake_mutations() {
   node -e '
-const writes = new Set(["t3_project_create", "t3_thread_launch", "t3_thread_send", "t3_thread_interrupt", "t3_thread_organize"]);
+const writes = new Set(["t3_project_create", "t3_thread_launch", "t3_thread_send", "t3_thread_interrupt", "t3_thread_organize", "t3_thread_configure"]);
 const out = [];
 for (const line of require("fs").readFileSync(process.argv[1], "utf8").split("\n")) {
   if (!line) continue;
