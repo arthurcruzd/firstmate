@@ -143,10 +143,20 @@ test_login_refuses_other_ceilings() {
   pass "fm-t3-mcp login: refuses every ceiling but full-access before any request"
 }
 
+# The tool shape each TOOL_SHAPES capability resolves to in the current case's
+# shape (tests/t3-fake-server.mjs).
+expected_capabilities() {
+  case "${T3_FAKE_TOOL_SHAPE:-current}" in
+    split) printf '%s' '{"pendingRequests":"t3_pending_request_*","threadConfiguration":"t3_thread_configuration"}' ;;
+    *) printf '%s' '{"pendingRequests":"t3_pending_request","threadConfiguration":"t3_thread_configure"}' ;;
+  esac
+}
+
 test_status_gate_and_protocol() {
   fresh_case status
   mcp status
   expect_code 0 "$RC" "status should pass the gate: $ERR"
+  assert_equals "$(expected_capabilities)" "$(field "$OUT" capabilities)" "status names the tool shape chosen for each capability"
   assert_equals env-fake-1 "$(field "$OUT" environmentId)" "status should report the environment id"
   assert_equals 0.0.46-nightly.fake "$(field "$OUT" serverVersion)" "status should report the server version"
   node -e '
@@ -177,6 +187,44 @@ test_gate_refuses_missing_tools() {
   expect_code 4 "$RC" "a server without t3_thread_configure must be refused"
   assert_contains "$ERR" "t3_thread_configure" "the refusal should name t3_thread_configure"
   pass "fm-t3-mcp gate: refuses a server missing a required tool or its identity tool"
+}
+
+# Each capability T3 renamed passes on either of its shapes and is refused,
+# by name, only when neither is offered whole.
+test_gate_accepts_either_tool_shape() {
+  local base='"t3_thread_launch","t3_thread_send","t3_thread_read","t3_thread_wait","t3_thread_interrupt","t3_thread_organize","t3_thread_configure","t3_thread_list","t3_project_list","t3_project_create","orchestrator_capabilities","t3_environment_read"'
+  fresh_case gate-shapes '{"toolShape":"current"}'
+  FM_T3_BASE="[$base]" t3_fake_set 'w.tools = [...JSON.parse(process.env.FM_T3_BASE), "t3_pending_request"]'
+  mcp status
+  expect_code 0 "$RC" "the 0.1.7+ shape passes the gate: $ERR"
+  assert_equals '{"pendingRequests":"t3_pending_request","threadConfiguration":"t3_thread_configure"}' "$(field "$OUT" capabilities)" \
+    "the single pending-request tool and the configure read are chosen"
+  FM_T3_BASE="[$base]" t3_fake_set 'w.tools = [...JSON.parse(process.env.FM_T3_BASE), "t3_pending_request", "t3_pending_request_list", "t3_pending_request_read", "t3_pending_request_respond", "t3_thread_configuration"]'
+  mcp status
+  expect_code 0 "$RC" "a server offering both shapes passes: $ERR"
+  assert_equals '{"pendingRequests":"t3_pending_request","threadConfiguration":"t3_thread_configuration"}' "$(field "$OUT" capabilities)" \
+    "the single pending-request tool and the dedicated configuration read are preferred"
+  FM_T3_BASE="[$base]" t3_fake_set 'w.tools = [...JSON.parse(process.env.FM_T3_BASE), "t3_pending_request_list", "t3_pending_request_read"]'
+  mcp status
+  expect_code 4 "$RC" "a server with neither whole pending-request shape is refused"
+  assert_equals capability_gate "$(field "$OUT" error.code)" "the refusal is the capability gate"
+  assert_contains "$ERR" "t3_pending_request (or t3_pending_request_list, t3_pending_request_read, and t3_pending_request_respond)" \
+    "the refusal names both pending-request shapes"
+  assert_not_contains "$ERR" "t3_thread_configuration" "a satisfied capability is not named"
+  fresh_case gate-shapes-split '{"toolShape":"split"}'
+  FM_T3_BASE="[$base]" t3_fake_set 'w.tools = [...JSON.parse(process.env.FM_T3_BASE), "t3_pending_request_list", "t3_pending_request_read", "t3_pending_request_respond"]'
+  mcp status
+  expect_code 4 "$RC" "a t3_thread_configure that requires modelSelection cannot read a launch back"
+  assert_contains "$ERR" "t3_thread_configuration (or a t3_thread_configure that reads without modelSelection)" \
+    "the refusal names both configuration-read shapes"
+  assert_equals '["t3_thread_configuration (or a t3_thread_configure that reads without modelSelection)"]' "$(field "$OUT" error.missing)" \
+    "the refusal lists exactly the unmet capability"
+  FM_T3_BASE="[$base]" t3_fake_set 'w.tools = [...JSON.parse(process.env.FM_T3_BASE), "t3_pending_request_list", "t3_pending_request_read", "t3_pending_request_respond", "t3_thread_configuration"]'
+  mcp status
+  expect_code 0 "$RC" "the 0.1.2 shape passes the gate: $ERR"
+  assert_equals '{"pendingRequests":"t3_pending_request_*","threadConfiguration":"t3_thread_configuration"}' "$(field "$OUT" capabilities)" \
+    "the three pending-request tools and t3_thread_configuration are chosen"
+  pass "fm-t3-mcp gate: each renamed capability passes on either tool shape and is refused by name only when neither is whole"
 }
 
 test_environment_mismatch_refused() {
@@ -671,9 +719,21 @@ test_launch_reads_back_full_configuration() {
   fresh_case launch-config
   mcp project-ensure --root "$TMP_ROOT/proj"
   project=$(field "$OUT" projectId)
+  : > "$T3_FAKE_LOG"
   mcp launch --project "$project" --title ok --model-selection "$sel" --worktree "$WT"
   expect_code 0 "$RC" "a launch whose configuration reads back exactly succeeds: $ERR"
-  t3_fake_set 'w.bindOptions = [{ id: "reasoningEffort", value: "high" }]'
+  assert_equals 1 "$(t3_fake_calls t3_thread_configuration | wc -l | tr -d ' ')" "the launch reads its configuration back once"
+  assert_equals t3_thread_launch "$(t3_fake_mutations)" "the configuration read-back changes nothing"
+  case "${T3_FAKE_TOOL_SHAPE:-current}" in
+    split) assert_grep '"tool":"t3_thread_configuration"' "$T3_FAKE_LOG" "the 0.1.2 shape reads through t3_thread_configuration" ;;
+    *) assert_grep '"tool":"t3_thread_configure","op":"t3_thread_configuration"' "$T3_FAKE_LOG" "the 0.1.7+ shape reads through t3_thread_configure without modelSelection" ;;
+  esac
+  t3_fake_set 'w.failTools = { t3_thread_configuration: { code: "unavailable", message: "configuration unavailable" } }'
+  mcp launch --project "$project" --title unread --model-selection "$sel" --worktree "$WT"
+  expect_code 1 "$RC" "a launch whose configuration cannot be read back is unproven"
+  assert_equals binding_unconfirmed "$(field "$OUT" error.code)" "the unread configuration is an unconfirmed binding"
+  assert_contains "$(t3_fake_calls t3_thread_organize)" '"action":"archive"' "the thread with an unread configuration is archived"
+  t3_fake_set 'w.failTools = {}; w.bindOptions = [{ id: "reasoningEffort", value: "high" }]'
   : > "$T3_FAKE_LOG"
   mcp launch --project "$project" --title dropped --model-selection "$sel" --worktree "$WT"
   expect_code 4 "$RC" "a launch that dropped a requested option is refused"
@@ -682,7 +742,7 @@ test_launch_reads_back_full_configuration() {
   t3_fake_set 'delete w.bindOptions; w.bindModel = "gpt-6-luna"'
   mcp launch --project "$project" --title model --model-selection "$sel" --worktree "$WT"
   expect_code 4 "$RC" "a launch on another model is refused"
-  pass "fm-t3-mcp launch: t3_thread_configuration must read back the instance, model, and every requested option"
+  pass "fm-t3-mcp launch: the configuration read must read back the instance, model, and every requested option, and only reads"
 }
 
 test_requests_and_respond() {
@@ -703,6 +763,10 @@ test_requests_and_respond() {
   mcp respond --thread thread-q --request req-question --answers-file "$TMP_ROOT/answers"
   expect_code 0 "$RC" "respond: $ERR"
   assert_equals '{"q1":"a"}' "$(field "$(t3_fake_calls t3_pending_request_respond)" answers)" "the answers reach t3_pending_request_respond"
+  case "${T3_FAKE_TOOL_SHAPE:-current}" in
+    split) assert_grep '"tool":"t3_pending_request_respond"' "$T3_FAKE_LOG" "the 0.1.2 shape answers through t3_pending_request_respond" ;;
+    *) assert_grep '"tool":"t3_pending_request","op":"t3_pending_request_respond","arguments":{"action":"respond"' "$T3_FAKE_LOG" "the 0.1.7+ shape answers through t3_pending_request action respond" ;;
+  esac
   mcp respond --thread thread-q --request req-approval --answers-file "$TMP_ROOT/answers"
   expect_code 3 "$RC" "a permission approval cannot be answered through the question tools"
   mcp requests --thread thread-q
@@ -918,38 +982,45 @@ test_capture_clamps_lines_and_closes_session() {
   pass "fm-t3-mcp capture: --lines above 500 reads the last 500, and the verb ends its MCP session"
 }
 
+# Every case runs in the default tool shape (T3 0.1.7+), then again in the
+# T3 0.1.2 shape (tests/t3-fake-server.mjs).
+ALL_TESTS=(
+  test_login_writes_private_credential_and_never_prints_token
+  test_login_standard_scopes_on_0_1_2
+  test_login_origin_defaults
+  test_login_refuses_other_ceilings
+  test_status_gate_and_protocol
+  test_gate_refuses_missing_tools
+  test_gate_accepts_either_tool_shape
+  test_environment_mismatch_refused
+  test_expiry_and_permissions
+  test_revoked_credential_refused
+  test_projects_by_real_path
+  test_launch_binds_workspace
+  test_launch_refusals
+  test_send_state_capture_interrupt_archive
+  test_resume_prepares_the_same_thread
+  test_thread_for_root
+  test_typed_failure_and_transport_errors
+  test_telemetry_reported
+  test_telemetry_reads_a_local_interface_origin
+  test_read_limit_matches_t3_cap
+  test_interrupt_confirms_only_the_interrupted_run
+  test_send_lost_reply_is_unconfirmed_and_retry_is_one_delivery
+  test_thread_for_root_pages_and_forks
+  test_resolve_selection_uses_t3_catalog
+  test_launch_reads_back_full_configuration
+  test_requests_and_respond
+  test_watch_is_event_driven_and_bounded
+  test_watch_reports_failed_waits_not_timeout
+  test_helper_runs_through_symlinked_path
+  test_empty_reply_is_never_success
+  test_watch_escalates_a_replaced_approval
+  test_jsonrpc_server_error_is_not_proven_refusal
+  test_orchestration_error_is_not_proven_refusal
+  test_long_wait_rearms_in_slices
+  test_capture_clamps_lines_and_closes_session
+)
 t3_fake_start "$TMP_ROOT/server"
-test_login_writes_private_credential_and_never_prints_token
-test_login_standard_scopes_on_0_1_2
-test_login_origin_defaults
-test_login_refuses_other_ceilings
-test_status_gate_and_protocol
-test_gate_refuses_missing_tools
-test_environment_mismatch_refused
-test_expiry_and_permissions
-test_revoked_credential_refused
-test_projects_by_real_path
-test_launch_binds_workspace
-test_launch_refusals
-test_send_state_capture_interrupt_archive
-test_resume_prepares_the_same_thread
-test_thread_for_root
-test_typed_failure_and_transport_errors
-test_telemetry_reported
-test_telemetry_reads_a_local_interface_origin
-test_read_limit_matches_t3_cap
-test_interrupt_confirms_only_the_interrupted_run
-test_send_lost_reply_is_unconfirmed_and_retry_is_one_delivery
-test_thread_for_root_pages_and_forks
-test_resolve_selection_uses_t3_catalog
-test_launch_reads_back_full_configuration
-test_requests_and_respond
-test_watch_is_event_driven_and_bounded
-test_watch_reports_failed_waits_not_timeout
-test_helper_runs_through_symlinked_path
-test_empty_reply_is_never_success
-test_watch_escalates_a_replaced_approval
-test_jsonrpc_server_error_is_not_proven_refusal
-test_orchestration_error_is_not_proven_refusal
-test_long_wait_rearms_in_slices
-test_capture_clamps_lines_and_closes_session
+for t in "${ALL_TESTS[@]}"; do "$t"; done
+t3_fake_in_shape split "${ALL_TESTS[@]}"

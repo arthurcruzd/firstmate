@@ -37,10 +37,14 @@ t3_fake_stop() {
 
 # t3_fake_case <dir> [world-json]: make <dir> the server's current case, with
 # a fresh world (default `{}`) and an empty request log. Sets T3_FAKE_WORLD
-# and T3_FAKE_LOG.
+# and T3_FAKE_LOG. A set T3_FAKE_TOOL_SHAPE becomes the world's toolShape
+# unless the world names one.
 t3_fake_case() {
   local world=${2:-}
   [ -n "$world" ] || world='{}'
+  if [ -n "${T3_FAKE_TOOL_SHAPE:-}" ]; then
+    world=$(node -e 'const w = JSON.parse(process.argv[1]); w.toolShape ??= process.argv[2]; process.stdout.write(JSON.stringify(w))' "$world" "$T3_FAKE_TOOL_SHAPE")
+  fi
   mkdir -p "$1"
   T3_FAKE_WORLD="$1/world.json"
   T3_FAKE_LOG="$1/requests.jsonl"
@@ -93,21 +97,27 @@ t3_fake_credential() {
   chmod "$mode" "$file"
 }
 
-# t3_fake_calls <tool>: the logged arguments of every call to <tool>, one JSON
-# object per line.
+# t3_fake_calls <tool>: the logged arguments of every call to the logical
+# <tool> (tests/t3-fake-server.mjs `op`), one JSON object per line, so a
+# t3_pending_request_respond reads the same in both tool shapes: a
+# t3_pending_request call shows its arguments without the action.
 t3_fake_calls() {
   node -e '
 const tool = process.argv[1];
 for (const line of require("fs").readFileSync(process.argv[2], "utf8").split("\n")) {
   if (!line) continue;
   const e = JSON.parse(line);
-  if (e.tool === tool && !e.dropped) console.log(JSON.stringify(e.arguments ?? {}));
+  if ((e.op ?? e.tool) !== tool || e.dropped) continue;
+  const args = { ...(e.arguments ?? {}) };
+  if (e.tool === "t3_pending_request") delete args.action;
+  console.log(JSON.stringify(args));
 }
 ' "$1" "$T3_FAKE_LOG"
 }
 
-# t3_fake_mutations: the mutating tool calls in order, space-separated (reads,
-# the gate, and dropped calls excluded).
+# t3_fake_mutations: the mutating logical tool calls in order, space-separated
+# (reads, including a t3_thread_configure without modelSelection, the gate,
+# and dropped calls excluded).
 t3_fake_mutations() {
   node -e '
 const writes = new Set(["t3_project_create", "t3_thread_launch", "t3_thread_send", "t3_thread_interrupt", "t3_thread_organize", "t3_thread_configure"]);
@@ -115,8 +125,22 @@ const out = [];
 for (const line of require("fs").readFileSync(process.argv[1], "utf8").split("\n")) {
   if (!line) continue;
   const e = JSON.parse(line);
-  if (writes.has(e.tool)) out.push(e.dropped ? e.tool + "!" : e.tool);
+  const op = e.op ?? e.tool;
+  if (writes.has(op)) out.push(e.dropped ? op + "!" : op);
 }
 process.stdout.write(out.join(" "));
 ' "$T3_FAKE_LOG"
+}
+
+# t3_fake_in_shape <shape> <test-function>...: run each test with every case
+# it starts in tool shape <shape> (tests/t3-fake-server.mjs), after a TAP
+# comment naming the shape. The suites run whole in the default shape and
+# repeat the tests that drive a shape-dependent tool in the other one.
+t3_fake_in_shape() {
+  local shape=$1 t
+  shift
+  printf '# tool shape: %s\n' "$shape"
+  for t in "$@"; do
+    T3_FAKE_TOOL_SHAPE=$shape "$t"
+  done
 }

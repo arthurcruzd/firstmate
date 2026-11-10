@@ -18,7 +18,15 @@
 //   - archive is distinct from run end: the active run ends asynchronously;
 //   - a send is committed before its reply, which dropReplyTools can lose;
 //   - pendingRequestCount counts every pending runtime request, while the
-//     t3_pending_request_* tools see only user-input questions.
+//     pending-request tools see only user-input questions;
+//   - two tool shapes (bin/fm-t3-mcp.mjs TOOL_SHAPES), chosen by the world's
+//     toolShape, else $T3_FAKE_TOOL_SHAPE, else current. `current` is T3
+//     0.1.7 and 0.1.8: one t3_pending_request tool taking an action, and no
+//     t3_thread_configuration, whose read is t3_thread_configure without
+//     modelSelection. `split` is T3 0.1.2: t3_pending_request_list, _read,
+//     and _respond, t3_thread_configuration, and a t3_thread_configure whose
+//     input schema requires modelSelection. A call to a tool the shape does
+//     not offer fails as unknown_tool.
 //
 // Usage: t3-fake-server.mjs --case-file <file> --port-file <file> [--parent-pid <pid>]
 // <case-file> holds the path of the current case directory. Every request
@@ -31,7 +39,8 @@
 //   CLI), rejectSendDispatch (that many t3_thread_send calls fail at
 //   dispatch, and, as T3 does, each such request id is answered "was
 //   previously rejected" from then on),
-//   tools (array of names; default all), revoked (every /mcp call is 401),
+//   toolShape (current|split), tools (array of names; default the shape's
+//   whole set), revoked (every /mcp call is 401),
 //   sse (SSE replies), expiresIn (seconds), bindWorktree, bindInstance,
 //   bindRuntimeMode, bindModel, bindOptions (override what a launch binds),
 //   archiveKeepsRun (archive never ends the run), interruptStuck or
@@ -54,6 +63,11 @@
 //   runs, and runtimeRequests [{id, kind: user_input|approval, status,
 //   questions}]}). An approval's activity item is an items entry {itemId,
 //   type: "approval_request", status} the world keeps beside its request.
+// Every per-tool key (failTools, dropTools, dropReplyTools, emptyReplyTools,
+// rpcErrorTools, committedErrorTools) names the logical tool, which is also
+// logged as `op`: t3_pending_request_<action> for a t3_pending_request call,
+// t3_thread_configuration for a t3_thread_configure without modelSelection,
+// and the tool's own name otherwise, so a case reads the same in both shapes.
 // DELETE /mcp ends a session and is logged with the session id it names.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -64,12 +78,26 @@ import path from "node:path";
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].slice(2)] = process.argv[i + 1];
 
-const ALL_TOOLS = [
+const COMMON_TOOLS = [
   "t3_thread_launch", "t3_thread_send", "t3_thread_read", "t3_thread_wait", "t3_thread_interrupt",
-  "t3_thread_organize", "t3_thread_list", "t3_thread_configuration", "t3_thread_configure", "t3_project_list", "t3_project_create",
-  "t3_pending_request_list", "t3_pending_request_read", "t3_pending_request_respond",
+  "t3_thread_organize", "t3_thread_list", "t3_thread_configure", "t3_project_list", "t3_project_create",
   "orchestrator_capabilities", "t3_environment_read",
 ];
+const SHAPE_TOOLS = {
+  current: [...COMMON_TOOLS, "t3_pending_request"],
+  split: [...COMMON_TOOLS, "t3_thread_configuration", "t3_pending_request_list", "t3_pending_request_read", "t3_pending_request_respond"],
+};
+const shapeOf = (w) => w.toolShape ?? process.env.T3_FAKE_TOOL_SHAPE ?? "current";
+const offeredTools = (w) => w.tools ?? SHAPE_TOOLS[shapeOf(w)] ?? [];
+// The input schema tools/list reports; only the configure schema differs by shape.
+const inputSchema = (w, name) =>
+  name === "t3_thread_configure" && shapeOf(w) === "split" ? { type: "object", required: ["modelSelection"] } : { type: "object" };
+// The logical tool a call performs (see the header).
+const logicalTool = (name, a) => {
+  if (name === "t3_pending_request") return `t3_pending_request_${a?.action}`;
+  if (name === "t3_thread_configure" && a?.modelSelection === undefined) return "t3_thread_configuration";
+  return name;
+};
 const ACTIVE = new Set(["preparing", "queued", "starting", "running", "waiting"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "rolled_back"]);
 const select = (id, values) => ({ id, label: id, type: "select", options: values.map((v) => ({ id: v, label: v })) });
@@ -199,8 +227,22 @@ function listItem(x) {
 
 // Returns [result, changed].
 async function callTool(w, name, a) {
-  const fail = (w.failTools ?? {})[name];
+  const fail = (w.failTools ?? {})[logicalTool(name, a)];
   if (fail) return [err(fail.code, fail.message), false];
+  if (!offeredTools(w).includes(name)) return [err("unknown_tool", `no tool ${name}`), false];
+  if (name === "t3_pending_request") {
+    const { action, ...rest } = a;
+    if (!["list", "read", "respond"].includes(action)) return [err("invalid_request", `unknown action ${action}`), false];
+    return toolImpl(w, `t3_pending_request_${action}`, rest);
+  }
+  if (name === "t3_thread_configure" && a.modelSelection === undefined) {
+    if (shapeOf(w) === "split") return [err("invalid_request", "modelSelection is required"), false];
+    return toolImpl(w, "t3_thread_configuration", a);
+  }
+  return toolImpl(w, name, a);
+}
+
+async function toolImpl(w, name, a) {
   const threads = (w.threads = w.threads ?? {});
   const projects = (w.projects = w.projects ?? []);
   const t = a.threadId !== undefined ? threads[a.threadId] : undefined;
@@ -372,19 +414,20 @@ async function mcp(req, res) {
   const w = loadWorld();
   const auth = (req.headers.authorization ?? "").replace(/^Bearer /, "");
   const msg = JSON.parse(await body(req));
-  const entry = { path: "/mcp", method: msg.method, tool: msg.params?.name, arguments: msg.params?.arguments, auth, protocol: req.headers["mcp-protocol-version"] };
+  const op = msg.method === "tools/call" ? logicalTool(msg.params?.name, msg.params?.arguments) : undefined;
+  const entry = { path: "/mcp", method: msg.method, tool: msg.params?.name, ...(op !== undefined && op !== msg.params?.name ? { op } : {}), arguments: msg.params?.arguments, auth, protocol: req.headers["mcp-protocol-version"] };
   if (w.revoked || !(w.tokens ?? []).includes(auth)) {
     log(w, { ...entry, status: 401 });
     return json(res, 401, { error: "invalid_token" });
   }
-  if (msg.method === "tools/call" && (w.dropTools ?? {})[msg.params.name] > 0) {
-    w.dropTools[msg.params.name]--;
+  if (msg.method === "tools/call" && (w.dropTools ?? {})[op] > 0) {
+    w.dropTools[op]--;
     saveWorld(w);
     log(w, { ...entry, dropped: true });
     return req.socket.destroy();
   }
-  if (msg.method === "tools/call" && (w.emptyReplyTools ?? {})[msg.params.name] > 0) {
-    w.emptyReplyTools[msg.params.name]--;
+  if (msg.method === "tools/call" && (w.emptyReplyTools ?? {})[op] > 0) {
+    w.emptyReplyTools[op]--;
     saveWorld(w);
     log(w, { ...entry, emptyReply: true });
     res.writeHead(200, { "content-type": "text/event-stream", "mcp-session-id": "sess-fake" });
@@ -398,7 +441,7 @@ async function mcp(req, res) {
     res.writeHead(202);
     return res.end();
   } else if (msg.method === "tools/list") {
-    result = { tools: (w.tools ?? ALL_TOOLS).map((name) => ({ name, inputSchema: { type: "object" } })) };
+    result = { tools: offeredTools(w).map((name) => ({ name, inputSchema: inputSchema(w, name) })) };
   } else if (msg.method === "tools/call") {
     let changed = settle(w);
     let mutated;
@@ -406,25 +449,25 @@ async function mcp(req, res) {
     changed = changed || mutated;
     // A wait re-reads the world while it blocks; never write back the stale copy.
     if (changed && msg.params.name !== "t3_thread_wait") saveWorld(w);
-    if ((w.dropReplyTools ?? {})[msg.params.name] > 0) {
+    if ((w.dropReplyTools ?? {})[op] > 0) {
       const fresh = loadWorld();
-      fresh.dropReplyTools[msg.params.name]--;
+      fresh.dropReplyTools[op]--;
       saveWorld(fresh);
       log(fresh, { ...entry, replyDropped: true });
       return req.socket.destroy();
     }
-    if ((w.rpcErrorTools ?? {})[msg.params.name] !== undefined) {
+    if ((w.rpcErrorTools ?? {})[op] !== undefined) {
       const fresh = loadWorld();
-      const code = fresh.rpcErrorTools[msg.params.name];
-      delete fresh.rpcErrorTools[msg.params.name];
+      const code = fresh.rpcErrorTools[op];
+      delete fresh.rpcErrorTools[op];
       saveWorld(fresh);
       log(fresh, { ...entry, rpcError: code });
       return json(res, 200, { jsonrpc: "2.0", id: msg.id, error: { code, message: "internal error" } }, { "mcp-session-id": "sess-fake" });
     }
-    if ((w.committedErrorTools ?? {})[msg.params.name] !== undefined) {
+    if ((w.committedErrorTools ?? {})[op] !== undefined) {
       const fresh = loadWorld();
-      const code = fresh.committedErrorTools[msg.params.name];
-      delete fresh.committedErrorTools[msg.params.name];
+      const code = fresh.committedErrorTools[op];
+      delete fresh.committedErrorTools[op];
       saveWorld(fresh);
       log(fresh, { ...entry, committedError: code });
       const result = code === null ? { isError: true, content: [{ type: "text", text: "The operation could not be completed." }] } : err(code, "The operation could not be completed.");

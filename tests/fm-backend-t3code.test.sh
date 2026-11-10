@@ -65,9 +65,10 @@ mkdir -p "$SPAWN_HOME"
 # t3_case <name> [thread-status] -> sets CASE_DIR, CONFIG, LOG, REPO
 # The default world has one project rooted at $REPO with a Claude default
 # model, one thread `thread-live` in the given V2 status, and a credential.
+# A case run in a named tool shape (t3_fake_in_shape) gets its own directory.
 t3_case() {
   local name=$1 status=${2:-completed}
-  CASE_DIR="$TMP_ROOT/$name"
+  CASE_DIR="$TMP_ROOT${T3_FAKE_TOOL_SHAPE:+/shape-$T3_FAKE_TOOL_SHAPE}/$name"
   CONFIG="$CASE_DIR/config"
   REPO="$CASE_DIR/repo"
   mkdir -p "$CONFIG" "$REPO"
@@ -88,10 +89,10 @@ t3_thread_json() {  # <id> <status> <archived true|false>
 }
 
 # t3_world <thread-json...>: a fresh world (each thread keyed by its id) that
-# keeps the case's accepted credentials.
+# keeps the case's accepted credentials and tool shape.
 t3_world() {
   FM_T3_THREADS="[$(IFS=,; printf '%s' "$*")]" FM_T3_REPO="$REPO" t3_fake_set '
-w = { tokens: w.tokens || [],
+w = { tokens: w.tokens || [], ...(w.toolShape ? { toolShape: w.toolShape } : {}),
   projects: [{ id: "proj-1", title: "repo", workspaceRoot: process.env.FM_T3_REPO, deletedAt: null,
     defaultModelSelection: { instanceId: "claudeAgent", model: "claude-sonnet-5" } }],
   threads: Object.fromEntries(JSON.parse(process.env.FM_T3_THREADS).map((t) => [t.threadId, t])) };'
@@ -1442,7 +1443,7 @@ test_control_relaunch_resumes_the_same_thread() {
   [ "$(t3_dispatch_types)" = "t3_thread_organize t3_thread_configure t3_thread_send" ] \
     || fail "relaunch must unarchive, configure, then send the relaunch brief, got '$(t3_dispatch_types)'"
   [ "$(t3_request "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" 'r.arguments.action')" = unarchive ] || fail "relaunch must unarchive the thread"
-  configure=$(t3_log_line_of 'r.tool === "t3_thread_configure"')
+  configure=$(t3_log_line_of '(r.op ?? r.tool) === "t3_thread_configure"')
   [ "$(t3_request "$configure" 'r.arguments.modelSelection.model')" = claude-haiku-5-5 ] || fail "relaunch must apply the chosen model"
   send=$(t3_log_line_of 'r.tool === "t3_thread_send"')
   [ "$(t3_request "$send" 'r.arguments.threadId')" = "$RELAUNCH_THREAD" ] || fail "the relaunch brief must go to the same thread"
@@ -3325,3 +3326,15 @@ test_spawn_rejected_lease_is_neither_cleaned_nor_returned
 test_teardown_keeps_tracked_claude_local_md
 test_fractional_poll_event_wait
 test_housekeeping_removes_the_iterated_stale_marker
+# The cases that drive a tool T3 renamed (the launch configuration read-back,
+# the pending-request tools) again in the T3 0.1.2 tool shape; everything
+# above ran in the 0.1.7+ shape (tests/t3-fake-server.mjs).
+t3_fake_in_shape split \
+  test_capability_gate_refuses_control \
+  test_thread_create_and_turn_start_payloads \
+  test_thread_create_uncertain_and_refused_outcomes \
+  test_spawn_leases_slot_creates_thread_and_starts_launch_turn \
+  test_misbound_thread_launch_returns_lease \
+  test_push_wait_escalates_pending_question_once \
+  test_answer_script_reads_and_answers_questions \
+  test_control_relaunch_resumes_the_same_thread

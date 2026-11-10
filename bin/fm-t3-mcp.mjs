@@ -23,7 +23,8 @@
 //     $FM_T3CODE_ORIGIN, else the `origin` in
 //     ~/.t3/userdata/server-runtime.json.
 //   fm-t3-mcp.mjs status
-//     Credential expiry, the capability gate, and whether a server on this
+//     Credential expiry, the capability gate (capabilities names the tool
+//     shape chosen for each TOOL_SHAPES capability), and whether a server on this
 //     machine (loopback or one of its own interface addresses) runs with
 //     telemetry off in its own process (telemetry: off|on|unknown; anything
 //     but off adds a stderr warning). Changes nothing.
@@ -49,8 +50,8 @@
 //       [--worktree <abs-path>] [--branch <name>] [--message-file <file>]
 //     t3_thread_launch at runtimeMode full-access. With --worktree the
 //     workspace strategy is existing_worktree; without it, root (the project's
-//     own checkout). Reads the thread and its t3_thread_configuration back and
-//     archives and refuses it unless T3 bound exactly that workspace, full
+//     own checkout). Reads the thread and its configuration (TOOL_SHAPES
+//     threadConfiguration) back and archives and refuses it unless T3 bound exactly that workspace, full
 //     access, instance, model, and every requested option value; a refused
 //     thread that does not then read back archived with no active run exits
 //     1, because it may still be live. A read-back that fails also archives
@@ -104,13 +105,13 @@
 //     different run). T3 ends the run asynchronously after the request.
 //   fm-t3-mcp.mjs requests --thread <id>
 //     The thread's pending runtime requests: questions (each user-input
-//     request id with its questions, from t3_pending_request_list/read) and
+//     request id with its questions, from T3's pending-request list and read) and
 //     approvals, the count of pending requests those tools cannot see or
 //     answer (permission approvals, answered only in T3 Code itself). The
 //     signature names the question ids, the approval count, and the activity
 //     item id of each approval T3 shows among the thread's last 100 items.
 //   fm-t3-mcp.mjs respond --thread <id> --request <request-id> --answers-file <file>
-//     t3_pending_request_respond with the JSON object in <file>, keyed by
+//     T3's pending-request respond with the JSON object in <file>, keyed by
 //     question id. It cannot approve a permission request.
 //   fm-t3-mcp.mjs watch --thread <id>... --timeout-ms <n> [--escalated <id>=<signature>]...
 //     The T3 event wait for the watcher. It first reads every thread: one
@@ -143,7 +144,8 @@
 // with FM_HOME defaulting to this repository.
 //
 // The capability gate (every verb, login included) runs tools/list and refuses
-// unless all of REQUIRED_TOOLS and t3_environment_read are present, then reads
+// unless all of REQUIRED_TOOLS, one shape of every TOOL_SHAPES capability, and
+// t3_environment_read are present, naming each one missing, then reads
 // t3_environment_read and refuses unless its environmentId equals the one
 // recorded at sign-in, so a different T3 on the same origin is never driven
 // with this credential.
@@ -184,14 +186,35 @@ export const REQUIRED_TOOLS = [
   "t3_thread_organize",
   "t3_thread_configure",
   "t3_thread_list",
-  "t3_thread_configuration",
   "t3_project_list",
   "t3_project_create",
-  "t3_pending_request_list",
-  "t3_pending_request_read",
-  "t3_pending_request_respond",
   "orchestrator_capabilities",
 ];
+// Capabilities T3 offers under more than one tool shape, chosen by which tools
+// tools/list offers, never by version number. Each list is in preference
+// order; a shape counts when every tool it names is offered and, for
+// `readable`, that tool's input schema allows the call Firstmate makes.
+//   pendingRequests: one t3_pending_request tool taking an action
+//     (list|read|respond; T3 0.1.7+), or the three t3_pending_request_* tools
+//     (T3 0.1.2), with the same arguments and replies.
+//   threadConfiguration: the read that proves a launch's binding,
+//     t3_thread_configuration (T3 0.1.2), or t3_thread_configure without
+//     modelSelection (T3 0.1.7+), which only reads and answers the same
+//     threadId, modelSelection, runtimeMode, and interactionMode.
+export const TOOL_SHAPES = {
+  pendingRequests: [
+    { shape: "t3_pending_request", tools: ["t3_pending_request"] },
+    { shape: "t3_pending_request_*", tools: ["t3_pending_request_list", "t3_pending_request_read", "t3_pending_request_respond"] },
+  ],
+  threadConfiguration: [
+    { shape: "t3_thread_configuration", tools: ["t3_thread_configuration"] },
+    { shape: "t3_thread_configure", tools: ["t3_thread_configure"], readable: (schema) => !(schema?.required ?? []).includes("modelSelection") },
+  ],
+};
+const SHAPE_NEEDS = {
+  pendingRequests: "t3_pending_request (or t3_pending_request_list, t3_pending_request_read, and t3_pending_request_respond)",
+  threadConfiguration: "t3_thread_configuration (or a t3_thread_configure that reads without modelSelection)",
+};
 const ENVIRONMENT_TOOL = "t3_environment_read";
 const EXPIRY_WARN_DAYS = 5;
 const DAY_MS = 86_400_000;
@@ -529,17 +552,34 @@ function toolError(data, content) {
   };
 }
 
-// The capability gate: required tools present, environment id unchanged.
+// The shape of each TOOL_SHAPES capability the listed tools offer, and the
+// capabilities none of their shapes satisfies.
+export function toolShapes(tools) {
+  const schemas = new Map((tools ?? []).map((t) => [t.name, t.inputSchema ?? {}]));
+  const capabilities = {};
+  const unmet = [];
+  for (const [capability, shapes] of Object.entries(TOOL_SHAPES)) {
+    const found = shapes.find((s) => s.tools.every((name) => schemas.has(name)) && (!s.readable || s.readable(schemas.get(s.tools[0]))));
+    if (found) capabilities[capability] = found.shape;
+    else unmet.push(capability);
+  }
+  return { capabilities, unmet };
+}
+
+// The capability gate: required tools and one shape of every TOOL_SHAPES
+// capability present, environment id unchanged. The chosen shapes are kept on
+// the session for the verbs that call them.
 export async function gate(session, cred) {
   const server = await session.open();
   const listed = await session.rpc("tools/list", {});
   const names = new Set((listed?.tools ?? []).map((t) => t.name));
   const version = server?.serverInfo?.version ?? null;
-  const missing = REQUIRED_TOOLS.filter((t) => !names.has(t));
+  const { capabilities, unmet } = toolShapes(listed?.tools);
+  const missing = [...REQUIRED_TOOLS.filter((t) => !names.has(t)), ...unmet.map((c) => SHAPE_NEEDS[c])];
   if (missing.length) {
     throw new Refusal(
       "capability_gate",
-      `T3 ${version ?? "(unknown version)"} at ${session.origin} lacks ${missing.join(", ")}; backend=t3code needs a T3 with the Orchestrator V2 thread tools (docs/t3code-backend.md)`,
+      `T3 ${version ?? "(unknown version)"} at ${session.origin} lacks ${missing.join("; ")}; backend=t3code needs a T3 with the Orchestrator V2 thread tools (docs/t3code-backend.md)`,
       4,
       { serverVersion: version, missing },
     );
@@ -558,7 +598,21 @@ export async function gate(session, cred) {
       { environmentId, expected: cred.environment_id },
     );
   }
-  return { serverVersion: version, environmentId, serverVersionReported: envRead?.serverVersion ?? null, tools: [...names].sort() };
+  session.capabilities = capabilities;
+  return { serverVersion: version, environmentId, serverVersionReported: envRead?.serverVersion ?? null, capabilities, tools: [...names].sort() };
+}
+
+// A pending-request action (list, read, respond) in the shape the gate chose.
+function pendingRequestCall(session, action, args) {
+  if (session.capabilities?.pendingRequests === "t3_pending_request") return session.call("t3_pending_request", { action, ...args });
+  return session.call(`t3_pending_request_${action}`, args);
+}
+
+// A thread's recorded configuration in the shape the gate chose. The
+// t3_thread_configure form sends no modelSelection, so it only reads.
+function threadConfiguration(session, threadId) {
+  if (session.capabilities?.threadConfiguration === "t3_thread_configure") return session.call("t3_thread_configure", { threadId });
+  return session.call("t3_thread_configuration", { threadId });
 }
 
 async function verifiedSession(flags) {
@@ -720,6 +774,7 @@ async function status(flags) {
     environmentId: g.environmentId,
     serverVersion: g.serverVersion,
     recordedServerVersion: cred.server_version ?? null,
+    capabilities: g.capabilities,
     telemetry,
     ...(cred.warning ? { credentialWarning: cred.warning } : {}),
   };
@@ -942,7 +997,7 @@ async function launch(flags) {
   let config;
   try {
     t = threadOf(await session.call("t3_thread_read", { threadId: out.threadId, limit: 1, runLimit: 1 }));
-    config = await session.call("t3_thread_configuration", { threadId: out.threadId });
+    config = await threadConfiguration(session, out.threadId);
   } catch (e) {
     const archived = await archiveLaunched();
     throw new Refusal(
@@ -1113,7 +1168,7 @@ function threadOf(out) {
 async function pendingOf(session, threadId, t) {
   const count = t.pendingRequestCount ?? 0;
   if (!count) return { questions: [], approvals: 0, approvalIds: [] };
-  const listed = await session.call("t3_pending_request_list", { threadId });
+  const listed = await pendingRequestCall(session, "list", { threadId });
   const ids = [...new Set(listed?.requestIds ?? [])].sort();
   const approvals = Math.max(0, count - ids.length);
   if (!approvals) return { questions: ids, approvals, approvalIds: [] };
@@ -1134,7 +1189,7 @@ async function requests(flags) {
   const pending = await pendingOf(session, threadId, t);
   const questions = [];
   for (const requestId of pending.questions) {
-    const q = await session.call("t3_pending_request_read", { threadId, requestId });
+    const q = await pendingRequestCall(session, "read", { threadId, requestId });
     questions.push({ requestId, questions: q?.questions ?? [] });
   }
   return { ok: true, threadId, pendingRequestCount: t.pendingRequestCount ?? 0, questions, approvals: pending.approvals, signature: pendingSignature(pending) };
@@ -1152,7 +1207,7 @@ async function respond(flags) {
   }
   if (!answers || typeof answers !== "object" || Array.isArray(answers)) usage("--answers-file must hold a JSON object keyed by question id");
   const { session } = await verifiedSession(flags);
-  await session.call("t3_pending_request_respond", { threadId, requestId, answers });
+  await pendingRequestCall(session, "respond", { threadId, requestId, answers });
   return { ok: true, threadId, requestId };
 }
 

@@ -80,9 +80,11 @@ Every selected option is checked against the model's catalog descriptors.
 
 ### Capability gate
 
-Every call first runs `tools/list` and refuses unless T3 offers every tool in `REQUIRED_TOOLS` in `bin/fm-t3-mcp.mjs` (the thread, project, configuration, pending-request, and catalog tools) and `t3_environment_read`.
+Every call first runs `tools/list` and refuses unless T3 offers every tool in `REQUIRED_TOOLS` in `bin/fm-t3-mcp.mjs` (the thread, project, and catalog tools), one whole shape of each capability in its `TOOL_SHAPES`, and `t3_environment_read`.
+`TOOL_SHAPES` covers the tools T3 renamed, chosen by which tools the server lists rather than by its version: pending questions through the single `t3_pending_request` tool (T3 0.1.7 and later) or the three `t3_pending_request_*` tools (T3 0.1.2), and the launch's configuration read-back through `t3_thread_configuration` (T3 0.1.2) or `t3_thread_configure` without a model selection, which only reads (T3 0.1.7 and later).
+`fm-t3-mcp.mjs status` reports the shape chosen for each.
 It then refuses unless `t3_environment_read` reports the environment id recorded at sign-in, so a different T3 server behind the same address is never driven with this credential.
-A refusal names the missing tool or both environment ids, and spawn, control, and teardown stop before their first mutation.
+A refusal names each missing tool or capability, with both of its shapes, or both environment ids, and spawn, control, and teardown stop before their first mutation.
 This gate replaces the HTTP dispatch probe and version floor of the pre-V2 transport, which T3 0.0.46 removed.
 
 ### Windows programs from WSL
@@ -141,7 +143,7 @@ A `claude` task checks the leased worktree and refuses a tracked, existing, or s
 ## Current lifecycle and safety
 
 Spawn matches the project (the home, for a secondmate) by real path against T3's live projects, creating one titled `fm-<directory name>` with `t3_project_create` when absent, and leases the worktree for a worker.
-It then launches an idle thread with `t3_thread_launch` (the workspace strategy and branch, `full-access` runtime mode, the model selection) and reads the thread and its `t3_thread_configuration` back; a thread T3 bound to another workspace, runtime mode, instance, model, or option value is archived and the spawn refuses.
+It then launches an idle thread with `t3_thread_launch` (the workspace strategy and branch, `full-access` runtime mode, the model selection) and reads the thread and its configuration back; a thread T3 bound to another workspace, runtime mode, instance, model, or option value is archived and the spawn refuses.
 It installs the harness hooks, records metadata, installs the [per-directory harness environment](#per-directory-harness-environment), and sends the encoded brief (the charter, for a secondmate) as the thread's first message with `t3_thread_send`.
 Exact call payloads are owned by `bin/fm-t3-mcp.mjs` and `bin/backends/t3code.sh`.
 
@@ -239,7 +241,7 @@ The poll loop, its wedge timer, and the `FM_BUSY_TURN_MAX_SECS` bound on a runni
 Secondmate threads stay off the splice, as on Herdr.
 In a home that also records Herdr or Rex workers, that backend keeps the push wait and the T3 workers stay on the poll loop, so adding a T3 task never slows Herdr or Rex escalation.
 
-Read and answer a worker's pending questions with [`bin/fm-t3-answer.sh`](../bin/fm-t3-answer.sh), which uses T3's `t3_pending_request_*` tools.
+Read and answer a worker's pending questions with [`bin/fm-t3-answer.sh`](../bin/fm-t3-answer.sh), which uses T3's pending-request tools in whichever shape the server offers.
 Those tools list and answer questions only; a permission approval is visible through `t3_thread_read`'s activity view as an `approval_request` item, which is how the wake identifies it, but no `/mcp` tool answers it, so it is surfaced as a count and answered only in T3 Code itself.
 
 ## Firstmate itself in T3
@@ -345,7 +347,8 @@ FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live
 FM_T3CODE_PR_TOOLS_LIVE=1 FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-pr-tools-live-e2e.test.sh
 ```
 
-The portable entry points cover the T3 adapter against a [fake `/mcp` server](../tests/t3-fake-server.mjs) and fake Treehouse, plus the shared backend, daemon, and control behavior; `tests/fm-t3-host.test.sh` also covers the relay hosting the away daemon, and `tests/fm-t3-supervision-host.test.sh` the relay running the supervision host.
+The portable entry points cover the T3 adapter against a [fake `/mcp` server](../tests/t3-fake-server.mjs) and fake Treehouse, plus the shared backend, daemon, and control behavior.
+The fake serves either tool shape: `tests/fm-t3-mcp.test.sh` runs every case in both, and `tests/fm-backend-t3code.test.sh` repeats the cases that read a launch's configuration or pending questions in the T3 0.1.2 shape; `tests/fm-t3-host.test.sh` also covers the relay hosting the away daemon, and `tests/fm-t3-supervision-host.test.sh` the relay running the supervision host.
 The live guard spends no model tokens and changes nothing on the server: it checks the gate, the project catalog, and a typed missing-thread read against the server the configured credential names, and skips cleanly without one.
 Set `FM_T3CODE_LIVE_E2E=0` to disable it or `FM_T3CODE_LIVE_E2E=1` to require it; the shared `FM_LIVE` override also applies.
 The pull-request-tool guard is opt-in because it spends model tokens: it launches one scratch Claude thread that links, lists, and unlinks an old merged PR, and archives that thread afterwards.
