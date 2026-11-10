@@ -2788,6 +2788,37 @@ The first line is the sign-in with only the read and operate scopes; the second 
 | `fm-control.sh exit` | refused before anything was sent |
 | Teardown, including the archive read-back and slot return | 23.5 s; the thread read `archived:true` with no active run, the record was removed, and the slot read `available` |
 
+### Stable 0.1.7 and 0.1.8 tool shapes
+
+T3 0.1.7 renamed two capabilities the backend depends on, and 0.1.8 kept the 0.1.7 shape.
+Verified live on 2026-11-10 against three Linux x64 servers, each through its home's own credential: `t3 0.1.7` and `t3 0.1.8` (native runtime under `~/.t3/runtime/versions/`) and `t3 0.1.2`.
+
+| Capability | T3 0.1.2 | T3 0.1.7 and 0.1.8 |
+| --- | --- | --- |
+| Pending questions | `t3_pending_request_list`, `t3_pending_request_read`, `t3_pending_request_respond` | one `t3_pending_request` with `action` `list`, `read`, or `respond`; the same arguments otherwise and the same replies (`requestIds`; `requestId` and `questions`; `sequence`) |
+| A thread's configuration | `t3_thread_configuration` | `t3_thread_configure` without `modelSelection` reads and answers the same `threadId`, `modelSelection`, `runtimeMode`, and `interactionMode`; its input schema no longer requires `modelSelection`, which 0.1.2's does |
+
+The replies and the read form of `t3_thread_configure` were read from the server bundled in each 0.1.7 and 0.1.8 runtime (the `t3_pending_request` and `t3_thread_configure` handlers), then confirmed live.
+Every other tool the helper calls keeps its arguments and reply fields across the three versions; the changes are added optional inputs (`environmentId`, `clientRequestId` on launch, `freshContext` on send, `stop` on interrupt, `untilDelegatedWorkSettled` on wait), nullable inputs becoming optional, and added reply fields (`link`, `next` and `resultRun` on wait, `executedModel` on runs, project `archivedAt` and `pinnedAt`).
+The capability gate picks each shape by `tools/list` rather than by version, and `status` names the choice:
+
+```text
+0.1.2: "capabilities":{"pendingRequests":"t3_pending_request_*","threadConfiguration":"t3_thread_configuration"}
+0.1.7: "capabilities":{"pendingRequests":"t3_pending_request","threadConfiguration":"t3_thread_configure"}
+0.1.8: "capabilities":{"pendingRequests":"t3_pending_request","threadConfiguration":"t3_thread_configure"}
+```
+
+On every server `status`, and `state`, `read`, and `requests` on an existing thread, passed, and the configuration and question-list reads answered in the chosen shape.
+On 0.1.8 one scratch Claude thread (`claudeAgent`, `claude-haiku-5-5`) in a scratch project ran the whole cycle, after which the thread was archived and the project deleted:
+
+| Step | Result |
+| --- | --- |
+| `launch` with a first message | bound and read back at full access through the configuration read |
+| Claude's question tool | `pendingRequestCount` 1; `requests` listed and read it (question id, header, two options) |
+| `watch`, then `watch --escalated` with that signature | `event:blocked`, then `event:timeout` |
+| `respond` | the run continued with the answer, and `requests` then read nothing pending |
+| `wait`, `archive`, `resume`, `send`, `interrupt`, `archive` | `completed`; `closed`; `resumed`; `started`; `cancel=confirmed`; `closed` |
+
 ### Permission approvals in the activity view
 
 The approval part of the pending-request signature was checked against the stable `t3 v0.1.0` source (tag `v0.1.0`, commit `81493efb`); no permission approval was triggered on the live lab server.
@@ -2825,10 +2856,11 @@ FM_CONFIG_OVERRIDE=<home>/config bin/fm-test-run.sh tests/fm-backend-t3code-live
 ```
 
 ```text
-ok - t3code live transport: T3 0.1.0 environment <id> passes the gate (telemetry=off)
+ok - t3code live transport: T3 0.1.8 environment <id> passes the gate (telemetry=on)
 ```
 
-That result is from the 2026-10-17 stable 0.1.0 lab run; refresh it with the command above after signing in.
+That result is from a 2026-11-10 run against a home's own `t3 0.1.8` server, whose telemetry was on; the 2026-10-17 stable 0.1.0 lab run read `telemetry=off`.
+Refresh it with the command above after signing in.
 
 ### Remote second mate on its host's T3 server
 
@@ -2906,7 +2938,8 @@ tests/fm-backend.test.sh
 tests/fm-daemon.test.sh
 ```
 
-The fake models the T3 protocol facts that hide defects when simplified: cursor paging, the read cap of 100, a wait on the exact run or else the latest by ordinal, an interrupt and an archive whose run ends asynchronously, a send committed before a reply that can be lost, and a pending-request count that includes approvals the question tools cannot see.
+The fake models the T3 protocol facts that hide defects when simplified: cursor paging, the read cap of 100, a wait on the exact run or else the latest by ordinal, an interrupt and an archive whose run ends asynchronously, a send committed before a reply that can be lost, a pending-request count that includes approvals the question tools cannot see, and both [tool shapes](#stable-017-and-018-tool-shapes).
+`tests/fm-t3-mcp.test.sh` runs every case in each shape, and `tests/fm-backend-t3code.test.sh` repeats its gate, launch, relaunch, and pending-question cases in the 0.1.2 shape.
 `tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, catalog-resolved selection, launch binding and configuration read-back with their uncertain and refused outcomes, send idempotency and the unconfirmed verdict for a lost reply, a JSON-RPC server error, T3's catch-all `orchestration_error`, or a tool error without a code (each of which also leaves a launch uncertain), capture and its 500-line bound, exact-run interrupt claims, pending questions and the per-approval signature, the bounded event wait and its re-armed slices, session close, the proven archive, and paged supervisor lookup.
 `tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment and the Codex trust warning, the Claude pull-request-tool version boundary, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort, including a secondmate home's environment removal, slot freshening before launch, isolation-rejected, dirty-slot, and uncertain-launch lease retention, tracked Codex configuration and tracked `CLAUDE.local.md` preservation, the exit and relaunch refusals, lost-reply resends through `fm-send.sh`, the push escalation of pending questions, including under a fractional poll interval, and `bin/fm-t3-answer.sh`, failed-run secondmate resume, the secondmate home shutdown barrier for pooled, standalone, and nested homes and its `lsof` refusal before any archive, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.
 `tests/fm-backend-t3code.test.sh` also covers the refusal to replace a T3 secondmate whose thread cannot be proven closed, and `tests/fm-secondmate-liveness.test.sh` pins the unchanged best-effort close on tmux.
