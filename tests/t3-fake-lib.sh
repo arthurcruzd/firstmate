@@ -37,13 +37,16 @@ t3_fake_stop() {
 
 # t3_fake_case <dir> [world-json]: make <dir> the server's current case, with
 # a fresh world (default `{}`) and an empty request log. Sets T3_FAKE_WORLD
-# and T3_FAKE_LOG. A set T3_FAKE_TOOL_SHAPE becomes the world's toolShape
-# unless the world names one.
+# and T3_FAKE_LOG. A set T3_FAKE_TOOL_SHAPE becomes the world's toolShape, and
+# a set T3_FAKE_CATALOG_SHAPE its catalogShape, unless the world names one.
 t3_fake_case() {
   local world=${2:-}
   [ -n "$world" ] || world='{}'
   if [ -n "${T3_FAKE_TOOL_SHAPE:-}" ]; then
     world=$(node -e 'const w = JSON.parse(process.argv[1]); w.toolShape ??= process.argv[2]; process.stdout.write(JSON.stringify(w))' "$world" "$T3_FAKE_TOOL_SHAPE")
+  fi
+  if [ -n "${T3_FAKE_CATALOG_SHAPE:-}" ]; then
+    world=$(node -e 'const w = JSON.parse(process.argv[1]); w.catalogShape ??= process.argv[2]; process.stdout.write(JSON.stringify(w))' "$world" "$T3_FAKE_CATALOG_SHAPE")
   fi
   mkdir -p "$1"
   T3_FAKE_WORLD="$1/world.json"

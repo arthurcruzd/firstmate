@@ -40,12 +40,15 @@
 //     The model selection a launch sends, resolved against T3's own catalog
 //     (orchestrator_capabilities): the instance must exist, be usable, and run
 //     the harness's driver (claude: claudeAgent, codex: codex, grok: grok,
-//     muse: muse); the model must
-//     be one that instance lists; model default takes the project's default
-//     selection, which must name the same instance. A non-default effort
-//     replaces only the driver's reasoning option (claude: effort, codex, grok,
-//     and muse: reasoningEffort) and keeps every other default option; every option is
-//     then checked against that model's descriptors. Exit 4 refuses.
+//     muse: muse); the model must be one that instance lists, in the short
+//     listing or through T3's own catalog search when that listing omits
+//     some; model default takes the project's default selection, which must
+//     name the same instance. A non-default effort replaces only the driver's
+//     reasoning option (claude: effort, codex, grok, and muse:
+//     reasoningEffort) and keeps every other default option; every option is
+//     then checked against the values that model's catalog entry allows
+//     (optionValues reads both reply shapes). Exit 4 refuses, naming the
+//     allowed values.
 //   fm-t3-mcp.mjs launch --project <id> --title <title> --model-selection <json>
 //       [--worktree <abs-path>] [--branch <name>] [--message-file <file>]
 //     t3_thread_launch at runtimeMode full-access. With --worktree the
@@ -884,14 +887,38 @@ function modelSelection(flags) {
   return sel;
 }
 
-// An option selection is valid when the model's catalog describes its id and,
-// for a select, lists its value; a boolean option takes a boolean.
+// The values a model's catalog option allows, read by reply shape, never by
+// version: orchestrator_capabilities on T3 0.1.2, 0.1.7, and 0.1.8 lists them
+// as `values` (strings, or [false, true] for a boolean); T3's own provider
+// descriptor shape, `type` with a select's `options` [{id}], is read too. An
+// option in neither shape reads null, which refuses rather than allowing
+// nothing.
+export function optionValues(descriptor) {
+  if (Array.isArray(descriptor?.values)) return descriptor.values;
+  if (descriptor?.type === "boolean") return [false, true];
+  if (Array.isArray(descriptor?.options)) return descriptor.options.map((c) => c?.id);
+  return null;
+}
+
+// An option selection is valid when the model's catalog describes its id and
+// lists its value.
 function optionProblem(model, option) {
   const descriptor = (model.options ?? []).find((d) => d.id === option.id);
   if (!descriptor) return `option '${option.id}' is not one model ${model.id} offers`;
-  if (descriptor.type === "boolean") return typeof option.value === "boolean" ? null : `option '${option.id}' takes true or false`;
-  const values = (descriptor.options ?? []).map((c) => c.id);
+  const values = optionValues(descriptor);
+  if (!values?.length) return `T3's catalog lists no values it accepts for option '${option.id}' of model ${model.id} (descriptor ${JSON.stringify(descriptor)})`;
   return values.includes(option.value) ? null : `option '${option.id}' value '${option.value}' is not one of ${values.join(", ")} for model ${model.id}`;
+}
+
+// The catalog entry for <slug> on one provider instance. The default listing
+// is a short list that can leave models out (omittedModels counts them), so a
+// slug it does not list is looked up again with T3's own search.
+async function catalogModel(session, provider, slug) {
+  const listed = (provider.models ?? []).find((m) => m.id === slug);
+  if (listed || !provider.omittedModels) return listed ?? null;
+  const searched = await session.call("orchestrator_capabilities", { search: slug });
+  const again = (searched?.providers ?? []).find((p) => p.providerInstanceId === provider.providerInstanceId);
+  return (again?.models ?? []).find((m) => m.id === slug) ?? null;
 }
 
 async function resolveSelection(flags) {
@@ -921,7 +948,7 @@ async function resolveSelection(flags) {
     }
     base = { instanceId, model: def.model, ...(def.options !== undefined ? { options: def.options } : {}) };
   }
-  const model = (provider.models ?? []).find((m) => m.id === base.model);
+  const model = await catalogModel(session, provider, base.model);
   if (!model) throw new Refusal("model_unknown", `T3 instance '${instanceId}' does not list model '${base.model}'; pass --model with a slug from its catalog`);
   let options = base.options;
   if (effort !== "default") {

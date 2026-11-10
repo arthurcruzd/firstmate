@@ -142,6 +142,18 @@ first_reported_line() {  # <text>
   printf '%s\n' "$1" | sed -n '/./{s/^error: //;s/[[:space:]]\{1,\}/ /g;p;q;}'
 }
 
+# The reason a failed command reports: the first refusal line in its combined
+# output (an "error: " line, or a T3 helper's "fm-t3-mcp: " refusal), else its
+# first line that is not a "warning: ". The exit status alone decides that the
+# command failed; an advisory warning, such as T3's telemetry notice, can lead
+# the output but never names the failure.
+failure_line() {  # <text>
+  local line
+  line=$(printf '%s\n' "$1" | grep -m 1 -E '^(error|fm-t3-mcp): ' || true)
+  [ -n "$line" ] || line=$(printf '%s\n' "$1" | grep -v -E '^warning: ' || true)
+  first_reported_line "$line"
+}
+
 # Send the ordinary re-read steer to a mate this pass will not restart, and say
 # plainly which it was. A nudge is a partial reload and is never reported as more.
 fall_back_to_nudge() {  # <id> <reason>
@@ -153,7 +165,7 @@ fall_back_to_nudge() {  # <id> <reason>
   else
     unreached_count=$((unreached_count + 1))
     printf 'unreached: %s: %s; the re-read message could not be delivered either: %s\n' \
-      "$id" "$reason" "$(first_reported_line "$out")"
+      "$id" "$reason" "$(failure_line "$out")"
   fi
 }
 
@@ -186,7 +198,7 @@ restart_mate() {  # <array-index>
     return
   fi
 
-  restart_reason=$(first_reported_line "$restart_out")
+  restart_reason=$(failure_line "$restart_out")
   [ -n "$restart_reason" ] || restart_reason="the restart failed without a reported reason"
   report_unreached "$id" "the restart outcome is unknown: $restart_reason"
 }
@@ -315,7 +327,7 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
     FM_PENDING_REPLY_EXISTING_CORR="$corr" \
     "$SCRIPT_DIR/fm-send.sh" "$id" "$FM_SECONDMATE_PERSIST_REQUEST" 2>&1); then
     fm_pending_reply_discard_undelivered "$STATE" "$corr" >/dev/null 2>&1 || true
-    REASON[i]="the request to write down its open work could not be delivered: $(first_reported_line "$send_out")"
+    REASON[i]="the request to write down its open work could not be delivered: $(failure_line "$send_out")"
     i=$((i + 1))
     continue
   fi

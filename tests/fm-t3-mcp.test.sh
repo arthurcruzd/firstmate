@@ -714,6 +714,74 @@ test_resolve_selection_uses_t3_catalog() {
   pass "fm-t3-mcp resolve-selection: driver, model, and options come from T3's catalog; an effort override keeps other options"
 }
 
+# The catalog shape the fake actually served, read straight from
+# orchestrator_capabilities, so a shape case cannot pass vacuously.
+served_effort_option() {  # -> the claude-haiku-5-5 effort option as JSON
+  # shellcheck disable=SC2016
+  FM_T3_HELPER="$HELPER" FM_T3_CRED="$CRED" node --input-type=module -e '
+    const m = await import(process.env.FM_T3_HELPER);
+    const cred = m.readCredential(process.env.FM_T3_CRED);
+    const s = new m.McpSession(cred.origin, cred.access_token);
+    await s.open();
+    const caps = await s.call("orchestrator_capabilities", {});
+    const model = caps.providers.find((p) => p.providerInstanceId === "claudeAgent").models.find((x) => x.id === "claude-haiku-5-5");
+    process.stdout.write(JSON.stringify(model.options.find((o) => o.id === "effort")));
+    await s.close();'
+}
+
+test_nondefault_effort_launches_in_each_catalog_shape() {
+  local cshape project sel
+  for cshape in values descriptor; do
+    fresh_case "effort-launch-$cshape" "{\"catalogShape\":\"$cshape\"}"
+    case "$cshape" in
+      values) assert_equals '{"id":"effort","values":["low","medium","high","xhigh","max"]}' "$(served_effort_option)" "the fake serves T3 0.1.2-0.1.8's values shape" ;;
+      descriptor) assert_contains "$(served_effort_option)" '"type":"select","options":[{"id":"low"' "the fake serves the descriptor shape" ;;
+    esac
+    mcp project-ensure --root "$TMP_ROOT/proj"
+    project=$(field "$OUT" projectId)
+    mcp resolve-selection --harness claude --instance claudeAgent --model claude-haiku-5-5 --effort high --project "$project"
+    expect_code 0 "$RC" "a non-default effort the catalog lists resolves in the $cshape shape: $ERR"
+    sel=$(field "$OUT" selection)
+    assert_equals '{"instanceId":"claudeAgent","model":"claude-haiku-5-5","options":[{"id":"effort","value":"high"}]}' "$sel" "the effort override is the selection's effort option ($cshape)"
+    : > "$T3_FAKE_LOG"
+    mcp launch --project "$project" --title "effort-$cshape" --model-selection "$sel" --worktree "$WT"
+    expect_code 0 "$RC" "a launch with the resolved non-default effort reads back bound ($cshape): $ERR"
+    assert_contains "$(t3_fake_calls t3_thread_launch)" '"modelSelection":{"instanceId":"claudeAgent","model":"claude-haiku-5-5","options":[{"id":"effort","value":"high"}]}' \
+      "the launch sends the resolved effort ($cshape)"
+    mcp resolve-selection --harness claude --instance claudeAgent --model claude-haiku-5-5 --effort ultra --project "$project"
+    expect_code 4 "$RC" "an effort the catalog lacks is refused ($cshape)"
+    assert_equals effort_unsupported "$(field "$OUT" error.code)" "the refusal is effort_unsupported ($cshape)"
+    assert_contains "$ERR" "is not one of low, medium, high, xhigh, max for model claude-haiku-5-5" "the refusal names the catalog's values ($cshape)"
+    FM_T3_ID="$project" t3_fake_set 'w.projects.find((p) => p.id === process.env.FM_T3_ID).defaultModelSelection = { instanceId: "claudeAgent", model: "claude-haiku-5-5", options: [{ id: "effort", value: "low" }, { id: "fastMode", value: true }] }'
+    mcp resolve-selection --harness claude --instance claudeAgent --model default --effort xhigh --project "$project"
+    expect_code 0 "$RC" "a default model's boolean option validates in the $cshape shape: $ERR"
+    assert_equals '{"instanceId":"claudeAgent","model":"claude-haiku-5-5","options":[{"id":"effort","value":"xhigh"},{"id":"fastMode","value":true}]}' \
+      "$(field "$OUT" selection)" "the effort override keeps the boolean option ($cshape)"
+    FM_T3_ID="$project" t3_fake_set 'w.projects.find((p) => p.id === process.env.FM_T3_ID).defaultModelSelection.options[1].value = "yes"'
+    mcp resolve-selection --harness claude --instance claudeAgent --model default --effort default --project "$project"
+    expect_code 4 "$RC" "a boolean option holding a string is refused ($cshape)"
+    assert_contains "$ERR" "option 'fastMode' value 'yes' is not one of false, true" "the boolean refusal names its values ($cshape)"
+  done
+  fresh_case effort-launch-unknown-shape
+  t3_fake_set 'w.providers = [{ providerInstanceId: "claudeAgent", driverKind: "claudeAgent", constraints: [], models: [{ id: "claude-haiku-5-5", options: [{ id: "effort", choices: ["low", "high"] }] }] }]'
+  mcp resolve-selection --harness claude --instance claudeAgent --model claude-haiku-5-5 --effort high --project p
+  expect_code 4 "$RC" "an option in an unrecognized catalog shape is refused, never allowed"
+  assert_contains "$ERR" "lists no values it accepts for option 'effort'" "the refusal says the catalog's values could not be read"
+  pass "fm-t3-mcp resolve-selection: a non-default effort resolves and launches in T3's values catalog shape and the descriptor shape; refusals name the allowed values"
+}
+
+test_resolve_selection_searches_an_omitted_model() {
+  fresh_case catalog-search '{"catalogLimit":1}'
+  mcp resolve-selection --harness claude --instance claudeAgent --model claude-haiku-5-5 --effort medium --project p
+  expect_code 0 "$RC" "a model the short list omits is found through T3's search: $ERR"
+  assert_equals '{"instanceId":"claudeAgent","model":"claude-haiku-5-5","options":[{"id":"effort","value":"medium"}]}' "$(field "$OUT" selection)" "the searched model resolves with its effort"
+  assert_contains "$(t3_fake_calls orchestrator_capabilities)" '{"search":"claude-haiku-5-5"}' "the lookup searches T3's catalog for the slug"
+  mcp resolve-selection --harness claude --instance claudeAgent --model claude-nowhere --effort default --project p
+  expect_code 4 "$RC" "a model T3's search does not find either is refused"
+  assert_equals model_unknown "$(field "$OUT" error.code)" "the refusal names the unknown model"
+  pass "fm-t3-mcp resolve-selection: a model left out of T3's short catalog list is looked up with T3's search"
+}
+
 test_launch_reads_back_full_configuration() {
   local project sel='{"instanceId":"codex","model":"gpt-5.6-sol","options":[{"id":"reasoningEffort","value":"high"},{"id":"serviceTier","value":"priority"}]}'
   fresh_case launch-config
@@ -1009,6 +1077,8 @@ ALL_TESTS=(
   test_send_lost_reply_is_unconfirmed_and_retry_is_one_delivery
   test_thread_for_root_pages_and_forks
   test_resolve_selection_uses_t3_catalog
+  test_nondefault_effort_launches_in_each_catalog_shape
+  test_resolve_selection_searches_an_omitted_model
   test_launch_reads_back_full_configuration
   test_requests_and_respond
   test_watch_is_event_driven_and_bounded

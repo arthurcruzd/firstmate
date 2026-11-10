@@ -26,7 +26,20 @@
 //     modelSelection. `split` is T3 0.1.2: t3_pending_request_list, _read,
 //     and _respond, t3_thread_configuration, and a t3_thread_configure whose
 //     input schema requires modelSelection. A call to a tool the shape does
-//     not offer fails as unknown_tool.
+//     not offer fails as unknown_tool;
+//   - two orchestrator_capabilities catalog shapes, chosen by the world's
+//     catalogShape (tests/t3-fake-lib.sh sets it from $T3_FAKE_CATALOG_SHAPE),
+//     else values. `values` is what
+//     T3 0.1.2, 0.1.7, and 0.1.8 serve: each model option is {id, values,
+//     default?}, a boolean's values [false, true], with no type or labels.
+//     `descriptor` serves T3's provider option descriptors unconverted
+//     ({id, label, type: select|boolean, options: [{id, label}]}). Providers
+//     are defined as descriptors and converted the way T3's own
+//     capabilityModelOption does; a world option that already carries values
+//     is served as given. catalogLimit lists at most that many models per
+//     provider and counts the rest in omittedModels, and a search argument
+//     lists only the models whose id contains every search word, as T3's
+//     short list and search do.
 //
 // Usage: t3-fake-server.mjs --case-file <file> --port-file <file> [--parent-pid <pid>]
 // <case-file> holds the path of the current case directory. Every request
@@ -57,7 +70,8 @@
 //   code, as T3's catch-all orchestration_error after a commit; a null code
 //   answers with text content only, as a tool handler that throws), waitCapMs (one
 //   t3_thread_wait times out after at most this long), probePath (each log
-//   line records whether it exists), providers (the orchestrator_capabilities
+//   line records whether it exists), catalogShape (values|descriptor),
+//   catalogLimit, providers (the orchestrator_capabilities
 //   catalog; default FAKE_PROVIDERS), projects ([{id, title, workspaceRoot,
 //   defaultModelSelection, deletedAt}]), threads ({id: detail plus items,
 //   runs, and runtimeRequests [{id, kind: user_input|approval, status,
@@ -123,6 +137,29 @@ const FAKE_PROVIDERS = [
     models: ["muse-spark-1.3", "muse-model"].map((id) => ({ id, label: id, options: [select("reasoningEffort", ["low", "medium", "high", "xhigh", "max"])] })),
   },
 ];
+
+const catalogShapeOf = (w) => w.catalogShape ?? "values";
+// T3's capabilityModelOption: a descriptor's ids become its values.
+const valuesOption = (d) => {
+  if (Array.isArray(d.values)) return d;
+  const def = d.type === "boolean" ? undefined : d.options?.find((c) => c.isDefault)?.id;
+  return { id: d.id, values: d.type === "boolean" ? [false, true] : (d.options ?? []).map((c) => c.id), ...(def === undefined ? {} : { default: def }) };
+};
+const catalog = (w, search) => {
+  const words = String(search ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  return (w.providers ?? FAKE_PROVIDERS).map((p) => {
+    let models = p.models ?? [];
+    if (words.length) models = models.filter((m) => words.every((word) => m.id.toLowerCase().includes(word)));
+    const limit = Number.isInteger(w.catalogLimit) ? w.catalogLimit : models.length;
+    const listed = models.slice(0, limit);
+    const omitted = models.length - listed.length;
+    return {
+      ...p,
+      models: listed.map((m) => (m.options && catalogShapeOf(w) === "values" ? { ...m, options: m.options.map(valuesOption) } : m)),
+      ...(omitted ? { omittedModels: omitted } : {}),
+    };
+  });
+};
 
 const caseDir = () => readFileSync(args["case-file"], "utf8").trim();
 const worldFile = () => path.join(caseDir(), "world.json");
@@ -250,7 +287,7 @@ async function toolImpl(w, name, a) {
     case "t3_environment_read":
       return [ok({ environmentId: w.environmentId ?? "env-fake-1", serverVersion: w.serverVersion ?? "0.0.46-nightly.fake" }), false];
     case "orchestrator_capabilities":
-      return [ok({ parentThreadId: null, runtimeMode: "full-access", interactionMode: "default", providers: w.providers ?? FAKE_PROVIDERS }), false];
+      return [ok({ parentThreadId: null, runtimeMode: "full-access", interactionMode: "default", providers: catalog(w, a?.search) }), false];
     case "t3_project_list":
       return [ok({ projects, nextCursor: null }), false];
     case "t3_project_create": {

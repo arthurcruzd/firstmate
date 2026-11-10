@@ -1436,7 +1436,7 @@ test_control_relaunch_resumes_the_same_thread() {
   local id=t3relaunchz1 out rc send configure
   t3_relaunch_fixture control-relaunch "$id" claudeAgent
   [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$RELAUNCH_THREAD")" = dead ] || fail "the fixture thread must be exited"
-  out=$(t3_relaunch_control "$id" relaunch --model claude-haiku-5-5 --note "pick up after the restart"); rc=$?
+  out=$(t3_relaunch_control "$id" relaunch --model claude-haiku-5-5 --effort xhigh --note "pick up after the restart"); rc=$?
   expect_code 0 "$rc" "relaunch on a t3code task should resume its thread"$'\n'"$out"
   assert_contains "$out" "relaunched $id harness=claude" "relaunch must report the replacement"
   assert_contains "$out" "endpoint=$RELAUNCH_THREAD" "relaunch must keep the same thread"
@@ -1445,6 +1445,8 @@ test_control_relaunch_resumes_the_same_thread() {
   [ "$(t3_request "$(t3_log_line_of 'r.tool === "t3_thread_organize"')" 'r.arguments.action')" = unarchive ] || fail "relaunch must unarchive the thread"
   configure=$(t3_log_line_of '(r.op ?? r.tool) === "t3_thread_configure"')
   [ "$(t3_request "$configure" 'r.arguments.modelSelection.model')" = claude-haiku-5-5 ] || fail "relaunch must apply the chosen model"
+  [ "$(t3_request "$configure" 'r.arguments.modelSelection.options')" = '[{"id":"effort","value":"xhigh"}]' ] \
+    || fail "relaunch must apply the chosen non-default effort, got '$(t3_request "$configure" 'r.arguments.modelSelection.options')'"
   send=$(t3_log_line_of 'r.tool === "t3_thread_send"')
   [ "$(t3_request "$send" 'r.arguments.threadId')" = "$RELAUNCH_THREAD" ] || fail "the relaunch brief must go to the same thread"
   assert_contains "$(t3_request "$send" 'r.arguments.message')" "pick up after the restart" "the relaunch brief must carry the progress note"
@@ -1479,6 +1481,11 @@ if (t.activeRunId) { t.runs[0].status = "completed"; t.runs[0].completedAt = new
   rm -f "$CONFIG/claude-permission-mode"
   [ "$rc" -ne 0 ] || fail "a relaunch under a permission mode T3 cannot honor must be refused"$'\n'"$out"
   assert_contains "$out" "cannot honor config/claude-permission-mode=auto" "the refusal must name the permission rule"
+  t3_world_set 'w.providers = [{ providerInstanceId: "claudeAgent", driverKind: "claudeAgent", constraints: [], models: [{ id: "claude-sonnet-5", options: [{ id: "effort", values: ["low", "high"], default: "low" }] }] }]'
+  out=$(t3_relaunch_control "$id" relaunch --effort max --note "same runtime"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch onto an effort T3's catalog does not list must be refused"$'\n'"$out"
+  assert_contains "$out" "cannot pass effort 'max' to harness 'claude': option 'effort' value 'max' is not one of low, high" \
+    "the effort refusal must name the values T3 allows"
   [ -z "$(t3_dispatch_types)" ] || fail "a refused relaunch must not stop or touch the thread, got '$(t3_dispatch_types)'"
   [ "$(t3_run 'fm_backend_agent_state t3code "$1"' "$thread")" = alive ] || fail "the running worker must stay alive after a refused relaunch"
   rm -rf "/tmp/fm-$id"

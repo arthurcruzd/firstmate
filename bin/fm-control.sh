@@ -1117,6 +1117,16 @@ resolve_relaunch_profile() {
     fi
     fm_backend_source t3code || return 1
     fm_backend_t3code_admit "$TARGET_HARNESS" "$KIND" "$permission_mode" "$launch_env" "$worker_account" || return 1
+    # And the model selection the replacement launches with, resolved against
+    # T3's catalog the way the launch owner resolves it, so a model or effort
+    # T3 refuses stops here with the old agent still running. A record without
+    # its T3 project can resolve only an explicit model; the launch owner
+    # resolves a default one after it registers the project.
+    local t3_project
+    t3_project=$(fm_meta_get "$META" t3_project_id)
+    if [ -n "$t3_project" ] || [ "$TARGET_MODEL" != default ]; then
+      fm_backend_t3code_model_selection "$TARGET_HARNESS" "$TARGET_MODEL" "$TARGET_EFFORT" "$t3_project" >/dev/null || return 1
+    fi
   fi
   # Likewise polytoken's launch profile and wiring refusals
   # (bin/fm-polytoken-lib.sh owns them). The launch owner retires the prior
