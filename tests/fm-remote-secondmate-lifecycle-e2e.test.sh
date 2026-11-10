@@ -1494,12 +1494,12 @@ assert_grep 'not ready' "$TMP_ROOT/spawn-rex-old-doctor.out" \
 cmp -s "$TMP_ROOT/parent-ios-before-old-rex.meta" "$PARENT/state/ios.meta" \
   || fail "the refused rex spawn rewrote the recorded route"
 
-# An explicit backend outside {herdr, rex} is refused before any remote call.
+# An explicit backend outside {herdr, rex, t3code} is refused before any remote call.
 ssh_before=$(cat "$SSH_COUNT")
 if remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate --backend tmux >"$TMP_ROOT/spawn-tmux-backend.out" 2>&1; then
   fail "an unknown remote backend was accepted"
 fi
-assert_grep 'runs only on the herdr or rex backend' "$TMP_ROOT/spawn-tmux-backend.out" \
+assert_grep 'runs only on the herdr, rex, or t3code backend' "$TMP_ROOT/spawn-tmux-backend.out" \
   "an unknown remote backend did not fail with the backend refusal"
 [ "$(cat "$SSH_COUNT")" = "$ssh_before" ] || fail "an unknown remote backend still made a remote call"
 
