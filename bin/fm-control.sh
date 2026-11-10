@@ -97,7 +97,9 @@
 #              The same pre-stop refusal applies to this home's worker tool
 #              exclusions (bin/fm-exclude-tools-lib.sh): a malformed list, or a
 #              replacement runtime that cannot hide the listed tools.
-#              On t3code the endpoint is the thread: the launch owner unarchives
+#              On t3code the replacement's model selection is resolved against
+#              T3's catalog before the old agent stops, so a model or effort T3
+#              refuses leaves it running. The endpoint is the thread: the launch owner unarchives
 #              it, applies the chosen model, and sends the relaunch brief as its
 #              next turn, so the replacement continues the thread's transcript;
 #              a harness on another T3 provider instance gets a new thread in

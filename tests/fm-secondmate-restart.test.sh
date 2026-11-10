@@ -544,7 +544,7 @@ test_remote_mate_restarts_over_the_transport_hop() {
   pass "T6 a remote mate restarts through the host-local control plane over the fm-on hop"
 }
 
-# --- T6c: a failed remote relaunch is labeled by its refusal, not a warning --
+# --- T6e: a failed remote relaunch is labeled by its refusal, not a warning --
 test_remote_restart_failure_names_the_refusal_not_a_warning() {
   local dir out rc
   dir=$(new_case warned-refusal)
@@ -558,7 +558,7 @@ test_remote_restart_failure_names_the_refusal_not_a_warning() {
   assert_contains "$out" "unreached: sm2: the restart outcome is unknown: fm-t3-mcp: backend=t3code cannot pass effort 'high'" \
     "the report must name the refusal that failed the relaunch"
   assert_not_contains "$out" "telemetry" "an advisory warning must never label a failed restart"
-  pass "T6c a failed remote relaunch reports its refusal, never the warning that preceded it"
+  pass "T6e a failed remote relaunch reports its refusal, never the warning that preceded it"
 }
 
 # --- T6b: a per-mate override decides which runtime that mate lands on -------

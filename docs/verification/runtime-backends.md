@@ -2819,6 +2819,44 @@ On 0.1.8 one scratch Claude thread (`claudeAgent`, `claude-haiku-5-5`) in a scra
 | `respond` | the run continued with the answer, and `requests` then read nothing pending |
 | `wait`, `archive`, `resume`, `send`, `interrupt`, `archive` | `completed`; `closed`; `resumed`; `started`; `cancel=confirmed`; `closed` |
 
+### Catalog option values and launch paths on 0.1.2, 0.1.7, and 0.1.8
+
+`orchestrator_capabilities` lists each model option as `{id, values, default}` on all three versions, not as T3's provider descriptor (`type` with a select's `options`).
+T3's `capabilityModelOption` makes that conversion in the server bundled in the 0.1.7 runtime, and the 0.1.2, 0.1.7, and 0.1.8 output schemas all declare `values`.
+Verified live on 2026-11-10 against `t3 0.1.2`, `t3 0.1.7`, and `t3 0.1.8` on Linux x64, with Claude Code 2.1.322, codex-cli 0.167.0, and node v24.22.1 and v26.9.0:
+
+```text
+{"id":"claude-opus-5-5","label":"Claude Opus 5.5","options":[{"id":"effort","values":["low","medium","high","xhigh","max","ultracode","ultrathink"],"default":"medium"},{"id":"fastMode","values":[false,true]}]}
+```
+
+`resolve-selection` reads either form (`optionValues` in `bin/fm-t3-mcp.mjs`), refuses an effort the model does not list by naming the values it does, and looks a model the short list omits up again with T3's `search`:
+
+```sh
+FM_HOME=<home> node bin/fm-t3-mcp.mjs resolve-selection --harness claude --instance claudeAgent --model claude-opus-5-5 --effort high --project <id>
+```
+
+```text
+{"ok":true,"driverKind":"claudeAgent","selection":{"instanceId":"claudeAgent","model":"claude-opus-5-5","options":[{"id":"effort","value":"high"}]}}
+{"ok":false,"error":{"code":"effort_unsupported","message":"backend=t3code cannot pass effort 'max' to harness 'grok': option 'reasoningEffort' value 'max' is not one of low, medium, high, xhigh for model grok-4.7-build-fast"}}
+```
+
+| Path | 0.1.8 | 0.1.7 | 0.1.2 |
+| --- | --- | --- | --- |
+| `resolve-selection`, default and every Firstmate effort | claude, codex, and grok (muse disabled on that server) | claude, codex, grok, and muse | claude (the other instances unavailable on that server) |
+| A model the short list omits (`claude-sonnet-5`) | found through `search` | found through `search` | found through `search` |
+| Launch with a non-default effort, read back, archive | through `fm-spawn.sh` below | `launch` at `claude-haiku-5-5` effort `low`, `wait`, `archive` | not run |
+| Ship spawn, steer, `fm-control.sh relaunch` at another effort, teardown | `claude-haiku-5-5` at `low`, then `medium` on the same thread | not run | not run |
+| Scout spawn, steer, relaunch onto another provider instance, teardown | `gpt-6-luna` at `low`, then `claude-haiku-5-5` at `high` on a new thread in the same worktree | not run | not run |
+| Relaunch onto an effort the catalog lacks | refused before the stop, the thread left unarchived | not run | not run |
+| Local second mate spawn, steer, `fm-secondmate-restart.sh`, teardown | persist answered, then `restarted` on the same thread at `medium` | not run | not run |
+| Remote second mate, host half (`fm-remote-secondmate-control.sh` launch, relay delivery, relaunch, retire) | relay installed and delivered a wake the mate drained; relaunched at `medium`; retired with the relay removed | not run | not run |
+| `fm-remote-doctor.sh --endpoint t3code` | `t3-credential` and `relay-manager` ok | not run | not run |
+
+Every thread was bound at full access with the requested instance, model, and effort, read back through the [configuration read](#stable-017-and-018-tool-shapes); T3 started the 0.1.8 Claude provider with `--effort=low --model=claude-haiku-5-5`.
+The remote host half ran on the host itself, without `fm-on.sh`, because the remote-job worker that transport uses belongs to the account's own code root.
+`fm-secondmate-restart.sh` names a failed relaunch by its first refusal line, never a leading warning such as the telemetry notice, which `tests/fm-secondmate-restart.test.sh` pins over the remote hop.
+The portable cases are in `tests/fm-t3-mcp.test.sh`: a non-default effort resolves and launches against the fake serving each catalog form, under both [tool shapes](#stable-017-and-018-tool-shapes).
+
 ### Permission approvals in the activity view
 
 The approval part of the pending-request signature was checked against the stable `t3 v0.1.0` source (tag `v0.1.0`, commit `81493efb`); no permission approval was triggered on the live lab server.
@@ -2938,7 +2976,7 @@ tests/fm-backend.test.sh
 tests/fm-daemon.test.sh
 ```
 
-The fake models the T3 protocol facts that hide defects when simplified: cursor paging, the read cap of 100, a wait on the exact run or else the latest by ordinal, an interrupt and an archive whose run ends asynchronously, a send committed before a reply that can be lost, a pending-request count that includes approvals the question tools cannot see, and both [tool shapes](#stable-017-and-018-tool-shapes).
+The fake models the T3 protocol facts that hide defects when simplified: cursor paging, the read cap of 100, a wait on the exact run or else the latest by ordinal, an interrupt and an archive whose run ends asynchronously, a send committed before a reply that can be lost, a pending-request count that includes approvals the question tools cannot see, both [tool shapes](#stable-017-and-018-tool-shapes), and both [catalog option forms](#catalog-option-values-and-launch-paths-on-012-017-and-018).
 `tests/fm-t3-mcp.test.sh` runs every case in each shape, and `tests/fm-backend-t3code.test.sh` repeats its gate, launch, relaunch, and pending-question cases in the 0.1.2 shape.
 `tests/fm-t3-mcp.test.sh` drives the helper against `tests/t3-fake-server.mjs`: the PKCE sign-in, origin defaults, every gate and credential refusal, real-path project matching, catalog-resolved selection, launch binding and configuration read-back with their uncertain and refused outcomes, send idempotency and the unconfirmed verdict for a lost reply, a JSON-RPC server error, T3's catch-all `orchestration_error`, or a tool error without a code (each of which also leaves a launch uncertain), capture and its 500-line bound, exact-run interrupt claims, pending questions and the per-approval signature, the bounded event wait and its re-armed slices, session close, the proven archive, and paged supervisor lookup.
 `tests/fm-backend-t3code.test.sh` drives the adapter, spawn, control, watcher, away daemon, and teardown against the same fake: model selection, the status table, kill ordering, per-directory environment and the Codex trust warning, the Claude pull-request-tool version boundary, worker and secondmate spawn, the secondmate credential link, launch-setting refusals, abort, including a secondmate home's environment removal, slot freshening before launch, isolation-rejected, dirty-slot, and uncertain-launch lease retention, tracked Codex configuration and tracked `CLAUDE.local.md` preservation, the exit and relaunch refusals, lost-reply resends through `fm-send.sh`, the push escalation of pending questions, including under a fractional poll interval, and `bin/fm-t3-answer.sh`, failed-run secondmate resume, the secondmate home shutdown barrier for pooled, standalone, and nested homes and its `lsof` refusal before any archive, the wedge and dead-agent paths, and stale-alert retention and re-arming under unknown busy state.

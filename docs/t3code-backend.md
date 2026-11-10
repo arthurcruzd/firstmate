@@ -76,7 +76,8 @@ A task's `--model` must be a model that instance lists in T3's catalog.
 `--model default` uses the T3 project's default model only when its instance matches `config/t3code-instances`; otherwise it refuses and asks for an explicit `--model`.
 `--effort` rides as the driver's reasoning option, `effort` for claude and `reasoningEffort` for codex, grok, and muse, and must be one of the values the catalog lists for that model.
 An effort replaces only that option: `--model default` keeps every other project default option, such as Codex's service tier or Claude's fast mode, while an explicit model sends only the effort.
-Every selected option is checked against the model's catalog descriptors.
+Every selected option is checked against the values T3's catalog lists for that model, which `orchestrator_capabilities` serves as each option's `values` on T3 0.1.2 through 0.1.8; T3's provider descriptor form (`type` with a select's `options`) is read too, and an option in neither form refuses.
+A model the catalog's short list leaves out is looked up again with T3's own search.
 
 ### Capability gate
 

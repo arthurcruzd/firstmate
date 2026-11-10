@@ -39,7 +39,8 @@
 # A mate whose persist answer did not arrive or whose runtime cannot prove a
 # restart gets the ordinary re-read nudge and is reported as a nudge, never as a
 # clean reload. Once a relaunch is attempted, any failed or ambiguous result is
-# reported as unknown rather than attributing it to either incarnation.
+# reported as unknown rather than attributing it to either incarnation, with the
+# first refusal line the relaunch printed as its reason, never a warning.
 #
 # Placement changes the transport and nothing else. A local mate is restarted
 # with bin/fm-control.sh <id> relaunch, which republishes this home's own
@@ -72,7 +73,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 usage() {
-  sed -n '2,65{s/^# \{0,1\}//;p;}' "$0"
+  sed -n '2,/^set -u$/{/^set -u$/d;s/^# \{0,1\}//;p;}' "$0"
 }
 
 case "${1:-}" in

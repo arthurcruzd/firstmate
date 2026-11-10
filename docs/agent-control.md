@@ -202,6 +202,7 @@ The worktree and the task's records are unaffected either way.
   This check lives only in the launch owner, so on the `relaunch` verb it fires after the old agent has stopped and the transaction ends as a failed launch.
   It also requires the shell to be in the recorded worktree: every pane backend but Orca (which owns its own task worktree with no current-path probe) gets one explicit `cd` to the recorded path (Herdr, whose shell may not be ready for it, gets one resend if the path has not moved after about 10 seconds), then a pre-launch path read that refuses before any harness starts unless it confirms the endpoint is sitting in the recorded copy.
   A T3 thread has no shell; the relaunch refuses unless T3 reads the resumed thread back bound to the recorded worktree.
+- On t3code, `relaunch` resolves the replacement's model and effort against T3's catalog before the old agent stops, so a selection T3 refuses leaves the running agent untouched and names the values T3 allows.
 
 ## Capability matrix
 
