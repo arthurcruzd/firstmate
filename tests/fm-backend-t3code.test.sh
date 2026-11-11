@@ -429,7 +429,7 @@ test_thread_create_and_turn_start_payloads() {
 test_thread_create_uncertain_and_refused_outcomes() {
   local out rc selection='{"instanceId":"claudeAgent","model":"claude-sonnet-5"}'
   t3_case create-outcomes
-  t3_world_set 'w.dropTools = { t3_thread_launch: 1 }'
+  t3_world_set 'w.launchRequestId = false; w.dropTools = { t3_thread_launch: 1 }'
   out=$(t3_run 'fm_backend_t3code_thread_create proj-1 fm-lost "" "$1" "$2"' "$REPO" "$selection" 2>&1); rc=$?
   expect_code 1 "$rc" "a launch whose reply was lost is uncertain (exit 1)"
   [ "$(t3_dispatch_types)" = 't3_thread_launch!' ] || fail "a lost launch must not be retried without an idempotency key, got '$(t3_dispatch_types)'"
@@ -2420,11 +2420,11 @@ test_uncertain_thread_launch_keeps_lease() {
   local id out rc
   id=$(t3_uid t3uncertain)
   t3_case spawn-uncertain
-  t3_world_set 'w.dropTools = { t3_thread_launch: 1 }'
+  t3_world_set 'w.dropReplyTools = { t3_thread_launch: 2 }'
   t3_worker_setup "$id"
   out=$(t3_worker_spawn "$id" claude --model claude-sonnet-5); rc=$?
   expect_code 1 "$rc" "a lost launch response must abort spawn"
-  [ "$(t3_dispatch_types)" = 't3_thread_launch!' ] || fail "a launch without an idempotency key must not be retried, got '$(t3_dispatch_types)'"
+  [ "$(t3_dispatch_types)" = 't3_thread_launch t3_thread_launch' ] || fail "same-id recovery must stop after one retry, got '$(t3_dispatch_types)'"
   assert_contains "$out" "did not report an outcome" "an uncertain launch must say so"
   assert_contains "$out" "stays leased until any thread T3 bound to it is found" "an uncertain launch must retain the slot"
   [ "$(t3_log_line_of 'r.tool === "treehouse" && r.args.indexOf("return --force") === 0')" -eq 0 ] || fail "an uncertain launch returned the lease"

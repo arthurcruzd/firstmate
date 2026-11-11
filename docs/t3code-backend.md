@@ -190,7 +190,10 @@ Secondmate retirement requires `lsof` to prove the home is quiet; without it, te
 If spawn aborts after launching the thread and before T3 accepts its launch brief, including when T3 refuses the brief, cleanup uses the same proven close and keeps the lease when it fails, then prints the manual archive, environment-removal, and `treehouse return --force` steps.
 After a proven close it removes the environment files the spawn wrote into the slot or secondmate home, as teardown does, and keeps a worker's lease when that fails.
 Spawn freshens a leased slot before launching its thread, so a slot it cannot bring current never gets a thread: a slot that is not clean (uncommitted work or a stale submodule checkout) keeps its lease, and spawn prints the manual `treehouse return --force` step; after any other refresh failure, including an uninspectable worktree or an unreachable origin, the slot is returned.
-`t3_thread_launch` has no idempotency key, so a lost launch reply, T3's catch-all `orchestration_error` or a tool error without a code, or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and never retries.
+When `tools/list` advertises `clientRequestId` on `t3_thread_launch` (0.1.7+), the adapter sends a fresh random id per launch and retries a lost transport reply once with the same id, payload, and sign-in, then performs the normal binding read-back.
+A retry after a new sign-in is outside this guarantee.
+Without that schema field (0.1.2), no launch retry is attempted.
+An unrecovered launch reply, T3's catch-all `orchestration_error` or a tool error without a code, or a failed binding read-back leaves ownership uncertain: spawn keeps the lease and requires manual inspection.
 A gate failure before `t3_thread_launch` is requested launched nothing, so spawn returns the lease.
 A leased path that fails the worktree isolation check may be the spawning checkout itself, so spawn neither cleans nor returns it and prints the manual `treehouse return --force` step to run once it is inspected.
 When the thread id is known, the helper archives it and reports its id and whether it then read back archived with no active run, but the lease stays held either way until it is released by hand.

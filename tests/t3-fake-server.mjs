@@ -52,6 +52,8 @@
 //   CLI), rejectSendDispatch (that many t3_thread_send calls fail at
 //   dispatch, and, as T3 does, each such request id is answered "was
 //   previously rejected" from then on),
+//   launchRequestId (false omits the optional launch id), refuseLaunchRetry
+//   (refuse a repeated launch id after its first commit),
 //   toolShape (current|split), tools (array of names; default the shape's
 //   whole set), revoked (every /mcp call is 401),
 //   sse (SSE replies), expiresIn (seconds), bindWorktree, bindInstance,
@@ -103,8 +105,9 @@ const SHAPE_TOOLS = {
 };
 const shapeOf = (w) => w.toolShape ?? process.env.T3_FAKE_TOOL_SHAPE ?? "current";
 const offeredTools = (w) => w.tools ?? SHAPE_TOOLS[shapeOf(w)] ?? [];
-// The input schema tools/list reports; only the configure schema differs by shape.
+// Input schemas: split models 0.1.2, current models 0.1.7+.
 const inputSchema = (w, name) =>
+  name === "t3_thread_launch" && shapeOf(w) !== "split" && w.launchRequestId !== false ? { type: "object", properties: { clientRequestId: { type: "string" } } } :
   name === "t3_thread_configure" && shapeOf(w) === "split" ? { type: "object", required: ["modelSelection"] } : { type: "object" };
 // The logical tool a call performs (see the header).
 const logicalTool = (name, a) => {
@@ -297,6 +300,11 @@ async function toolImpl(w, name, a) {
       return [ok(p), true];
     }
     case "t3_thread_launch": {
+      w.launchIds ??= {};
+      if (a.clientRequestId && w.launchIds[a.clientRequestId]) {
+        if (w.refuseLaunchRetry) return [err("invalid_request", "retry refused"), false];
+        return [ok(w.launchIds[a.clientRequestId]), false];
+      }
       const ws = a.workspaceStrategy ?? {};
       const id = `mcp:${randomUUID()}`;
       const sel = a.modelSelection ?? {};
@@ -314,7 +322,9 @@ async function toolImpl(w, name, a) {
       };
       threads[id] = n;
       if (a.message) startRun(n, a.message);
-      return [ok({ threadId: id, projectId: n.projectId, runId: n.activeRunId, status: n.status }), true];
+      const out = { threadId: id, projectId: n.projectId, runId: n.activeRunId, status: n.status };
+      if (a.clientRequestId) w.launchIds[a.clientRequestId] = out;
+      return [ok(out), true];
     }
     case "t3_thread_send": {
       if (!t) return [notFound(a.threadId), false];

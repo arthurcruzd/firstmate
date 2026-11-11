@@ -330,6 +330,52 @@ test_launch_binds_workspace() {
   pass "fm-t3-mcp launch: idle full-access thread on the existing worktree or the project root, with the given model selection"
 }
 
+test_launch_retry() {
+  local project calls first second count expected
+  fresh_case launch-retry
+  mcp project-ensure --root "$TMP_ROOT/proj"
+  project=$(field "$OUT" projectId)
+  t3_fake_set 'w.dropReplyTools = { t3_thread_launch: 1 }'
+  : > "$T3_FAKE_LOG"
+  mcp launch --project "$project" --title retry --model-selection "$SEL" --worktree "$WT"
+  if [ "${T3_FAKE_TOOL_SHAPE:-current}" = split ]; then
+    expect_code 1 "$RC" "0.1.2 must retain its uncertain launch"
+    assert_equals launch_unconfirmed "$(field "$OUT" error.code)" "legacy uncertainty code"
+    expected=1
+  else
+    expect_code 0 "$RC" "same-id retry should recover: $ERR"
+    expected=2
+  fi
+  calls=$(t3_fake_calls t3_thread_launch)
+  assert_equals "$expected" "$(printf '%s\n' "$calls" | wc -l | tr -d ' ')" "bounded launch calls"
+  first=$(printf '%s\n' "$calls" | head -1)
+  if [ "$expected" = 2 ]; then
+    second=$(printf '%s\n' "$calls" | tail -1)
+    assert_equals "$first" "$second" "retry must preserve the entire payload and id"
+    [ -n "$(field "$first" clientRequestId)" ] || fail "missing launch request id"
+  else
+    assert_equals "" "$(field "$first" clientRequestId)" "legacy launch has no request id"
+  fi
+  count=$(node -e 'console.log(Object.keys(JSON.parse(require("fs").readFileSync(process.argv[1])).threads).length)' "$T3_FAKE_WORLD")
+  assert_equals 1 "$count" "lost reply must create exactly one thread"
+  t3_fake_set 'w.dropReplyTools = { t3_thread_launch: 2 }'
+  : > "$T3_FAKE_LOG"
+  mcp launch --project "$project" --title retry-lost --model-selection "$SEL" --worktree "$WT"
+  expect_code 1 "$RC" "unrecovered reply stays uncertain"
+  assert_equals launch_unconfirmed "$(field "$OUT" error.code)" "unrecovered launch code"
+  calls=$(t3_fake_calls t3_thread_launch)
+  assert_equals "$expected" "$(printf '%s\n' "$calls" | wc -l | tr -d ' ')" "no third attempt"
+  second=$(printf '%s\n' "$calls" | head -1)
+  [ "$(field "$first" clientRequestId)" != "$(field "$second" clientRequestId)" ] || [ "$expected" = 1 ] || fail "different launches reused an id"
+  if [ "$expected" = 2 ]; then
+    t3_fake_set 'w.dropReplyTools = { t3_thread_launch: 1 }; w.refuseLaunchRetry = true'
+    mcp launch --project "$project" --title retry-refused --model-selection "$SEL" --worktree "$WT"
+    expect_code 1 "$RC" "a refused retry cannot prove the first launch did not commit"
+    assert_equals launch_unconfirmed "$(field "$OUT" error.code)" "retry refusal keeps uncertainty"
+  fi
+  pass "fm-t3-mcp launch: schema-gated same-id recovery, bounded retry, unique launch ids, and legacy uncertainty"
+}
+
 test_launch_refusals() {
   local project
   fresh_case launch-refusals
@@ -369,7 +415,7 @@ test_launch_refusals() {
   mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
   expect_code 1 "$RC" "a launched thread T3 does not yet find is an uncertain outcome"
   assert_contains "$ERR" "its archive is unproven" "a not-found archive of the thread this launch created is not a proven close"
-  t3_fake_set 'w.failTools = {}; w.dropTools = { t3_thread_launch: 1 }'
+  t3_fake_set 'w.failTools = {}; w.launchRequestId = false; w.dropTools = { t3_thread_launch: 1 }'
   mcp launch --project "$project" --title x --model-selection "$SEL" --worktree "$WT"
   expect_code 1 "$RC" "a launch whose reply was lost is an uncertain transport failure"
   t3_fake_set 'w.dropTools = { t3_environment_read: 1 }'
@@ -1066,6 +1112,7 @@ ALL_TESTS=(
   test_projects_by_real_path
   test_launch_binds_workspace
   test_launch_refusals
+  test_launch_retry
   test_send_state_capture_interrupt_archive
   test_resume_prepares_the_same_thread
   test_thread_for_root

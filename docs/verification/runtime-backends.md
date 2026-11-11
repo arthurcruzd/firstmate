@@ -2857,6 +2857,27 @@ The remote host half ran on the host itself, without `fm-on.sh`, because the rem
 `fm-secondmate-restart.sh` names a failed relaunch by its first refusal line, never a leading warning such as the telemetry notice, which `tests/fm-secondmate-restart.test.sh` pins over the remote hop.
 The portable cases are in `tests/fm-t3-mcp.test.sh`: a non-default effort resolves and launches against the fake serving each catalog form, under both [tool shapes](#stable-017-and-018-tool-shapes).
 
+### Retryable launch
+
+The [launch lifecycle](../t3code-backend.md#current-lifecycle-and-safety) is gated by the launch input schema, independently of the configuration-read tool shape.
+Verified on 2026-11-11 against Linux T3 0.1.8 on two hosts and 0.1.2 read-only:
+
+- On 0.1.8, the adapter's `launch` sent two identical payloads after a controlled transport failure discarded the first successful reply.
+  Both replies named the same thread; `t3_thread_list` for the scratch project returned one thread and `git worktree list --porcelain` returned one existing worktree.
+  The recovered launch and ordinary launches passed the normal workspace, full-access, model, and effort read-back, then `archive` returned `{"closed":true,"archived":true,"activeRunId":null}` (selected fields).
+- On 0.1.2, read-only `gate` returned `"launchRequestId":false`; no launch was requested.
+
+Refresh the portable regressions on both tool shapes with:
+
+```sh
+bash bin/fm-test-run.sh tests/fm-t3-mcp.test.sh tests/fm-backend-t3code.test.sh --jobs 2
+```
+
+`fm-t3-mcp` exercises a committed launch with its reply dropped once, twice, and followed by a refused retry; it checks identical retry payloads, distinct ids for separate launches, one created thread, and the unchanged path without the schema field.
+`fm-backend-t3code` checks lease retention when both launch replies are lost and the legacy single-attempt refusal path.
+For a live refresh, use a scratch project and credential from the same sign-in, invoke `launch --project <scratch-id> --title <title> --model-selection <selection> --worktree <scratch-path>`, and discard only the first launch response in the client's transport after T3 commits it.
+Compare the two payloads and replies, list only that project's threads, read back its worktree list, then archive the created thread and delete the scratch project.
+
 ### Permission approvals in the activity view
 
 The approval part of the pending-request signature was checked against the stable `t3 v0.1.0` source (tag `v0.1.0`, commit `81493efb`); no permission approval was triggered on the live lab server.

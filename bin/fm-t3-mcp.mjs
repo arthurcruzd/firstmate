@@ -62,7 +62,11 @@
 //     catch-all orchestration_error can follow a created thread, so it exits
 //     1 as well. A transport or unexpected failure of the
 //     gate, before t3_thread_launch is requested, exits 8: no thread was
-//     launched. Without --message-file the thread is created idle.
+//     launched. When the launch input schema offers clientRequestId, a lost
+//     transport reply is retried once with the same random per-launch id and
+//     credential; a new sign-in is outside this guarantee. Unrecovered launch
+//     outcomes keep the existing manual-inspection path. Without --message-file
+//     the thread is created idle.
 //   fm-t3-mcp.mjs send --thread <id> --message-file <file> --client-request-id <id>
 //     t3_thread_send mode auto: start an idle thread's next turn or steer the
 //     running one. T3 derives the message and command ids from the client
@@ -461,7 +465,12 @@ export class McpSession {
       throw new Refusal("transport", `T3 at ${this.origin} is unreachable: ${err.cause?.code || err.name}: ${err.message}`, 1);
     }
     this.sid = res.headers.get("mcp-session-id") ?? this.sid;
-    const text = await res.text();
+    let text;
+    try {
+      text = await res.text();
+    } catch (err) {
+      throw new Refusal("transport", `T3 /mcp reply was lost: ${err.name}: ${err.message}`, 1);
+    }
     if (res.status === 401 || res.status === 403) {
       throw new Refusal("unauthorized", `T3 at ${this.origin} rejected the credential (HTTP ${res.status}); it was revoked or belongs to another server, so the captain signs in again`, 4);
     }
@@ -602,7 +611,7 @@ export async function gate(session, cred) {
     );
   }
   session.capabilities = capabilities;
-  return { serverVersion: version, environmentId, serverVersionReported: envRead?.serverVersion ?? null, capabilities, tools: [...names].sort() };
+  return { serverVersion: version, environmentId, serverVersionReported: envRead?.serverVersion ?? null, capabilities, launchRequestId: listed.tools.some((t) => t.name === "t3_thread_launch" && t.inputSchema?.properties?.clientRequestId?.type === "string"), tools: [...names].sort() };
 }
 
 // A pending-request action (list, read, respond) in the shape the gate chose.
@@ -1007,12 +1016,23 @@ async function launch(flags) {
     interactionMode: "default",
     workspaceStrategy,
     ...(message ? { message } : {}),
+    ...(g.launchRequestId ? { clientRequestId: `fm-launch-${randomBytes(16).toString("hex")}` } : {}),
   };
   let out;
   try {
-    out = await session.call("t3_thread_launch", args);
+    try {
+      out = await session.call("t3_thread_launch", args);
+    } catch (err) {
+      if (!(err instanceof Refusal && err.code === "transport" && args.clientRequestId)) throw err;
+      // Same credential and payload: T3 returns the original thread, if created.
+      try {
+        out = await session.call("t3_thread_launch", args);
+      } catch (retryError) {
+        throw new Refusal("launch_unconfirmed", `${retryError.message}; the same-id launch retry could not confirm the first request; inspect t3_thread_list before retrying`, 1);
+      }
+    }
   } catch (err) {
-    if (err instanceof Refusal && err.code === UNPROVEN_TOOL_ERROR) {
+    if (err instanceof Refusal && (err.code === UNPROVEN_TOOL_ERROR || err.code === "transport")) {
       throw new Refusal("launch_unconfirmed", `${err.message}, which can follow a created thread; inspect t3_thread_list before retrying`, 1);
     }
     throw err;
